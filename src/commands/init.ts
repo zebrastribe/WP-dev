@@ -14,6 +14,13 @@ import {
   parseOptionalPort,
   isPrivateKeyFilePath,
 } from "../utils/remote-config-helpers.js";
+import {
+  domainPathSlug,
+  parseMainDomain,
+  suggestProduction,
+  suggestStaging,
+  type RemoteGuess,
+} from "../utils/domain-defaults.js";
 
 type PromptRl = ReturnType<typeof readline.createInterface>;
 
@@ -78,17 +85,18 @@ async function promptRemote(
   rl: PromptRl,
   title: string,
   cur: WpDevConfig["staging"],
+  suggestions?: RemoteGuess,
 ): Promise<WpDevConfig["staging"]> {
   console.error(`\n--- ${title} ---`);
-  const host = await ask(rl, "SSH hostname", cur.host);
+  const host = await ask(rl, "SSH hostname", suggestions?.host ?? cur.host);
   const user = await ask(rl, "SSH username", cur.user);
   const portRaw = await askOptional(
     rl,
     "SSH port (empty = omit from config; SSH then uses port 22)",
     cur.port != null ? String(cur.port) : "",
   );
-  const pathVal = await ask(rl, "Remote WordPress root path", cur.path);
-  const urlRaw = await ask(rl, "Site URL (https://…)", cur.url);
+  const pathVal = await ask(rl, "Remote WordPress root path", suggestions?.path ?? cur.path);
+  const urlRaw = await ask(rl, "Site URL (https://…)", suggestions?.url ?? cur.url);
   const url = normalizeSiteUrl(urlRaw, "https");
 
   let port: number | undefined;
@@ -115,6 +123,23 @@ async function promptRemote(
   return out;
 }
 
+function applyRemoteGuess(
+  guess: RemoteGuess,
+  user: string,
+  identityFile: string | undefined,
+  port?: number,
+): WpDevConfig["staging"] {
+  const out: WpDevConfig["staging"] = {
+    host: guess.host,
+    user,
+    path: guess.path,
+    url: normalizeSiteUrl(guess.url, "https"),
+  };
+  if (port !== undefined) out.port = port;
+  if (identityFile) out.identityFile = identityFile;
+  return out;
+}
+
 export async function cmdInit(): Promise<void> {
   assertInteractive();
   const configDir = ensureWpDevConfigJson();
@@ -134,14 +159,8 @@ export async function cmdInit(): Promise<void> {
     console.error(
       [
         "",
-        "wp-dev init — updates wp-dev.config.json (no pull/push).",
-        "",
-        "SSH keys: init does NOT create keys. It only saves an optional identityFile path to an existing private key file.",
-        "  • Leave identity file empty → OpenSSH defaults (~/.ssh/config, ssh-agent, default key names).",
-        "  • Or enter a path, e.g. ~/.ssh/id_ed25519 (never paste the key contents here).",
-        "  Create a key with: ssh-keygen -t ed25519; add the .pub line to the server authorized_keys.",
-        "",
-        "Simply.com: optional account number here; API key only via env WPDEV_SIMPLY_API_KEY (never stored in this file).",
+        "wp-dev init — writes wp-dev.config.json (no pull/push).",
+        "SSH: optional key file path only; empty = OpenSSH defaults.",
         "",
       ].join("\n"),
     );
@@ -151,30 +170,88 @@ export async function cmdInit(): Promise<void> {
     const localUrlRaw = await ask(rl, "Local site URL", draft.local.url);
     draft.local.url = normalizeSiteUrl(localUrlRaw, "http");
 
-    if (
-      await askYes(
+    const domainRaw = await askOptional(
+      rl,
+      "Main site domain (e.g. stri.be) — guesses staging./prod hosts and /var/www/<slug> paths [empty = configure staging & production separately]",
+      "",
+    );
+
+    if (domainRaw.trim()) {
+      const base = parseMainDomain(domainRaw);
+      const slug = domainPathSlug(domainRaw);
+      const stSug = suggestStaging(base);
+      const prSug = suggestProduction(base);
+
+      console.error(
+        `\nFrom domain "${base}" → path slug "${slug}" (used under /var/www/…):\n` +
+          `  staging:  ssh ${stSug.host}  path ${stSug.path}  url ${stSug.url}\n` +
+          `  production: ssh ${prSug.host}  path ${prSug.path}  url ${prSug.url}\n`,
+      );
+
+      const user = await ask(
         rl,
-        "Update staging SSH / path / URL in wp-dev.config.json?",
-        true,
-      )
-    ) {
-      draft.staging = await promptRemote(rl, "Staging", draft.staging);
+        "SSH username (same for staging + production unless you edit later)",
+        draft.staging.user || draft.production.user,
+      );
+
+      const identityHint =
+        draft.staging.identityFile ?? draft.production.identityFile;
+      const identityFile = await promptIdentityFile(
+        rl,
+        "SSH private key (shared; leave empty for agent/default keys)",
+        identityHint,
+      );
+
+      const portHint =
+        draft.staging.port != null
+          ? String(draft.staging.port)
+          : draft.production.port != null
+            ? String(draft.production.port)
+            : "";
+      const portRaw = await askOptional(
+        rl,
+        "SSH port for both (empty = omit, use port 22)",
+        portHint,
+      );
+      const sharedPort = portRaw.trim()
+        ? parseOptionalPort(portRaw)
+        : undefined;
+
+      if (
+        await askYes(
+          rl,
+          "Use these guessed hosts/paths/URLs (you can re-run init to change)?",
+          true,
+        )
+      ) {
+        draft.staging = applyRemoteGuess(stSug, user, identityFile, sharedPort);
+        draft.production = applyRemoteGuess(prSug, user, identityFile, sharedPort);
+      } else {
+        draft.staging = await promptRemote(rl, "Staging", draft.staging, stSug);
+        draft.production = await promptRemote(
+          rl,
+          "Production",
+          draft.production,
+          prSug,
+        );
+      }
+    } else {
+      if (
+        await askYes(rl, "Update staging SSH / path / URL?", true)
+      ) {
+        draft.staging = await promptRemote(rl, "Staging", draft.staging);
+      }
+      if (
+        await askYes(rl, "Update production SSH / path / URL?", true)
+      ) {
+        draft.production = await promptRemote(rl, "Production", draft.production);
+      }
     }
 
     if (
       await askYes(
         rl,
-        "Update production SSH / path / URL in wp-dev.config.json?",
-        true,
-      )
-    ) {
-      draft.production = await promptRemote(rl, "Production", draft.production);
-    }
-
-    if (
-      await askYes(
-        rl,
-        "Configure Simply.com API (save account S-number in config; API key only via WPDEV_SIMPLY_API_KEY)?",
+        "Configure Simply.com (account in config; API key in WPDEV_SIMPLY_API_KEY)?",
         false,
       )
     ) {

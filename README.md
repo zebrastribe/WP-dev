@@ -43,7 +43,8 @@ Re-check Docker anytime: **`npm run check`**.
 
 ### 3. Config (optional)
 
-- **`npx wp-dev init`** — interactive; or edit **`wp-dev.config.json`** (`project`, `local.url`, staging/production SSH).
+- **`npx wp-dev init`** — asks for **`project`**, **`local.url`**, then optionally a **main domain** (e.g. `stri.be`). From that it suggests **`staging.<domain>`**, **`/var/www/<slug>`** (dots → hyphens, e.g. `stri-be`), and **`https://staging.<domain>`** / production equivalents; one shared SSH user + optional key; or leave the domain empty to set staging and production separately.
+- Or edit **`wp-dev.config.json`** by hand.
 
 ### 4. Port clash (optional)
 

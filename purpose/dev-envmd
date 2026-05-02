@@ -152,7 +152,7 @@ src/
 
 ## 7. CLI Commands (must implement)
 
-* `wp-dev init` (interactive: project, local URL, staging/production SSH — updates `wp-dev.config.json`; no pull)
+* `wp-dev init` (interactive: project, local URL, optional domain → guessed staging/prod hosts + `/var/www/<slug>` paths; updates `wp-dev.config.json`; no pull)
 * `wp-dev up`
 * `wp-dev down`
 * `wp-dev pull staging`
