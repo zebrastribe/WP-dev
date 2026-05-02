@@ -2,7 +2,7 @@ import { copyFileSync, createReadStream, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { execa } from "execa";
-import type { WpflowConfig } from "../config/schema.js";
+import type { WpDevConfig } from "../config/schema.js";
 import type { SshSession } from "./ssh.js";
 import {
   getComposeProjectDir,
@@ -14,7 +14,7 @@ const CONTAINER_WP_PATH = "/var/www/html";
 
 export async function wpLocalRaw(
   configDir: string,
-  config: WpflowConfig,
+  config: WpDevConfig,
   wpArgs: string[],
   execOptions: { input?: Readable | Buffer } = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
@@ -44,12 +44,12 @@ export async function wpLocalRaw(
 
 export async function assertLocalWpInstalled(
   configDir: string,
-  config: WpflowConfig,
+  config: WpDevConfig,
 ): Promise<void> {
   const r = await wpLocalRaw(configDir, config, ["core", "is-installed"]);
   if (r.exitCode !== 0) {
     throw new Error(
-      "Local WordPress is not installed or docker services are not running. Run `wpflow up` and complete the WordPress install (or pull from remote) first.",
+      "Local WordPress is not installed or docker services are not running. Run `wp-dev up` and complete the WordPress install (or pull from remote) first.",
     );
   }
 }
@@ -135,7 +135,7 @@ export async function wpRemoteSearchReplace(
 
 export async function wpLocalDbImportFromFile(
   configDir: string,
-  config: WpflowConfig,
+  config: WpDevConfig,
   hostSqlPath: string,
 ): Promise<void> {
   const stream = createReadStream(hostSqlPath);
@@ -150,10 +150,10 @@ export async function wpLocalDbImportFromFile(
 /** Export DB to a host path by writing via the bind-mounted wp root (handles large dumps). */
 export async function wpLocalDbExportToFile(
   configDir: string,
-  config: WpflowConfig,
+  config: WpDevConfig,
   hostSqlPath: string,
 ): Promise<void> {
-  const fileName = `.wpflow-export-${Date.now()}.sql`;
+  const fileName = `.wp-dev-export-${Date.now()}.sql`;
   const containerPath = `${CONTAINER_WP_PATH}/${fileName}`;
   const r = await wpLocalRaw(configDir, config, ["db", "export", containerPath]);
   if (r.exitCode !== 0) {
@@ -173,7 +173,7 @@ export async function wpLocalDbExportToFile(
 
 export async function wpLocalSearchReplace(
   configDir: string,
-  config: WpflowConfig,
+  config: WpDevConfig,
   from: string,
   to: string,
 ): Promise<void> {

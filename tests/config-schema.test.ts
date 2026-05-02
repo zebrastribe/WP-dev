@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { wpflowConfigSchema } from "../src/config/schema.js";
+import { wpDevConfigSchema } from "../src/config/schema.js";
 
-describe("wpflowConfigSchema", () => {
+describe("wpDevConfigSchema", () => {
   it("accepts a minimal valid config", () => {
-    const parsed = wpflowConfigSchema.parse({
+    const parsed = wpDevConfigSchema.parse({
       project: "test",
       local: {
         url: "http://localhost:8888",
@@ -29,7 +29,7 @@ describe("wpflowConfigSchema", () => {
 
   it("rejects invalid local url", () => {
     expect(() =>
-      wpflowConfigSchema.parse({
+      wpDevConfigSchema.parse({
         project: "x",
         local: {
           url: "not-a-url",

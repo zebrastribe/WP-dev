@@ -1,14 +1,11 @@
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-
-type PromptRl = ReturnType<typeof readline.createInterface>;
 import { ZodError } from "zod";
-import type { WpflowConfig } from "../config/schema.js";
-import type { RemoteEnvName } from "../config/schema.js";
+import type { WpDevConfig } from "../config/schema.js";
 import {
-  ensureWpflowConfigJson,
+  ensureWpDevConfigJson,
   loadConfig,
-  writeWpflowConfig,
+  writeWpDevConfig,
 } from "../config/load.js";
 import { initLogger, logInfo } from "../utils/logger.js";
 import {
@@ -18,10 +15,12 @@ import {
   isPrivateKeyFilePath,
 } from "../utils/remote-config-helpers.js";
 
+type PromptRl = ReturnType<typeof readline.createInterface>;
+
 function assertInteractive(): void {
   if (!input.isTTY || !output.isTTY) {
     throw new Error(
-      "wpflow init must be run in an interactive terminal (TTY).",
+      "wp-dev init must be run in an interactive terminal (TTY).",
     );
   }
 }
@@ -78,8 +77,8 @@ async function promptIdentityFile(
 async function promptRemote(
   rl: PromptRl,
   title: string,
-  cur: WpflowConfig["staging"],
-): Promise<WpflowConfig["staging"]> {
+  cur: WpDevConfig["staging"],
+): Promise<WpDevConfig["staging"]> {
   console.error(`\n--- ${title} ---`);
   const host = await ask(rl, "SSH hostname", cur.host);
   const user = await ask(rl, "SSH username", cur.user);
@@ -105,7 +104,7 @@ async function promptRemote(
     cur.identityFile,
   );
 
-  const out: WpflowConfig["staging"] = {
+  const out: WpDevConfig["staging"] = {
     host,
     user,
     path: pathVal,
@@ -118,12 +117,12 @@ async function promptRemote(
 
 export async function cmdInit(): Promise<void> {
   assertInteractive();
-  const configDir = ensureWpflowConfigJson();
+  const configDir = ensureWpDevConfigJson();
   initLogger(configDir);
   logInfo("command init (interactive)");
 
   const loaded = loadConfig();
-  let draft: WpflowConfig = {
+  let draft: WpDevConfig = {
     ...loaded.config,
     local: { ...loaded.config.local },
     staging: { ...loaded.config.staging },
@@ -133,7 +132,7 @@ export async function cmdInit(): Promise<void> {
   const rl = readline.createInterface({ input, output });
   try {
     console.error(
-      "\nwpflow init — updates wpflow.config.json (SSH / URLs only). No pull or push runs.\nPrivate keys: enter a file path only; never paste key contents.\n",
+      "\nwp-dev init — updates wp-dev.config.json (SSH / URLs only). No pull or push runs.\nPrivate keys: enter a file path only; never paste key contents.\n",
     );
 
     draft.project = await ask(rl, "Project id (unique per clone)", draft.project);
@@ -144,7 +143,7 @@ export async function cmdInit(): Promise<void> {
     if (
       await askYes(
         rl,
-        "Update staging SSH / path / URL in wpflow.config.json?",
+        "Update staging SSH / path / URL in wp-dev.config.json?",
         true,
       )
     ) {
@@ -154,7 +153,7 @@ export async function cmdInit(): Promise<void> {
     if (
       await askYes(
         rl,
-        "Update production SSH / path / URL in wpflow.config.json?",
+        "Update production SSH / path / URL in wp-dev.config.json?",
         true,
       )
     ) {
@@ -162,7 +161,7 @@ export async function cmdInit(): Promise<void> {
     }
 
     try {
-      writeWpflowConfig(configDir, draft);
+      writeWpDevConfig(configDir, draft);
     } catch (e) {
       if (e instanceof ZodError) {
         const msg = e.errors.map((x) => `${x.path.join(".")}: ${x.message}`).join("\n");
@@ -171,7 +170,7 @@ export async function cmdInit(): Promise<void> {
       throw e;
     }
 
-    const path = `${configDir}/wpflow.config.json`.replace(/\\/g, "/");
+    const path = `${configDir}/wp-dev.config.json`.replace(/\\/g, "/");
     logInfo(`init wrote ${path}`);
     console.error(`\nSaved: ${path}\n`);
   } finally {

@@ -1,5 +1,5 @@
 # WordPress files for this clone: repo-root `wordpress/` → /var/www/html.
-# Isolation: `wpflow` runs `docker compose -p <id>` using `project` (or `local.composeProjectName`) from wpflow.config.json so volumes/containers do not clash across clones.
+# Isolation: `wp-dev` runs `docker compose -p <id>` using `project` (or `local.composeProjectName`) from wp-dev.config.json so volumes/containers do not clash across clones.
 services:
   db:
     image: mysql:8.0
@@ -27,7 +27,7 @@ services:
     depends_on:
       - db
 
-  # Official `wordpress` image has no `wp` binary; wpflow uses this service for WP-CLI.
+  # Official `wordpress` image has no `wp` binary; wp-dev uses this service for WP-CLI.
   wpcli:
     image: wordpress:cli-php8.2
     user: "33:33"

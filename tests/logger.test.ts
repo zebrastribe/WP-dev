@@ -12,15 +12,15 @@ import {
 describe("logger", () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "wpflow-log-test-"));
+    dir = mkdtempSync(join(tmpdir(), "wp-dev-log-test-"));
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("writes under configDir/logs/wpflow.log", () => {
+  it("writes under configDir/logs/wp-dev.log", () => {
     initLogger(dir);
-    expect(getLogFilePath()).toBe(join(dir, "logs", "wpflow.log"));
+    expect(getLogFilePath()).toBe(join(dir, "logs", "wp-dev.log"));
     logInfo("hello test");
     const text = readFileSync(logPathForConfigDir(dir), "utf8");
     expect(text).toContain("hello test");

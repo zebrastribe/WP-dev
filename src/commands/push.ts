@@ -63,7 +63,7 @@ export async function cmdPush(
     const backupDir = ensureBackupDir(config.project, env);
     const preName = timestampedDbName();
     prePushBackup = join(backupDir, `pre-push-${preName}`);
-    const remotePreDump = `/tmp/wpflow-pre-push-${Date.now()}.sql`;
+    const remotePreDump = `/tmp/wp-dev-pre-push-${Date.now()}.sql`;
     logInfo(`push ${env}: remote pre-push db backup -> ${prePushBackup}`);
     await wpRemoteDbExport(ssh, remote.path, remotePreDump);
     await ssh.getFile(remotePreDump, prePushBackup);
@@ -72,9 +72,9 @@ export async function cmdPush(
     logInfo(`push ${env}: rsync files -> remote`);
     await rsyncPush(remote, localWpRoot, { dryRun: false });
 
-    const tmpDir = mkdtempSync(join(tmpdir(), "wpflow-push-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-push-"));
     const localDump = join(tmpDir, "local.sql");
-    const remoteImport = `/tmp/wpflow-push-import-${Date.now()}.sql`;
+    const remoteImport = `/tmp/wp-dev-push-import-${Date.now()}.sql`;
     try {
       logInfo(`push ${env}: export local db, import on remote`);
       await wpLocalDbExportToFile(configDir, config, localDump);

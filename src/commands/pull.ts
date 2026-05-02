@@ -39,11 +39,11 @@ export async function cmdPull(
   try {
     await assertRemoteWpInstalled(ssh, remote.path);
 
-    const remoteDump = `/tmp/wpflow-pull-${Date.now()}.sql`;
+    const remoteDump = `/tmp/wp-dev-pull-${Date.now()}.sql`;
     logInfo(`pull ${env}: remote wp db export`);
     await wpRemoteDbExport(ssh, remote.path, remoteDump);
 
-    const tmpDir = mkdtempSync(join(tmpdir(), "wpflow-pull-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-pull-"));
     const localDump = join(tmpDir, "dump.sql");
     try {
       await ssh.getFile(remoteDump, localDump);

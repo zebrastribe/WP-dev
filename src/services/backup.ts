@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { RemoteEnvName } from "../config/schema.js";
 
 export function backupDirFor(project: string, env: RemoteEnvName | "local"): string {
-  return join(homedir(), ".wpflow", "backups", project, env);
+  return join(homedir(), ".wp-dev", "backups", project, env);
 }
 
 export function ensureBackupDir(project: string, env: RemoteEnvName | "local"): string {

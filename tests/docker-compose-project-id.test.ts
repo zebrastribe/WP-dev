@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { dockerComposeProjectId } from "../src/services/docker-compose.js";
-import type { WpflowConfig } from "../src/config/schema.js";
+import type { WpDevConfig } from "../src/config/schema.js";
 
-function cfg(overrides: Partial<WpflowConfig>): WpflowConfig {
-  const base: WpflowConfig = {
+function cfg(overrides: Partial<WpDevConfig>): WpDevConfig {
+  const base: WpDevConfig = {
     project: "my-site",
     local: {
       url: "http://localhost:8888",
@@ -57,6 +57,6 @@ describe("dockerComposeProjectId", () => {
   });
 
   it("falls back when project sanitizes to empty", () => {
-    expect(dockerComposeProjectId(cfg({ project: "!!!" }))).toBe("wpflow-site");
+    expect(dockerComposeProjectId(cfg({ project: "!!!" }))).toBe("wp-dev-site");
   });
 });

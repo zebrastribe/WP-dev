@@ -11,7 +11,7 @@ import { cmdBackup, type BackupTarget } from "./commands/backup.js";
 import { cmdRestore, type RestoreTarget } from "./commands/restore.js";
 import { cmdLogs } from "./commands/logs.js";
 import { cmdInit } from "./commands/init.js";
-import { ensureWpflowConfigJson } from "./config/load.js";
+import { ensureWpDevConfigJson } from "./config/load.js";
 import { initLogger, logError, logInfo } from "./utils/logger.js";
 
 function parseRemoteEnv(s: string): RemoteEnvName {
@@ -48,14 +48,14 @@ async function withLoadedConfig(
 async function main(): Promise<void> {
   const program = new Command();
   program
-    .name("wpflow")
-    .description("WordPress local Docker + pull/push staging & production")
+    .name("wp-dev")
+    .description("WordPress local Docker + pull/push staging & production (wp-dev)")
     .version("0.1.0");
 
   program
     .command("init")
     .description(
-      "Interactively set project id, local URL, staging/production SSH (updates wpflow.config.json; no pull)",
+      "Interactively set project id, local URL, staging/production SSH (updates wp-dev.config.json; no pull)",
     )
     .action(async () => {
       try {
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         try {
-          const dir = ensureWpflowConfigJson();
+          const dir = ensureWpDevConfigJson();
           initLogger(dir);
           logError(`init failed: ${msg}`);
         } catch {
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
 
   program
     .command("backup")
-    .description("Export database only to ~/.wpflow/backups/<project>/<env>/")
+    .description("Export database only to ~/.wp-dev/backups/<project>/<env>/")
     .argument("<env>", "local | staging | production")
     .action(async (env: string) => {
       const t = parseBackupTarget(env);
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
 
   program
     .command("logs")
-    .description("Print path to wpflow.log and the last N lines (project logs/)")
+    .description("Print path to wp-dev.log and the last N lines (project logs/)")
     .option("-n, --lines <n>", "number of lines from end of file", "100")
     .action(async (opts: { lines?: string }) => {
       const loaded = loadConfig();

@@ -5,14 +5,14 @@ import {
   existsSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { wpflowConfigSchema, type WpflowConfig } from "./schema.js";
+import { wpDevConfigSchema, type WpDevConfig } from "./schema.js";
 
-const CONFIG_NAMES = ["wpflow.config.json"];
-const EXAMPLE_NAME = "wpflow.config.example.json";
+const CONFIG_NAMES = ["wp-dev.config.json"];
+const EXAMPLE_NAME = "wp-dev.config.example.json";
 
 export type LoadedConfig = {
-  config: WpflowConfig;
-  /** Directory containing wpflow.config.json */
+  config: WpDevConfig;
+  /** Directory containing wp-dev.config.json */
   configDir: string;
 };
 
@@ -33,16 +33,16 @@ export function loadConfig(cwd = process.cwd()): LoadedConfig {
   const configDir = findConfigDir(cwd);
   if (!configDir) {
     throw new Error(
-      `No wpflow.config.json found in ${resolve(cwd)} or any parent directory.`,
+      `No wp-dev.config.json found in ${resolve(cwd)} or any parent directory.`,
     );
   }
-  const path = join(configDir, "wpflow.config.json");
+  const path = join(configDir, "wp-dev.config.json");
   const raw = JSON.parse(readFileSync(path, "utf8"));
-  const config = wpflowConfigSchema.parse(raw);
+  const config = wpDevConfigSchema.parse(raw);
   return { config, configDir };
 }
 
-/** Walk upward from `cwd` for a directory containing `wpflow.config.example.json`. */
+/** Walk upward from `cwd` for a directory containing `wp-dev.config.example.json`. */
 export function findExampleConfigDir(startDir: string): string | null {
   let dir = resolve(startDir);
   const root = resolve("/");
@@ -54,19 +54,19 @@ export function findExampleConfigDir(startDir: string): string | null {
 }
 
 /**
- * Ensure `wpflow.config.json` exists next to an example file (copy on first run).
- * Returns the directory containing `wpflow.config.json`.
+ * Ensure `wp-dev.config.json` exists next to an example file (copy on first run).
+ * Returns the directory containing `wp-dev.config.json`.
  */
-export function ensureWpflowConfigJson(cwd = process.cwd()): string {
+export function ensureWpDevConfigJson(cwd = process.cwd()): string {
   const existing = findConfigDir(cwd);
   if (existing) return existing;
   const withExample = findExampleConfigDir(cwd);
   if (!withExample) {
     throw new Error(
-      `No wpflow.config.json or ${EXAMPLE_NAME} found under ${resolve(cwd)}. Run this from the project root.`,
+      `No wp-dev.config.json or ${EXAMPLE_NAME} found under ${resolve(cwd)}. Run this from the project root.`,
     );
   }
-  const target = join(withExample, "wpflow.config.json");
+  const target = join(withExample, "wp-dev.config.json");
   const examplePath = join(withExample, EXAMPLE_NAME);
   if (!existsSync(target)) {
     copyFileSync(examplePath, target);
@@ -75,9 +75,9 @@ export function ensureWpflowConfigJson(cwd = process.cwd()): string {
   return withExample;
 }
 
-export function writeWpflowConfig(configDir: string, config: WpflowConfig): void {
-  const path = join(configDir, "wpflow.config.json");
-  const validated = wpflowConfigSchema.parse(config);
+export function writeWpDevConfig(configDir: string, config: WpDevConfig): void {
+  const path = join(configDir, "wp-dev.config.json");
+  const validated = wpDevConfigSchema.parse(config);
   writeFileSync(path, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
 }
 

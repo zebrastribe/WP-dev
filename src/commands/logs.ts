@@ -6,7 +6,7 @@ export function cmdLogs(loaded: LoadedConfig, lineCount: number): void {
   const path = logPathForConfigDir(loaded.configDir);
   if (!existsSync(path)) {
     console.log(
-      `No log file yet.\nExpected: ${path}\nRun any wpflow command (e.g. up) to create it.`,
+      `No log file yet.\nExpected: ${path}\nRun any wp-dev command (e.g. up) to create it.`,
     );
     return;
   }

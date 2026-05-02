@@ -21,7 +21,7 @@ const localSchema = z.object({
   wpRoot: z.string().min(1),
 });
 
-export const wpflowConfigSchema = z.object({
+export const wpDevConfigSchema = z.object({
   /** Used for backup paths and (unless overridden) Docker Compose project isolation. */
   project: z.string().min(1),
   local: localSchema,
@@ -29,12 +29,12 @@ export const wpflowConfigSchema = z.object({
   production: remoteEnvSchema,
 });
 
-export type WpflowConfig = z.infer<typeof wpflowConfigSchema>;
+export type WpDevConfig = z.infer<typeof wpDevConfigSchema>;
 export type RemoteEnvName = "staging" | "production";
 export type RemoteEnvConfig = z.infer<typeof remoteEnvSchema>;
 
 export function getRemoteEnv(
-  config: WpflowConfig,
+  config: WpDevConfig,
   name: RemoteEnvName,
 ): RemoteEnvConfig {
   return config[name];

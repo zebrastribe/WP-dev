@@ -45,7 +45,7 @@ export async function cmdRestore(
 
   const remote = getRemoteEnv(config, env);
   const ssh = await connectSsh(remote);
-  const remoteImport = `/tmp/wpflow-restore-${Date.now()}.sql`;
+  const remoteImport = `/tmp/wp-dev-restore-${Date.now()}.sql`;
   try {
     await assertRemoteWpInstalled(ssh, remote.path);
     await ssh.putFile(resolve(file), remoteImport);

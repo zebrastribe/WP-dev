@@ -1,4 +1,4 @@
-You are building a **Linux-first WordPress deployment CLI tool** called `wpflow`.
+You are building a **Linux-first WordPress deployment CLI tool** called `wp-dev`.
 
 The goal of this tool is NOT to be a full platform, but a **reliable developer utility** that standardizes WordPress workflows across local, staging, and production environments.
 
@@ -21,8 +21,8 @@ Only implement:
   * A **WP-CLI** sidecar (`wordpress:cli-php*`, same bind mount) — the main WordPress image does not ship `wp`; local DB commands must use this service.
 * One command to start/stop:
 
-  * `wpflow up`
-  * `wpflow down`
+  * `wp-dev up`
+  * `wp-dev down`
 
 ---
 
@@ -30,7 +30,7 @@ Only implement:
 
 Each project must use a config file:
 
-`wpflow.config.json`
+`wp-dev.config.json`
 
 Example:
 
@@ -39,7 +39,10 @@ Example:
   "project": "example",
   "local": {
     "url": "http://example.local",
-    "path": "./docker"
+    "path": "./docker",
+    "composeFile": "docker-compose.yml",
+    "composeService": "wpcli",
+    "wpRoot": "./wordpress"
   },
   "staging": {
     "host": "staging.example.com",
@@ -62,7 +65,7 @@ Example:
 
 ### A. Pull Command
 
-`wpflow pull <env>`
+`wp-dev pull <env>`
 
 Must:
 
@@ -80,7 +83,7 @@ Must:
 
 ### B. Push Command
 
-`wpflow push <env>`
+`wp-dev push <env>`
 
 Must:
 
@@ -149,15 +152,15 @@ src/
 
 ## 7. CLI Commands (must implement)
 
-* `wpflow init` (interactive: project, local URL, staging/production SSH — updates `wpflow.config.json`; no pull)
-* `wpflow up`
-* `wpflow down`
-* `wpflow pull staging`
-* `wpflow pull production`
-* `wpflow push staging`
-* `wpflow push production`
-* `wpflow backup <env>`
-* `wpflow logs` (tail `logs/wpflow.log` beside `wpflow.config.json`; gitignored)
+* `wp-dev init` (interactive: project, local URL, staging/production SSH — updates `wp-dev.config.json`; no pull)
+* `wp-dev up`
+* `wp-dev down`
+* `wp-dev pull staging`
+* `wp-dev pull production`
+* `wp-dev push staging`
+* `wp-dev push production`
+* `wp-dev backup <env>`
+* `wp-dev logs` (tail `logs/wp-dev.log` beside `wp-dev.config.json`; gitignored)
 
 Automated **tests** (Vitest) run in CI: `npm test` (config schema, compose project id, logger).
 
@@ -171,7 +174,7 @@ Before ANY destructive DB operation:
 * Save locally under:
 
   ```
-  ~/.wpflow/backups/<project>/<env>/
+  ~/.wp-dev/backups/<project>/<env>/
   ```
 * Timestamp files:
 
@@ -181,7 +184,7 @@ Before ANY destructive DB operation:
 
 Add:
 
-* `wpflow restore <env> <file>`
+* `wp-dev restore <env> <file>`
 
 ---
 
@@ -225,9 +228,9 @@ V1 is complete when:
 
 * A developer can:
 
-  1. spin up local WP (`wpflow up`)
-  2. pull production into local (`wpflow pull production`)
-  3. push local to staging (`wpflow push staging`)
+  1. spin up local WP (`wp-dev up`)
+  2. pull production into local (`wp-dev pull production`)
+  3. push local to staging (`wp-dev push staging`)
 * All operations are safe, repeatable, and use backups
 
 ---

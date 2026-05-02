@@ -35,7 +35,7 @@ export async function cmdBackup(
   const ssh = await connectSsh(remote);
   try {
     await assertRemoteWpInstalled(ssh, remote.path);
-    const remoteDump = `/tmp/wpflow-backup-${Date.now()}.sql`;
+    const remoteDump = `/tmp/wp-dev-backup-${Date.now()}.sql`;
     await wpRemoteDbExport(ssh, remote.path, remoteDump);
     await ssh.getFile(remoteDump, outPath);
     await ssh.exec(`rm -f ${remoteDump}`);

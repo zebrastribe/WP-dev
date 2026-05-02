@@ -6,7 +6,7 @@ let logFilePath: string | null = null;
 export function initLogger(configDir: string): void {
   const dir = join(configDir, "logs");
   mkdirSync(dir, { recursive: true });
-  logFilePath = join(dir, "wpflow.log");
+  logFilePath = join(dir, "wp-dev.log");
   appendRaw(`[${iso()}] [info] --- session start ---\n`);
 }
 
@@ -15,7 +15,7 @@ export function getLogFilePath(): string | null {
 }
 
 export function logPathForConfigDir(configDir: string): string {
-  return join(configDir, "logs", "wpflow.log");
+  return join(configDir, "logs", "wp-dev.log");
 }
 
 function iso(): string {

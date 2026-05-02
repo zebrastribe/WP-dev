@@ -2,7 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 docker/.env
-wpflow.config.json
+wp-dev.config.json
 wordpress/*
 !wordpress/.gitkeep
 logs/
