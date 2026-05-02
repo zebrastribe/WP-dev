@@ -9,6 +9,7 @@ import {
   wpLocalDbExportToFile,
   wpRemoteDbExport,
 } from "../services/wpcli.js";
+import { logInfo } from "../utils/logger.js";
 
 export type BackupTarget = RemoteEnvName | "local";
 
@@ -20,6 +21,8 @@ export async function cmdBackup(
   const dir = ensureBackupDir(config.project, env);
   const name = timestampedDbName();
   const outPath = join(dir, name);
+
+  logInfo(`backup ${env} -> ${outPath}`);
 
   if (env === "local") {
     await assertLocalWpInstalled(configDir, config);

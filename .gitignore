@@ -5,4 +5,5 @@ docker/.env
 wpflow.config.json
 wordpress/*
 !wordpress/.gitkeep
+logs/
 .DS_Store

@@ -10,6 +10,7 @@ import {
   wpRemoteDbImport,
 } from "../services/wpcli.js";
 import { confirmProduction } from "../utils/confirm.js";
+import { logInfo } from "../utils/logger.js";
 
 export type RestoreTarget = RemoteEnvName | "local";
 
@@ -20,6 +21,8 @@ export async function cmdRestore(
 ): Promise<void> {
   const { config, configDir } = loaded;
   assertBackupFileExists(file);
+
+  logInfo(`restore ${env} from ${resolve(file)}`);
 
   if (env === "local") {
     await assertLocalWpInstalled(configDir, config);
@@ -33,6 +36,7 @@ export async function cmdRestore(
       "You are about to REPLACE the PRODUCTION database from a backup file.",
     );
     if (!ok) {
+      logInfo("restore production: user aborted at confirmation");
       console.error("Aborted.");
       process.exitCode = 1;
       return;

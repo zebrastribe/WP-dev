@@ -156,6 +156,9 @@ src/
 * `wpflow push staging`
 * `wpflow push production`
 * `wpflow backup <env>`
+* `wpflow logs` (tail `logs/wpflow.log` beside `wpflow.config.json`; gitignored)
+
+Automated **tests** (Vitest) run in CI: `npm test` (config schema, compose project id, logger).
 
 ---
 

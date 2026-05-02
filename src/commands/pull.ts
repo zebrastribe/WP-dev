@@ -12,6 +12,7 @@ import {
   wpLocalSearchReplace,
   wpRemoteDbExport,
 } from "../services/wpcli.js";
+import { logInfo } from "../utils/logger.js";
 
 export type PullOptions = {
   dryRun: boolean;
@@ -27,16 +28,19 @@ export async function cmdPull(
   const localWpRoot = resolveFromConfigDir(configDir, config.local.wpRoot);
 
   if (options.dryRun) {
+    logInfo(`pull ${env} dry-run: rsync only`);
     console.error("[dry-run] Would: validate SSH, export remote DB, rsync files, import DB, search-replace URLs.");
     await rsyncPull(remote, localWpRoot, { dryRun: true });
     return;
   }
 
+  logInfo(`pull ${env}: connect ssh ${remote.user}@${remote.host}`);
   const ssh = await connectSsh(remote);
   try {
     await assertRemoteWpInstalled(ssh, remote.path);
 
     const remoteDump = `/tmp/wpflow-pull-${Date.now()}.sql`;
+    logInfo(`pull ${env}: remote wp db export`);
     await wpRemoteDbExport(ssh, remote.path, remoteDump);
 
     const tmpDir = mkdtempSync(join(tmpdir(), "wpflow-pull-"));
@@ -45,6 +49,7 @@ export async function cmdPull(
       await ssh.getFile(remoteDump, localDump);
       await ssh.exec(`rm -f ${remoteDump.replace(/'/g, `'\\''`)}`);
 
+      logInfo(`pull ${env}: rsync files -> ${localWpRoot}`);
       await rsyncPull(remote, localWpRoot, { dryRun: false });
 
       const sql = readFileSync(localDump, "utf8");
@@ -52,7 +57,9 @@ export async function cmdPull(
         throw new Error("Downloaded SQL dump looks empty or invalid.");
       }
 
+      logInfo(`pull ${env}: local wp db import`);
       await wpLocalDbImportFromFile(configDir, config, localDump);
+      logInfo(`pull ${env}: search-replace ${remote.url} -> ${config.local.url}`);
       await wpLocalSearchReplace(configDir, config, remote.url, config.local.url);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });

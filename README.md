@@ -26,6 +26,8 @@ Yes, if you want a reusable template or team workflow. Do **not** commit secrets
 
    `npm install` creates `wpflow.config.json` from `wpflow.config.example.json` if it does not exist yet.
 
+   Run **`npm test`** to execute the Vitest suite (config validation, Docker project id, logger).
+
 3. **Configure the project**
 
    Edit `wpflow.config.json`:
@@ -65,8 +67,18 @@ Yes, if you want a reusable template or team workflow. Do **not** commit secrets
 | `npx wpflow push staging` \| `production` | Sync local to remote (production asks for typing `yes`) |
 | `npx wpflow backup <env>` | DB-only export under `~/.wpflow/backups/...` |
 | `npx wpflow restore <env> <file.sql>` | Import a SQL backup |
+| `npx wpflow logs` | Print **`logs/wpflow.log`** path and the last lines (append-only audit trail next to `wpflow.config.json`) |
+| `npx wpflow logs -n 200` | Show more lines from the end of the log |
 
 Add **`--dry-run`** on `pull` or `push` to preview rsync only (no database steps).
+
+## Logging
+
+Each run writes ISO-timestamped lines to **`logs/wpflow.log`** under the same directory as `wpflow.config.json`. The **`logs/`** folder is gitignored. **Warnings and errors** are also printed to stderr. Use **`wpflow logs`** to view the file path and recent output in the terminal, or open `logs/wpflow.log` in your editor.
+
+## CI
+
+GitHub Actions runs **`npm ci`**, **`npm test`**, and **`npm run build`** on pushes and pull requests to `main` (see `.github/workflows/ci.yml`).
 
 ## Notes
 
