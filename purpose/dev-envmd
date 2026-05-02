@@ -161,6 +161,7 @@ src/
 * `wp-dev push production`
 * `wp-dev backup <env>`
 * `wp-dev logs` (tail `logs/wp-dev.log` beside `wp-dev.config.json`; gitignored)
+* `wp-dev simply test` (optional: verify [Simply.com API](https://www.simply.com/en/docs/api/) — `simply.account` in config + `WPDEV_SIMPLY_API_KEY` env)
 
 Automated **tests** (Vitest) run in CI: `npm test` (config schema, compose project id, logger).
 

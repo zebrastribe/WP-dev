@@ -27,6 +27,31 @@ describe("wpDevConfigSchema", () => {
     expect(parsed.local.composeFile).toBe("docker-compose.yml");
   });
 
+  it("accepts optional simply block", () => {
+    const parsed = wpDevConfigSchema.parse({
+      project: "x",
+      local: {
+        url: "http://localhost:8888",
+        path: "./docker",
+        wpRoot: "./wordpress",
+      },
+      staging: {
+        host: "s",
+        user: "u",
+        path: "/p",
+        url: "https://s",
+      },
+      production: {
+        host: "p",
+        user: "u",
+        path: "/p",
+        url: "https://p",
+      },
+      simply: { account: "S999999" },
+    });
+    expect(parsed.simply?.account).toBe("S999999");
+  });
+
   it("rejects invalid local url", () => {
     expect(() =>
       wpDevConfigSchema.parse({

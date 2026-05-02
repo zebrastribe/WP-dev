@@ -9,6 +9,13 @@ const remoteEnvSchema = z.object({
   identityFile: z.string().optional(),
 });
 
+/** Optional [Simply.com REST API](https://www.simply.com/en/docs/api/) — use for DNS/hosting automation; API key via `WPDEV_SIMPLY_API_KEY`. */
+const simplySchema = z.object({
+  account: z
+    .string()
+    .regex(/^S\d+$/i, "Simply.com account must look like S123456"),
+});
+
 const localSchema = z.object({
   url: z.string().url(),
   path: z.string().min(1),
@@ -27,6 +34,7 @@ export const wpDevConfigSchema = z.object({
   local: localSchema,
   staging: remoteEnvSchema,
   production: remoteEnvSchema,
+  simply: simplySchema.optional(),
 });
 
 export type WpDevConfig = z.infer<typeof wpDevConfigSchema>;

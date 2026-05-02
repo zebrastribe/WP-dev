@@ -11,6 +11,7 @@ import { cmdBackup, type BackupTarget } from "./commands/backup.js";
 import { cmdRestore, type RestoreTarget } from "./commands/restore.js";
 import { cmdLogs } from "./commands/logs.js";
 import { cmdInit } from "./commands/init.js";
+import { cmdSimplyTest } from "./commands/simply.js";
 import { ensureWpDevConfigJson } from "./config/load.js";
 import { initLogger, logError, logInfo } from "./utils/logger.js";
 
@@ -72,6 +73,19 @@ async function main(): Promise<void> {
         console.error(msg);
         process.exitCode = 1;
       }
+    });
+
+  const simply = program
+    .command("simply")
+    .description(
+      "Simply.com REST API (domains/hosting) — https://www.simply.com/en/docs/api/",
+    );
+
+  simply
+    .command("test")
+    .description("Verify API credentials (GET /my/products/)")
+    .action(async () => {
+      await withLoadedConfig("simply test", cmdSimplyTest);
     });
 
   program

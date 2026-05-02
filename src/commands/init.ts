@@ -132,7 +132,18 @@ export async function cmdInit(): Promise<void> {
   const rl = readline.createInterface({ input, output });
   try {
     console.error(
-      "\nwp-dev init — updates wp-dev.config.json (SSH / URLs only). No pull or push runs.\nPrivate keys: enter a file path only; never paste key contents.\n",
+      [
+        "",
+        "wp-dev init — updates wp-dev.config.json (no pull/push).",
+        "",
+        "SSH keys: init does NOT create keys. It only saves an optional identityFile path to an existing private key file.",
+        "  • Leave identity file empty → OpenSSH defaults (~/.ssh/config, ssh-agent, default key names).",
+        "  • Or enter a path, e.g. ~/.ssh/id_ed25519 (never paste the key contents here).",
+        "  Create a key with: ssh-keygen -t ed25519; add the .pub line to the server authorized_keys.",
+        "",
+        "Simply.com: optional account number here; API key only via env WPDEV_SIMPLY_API_KEY (never stored in this file).",
+        "",
+      ].join("\n"),
     );
 
     draft.project = await ask(rl, "Project id (unique per clone)", draft.project);
@@ -158,6 +169,26 @@ export async function cmdInit(): Promise<void> {
       )
     ) {
       draft.production = await promptRemote(rl, "Production", draft.production);
+    }
+
+    if (
+      await askYes(
+        rl,
+        "Configure Simply.com API (save account S-number in config; API key only via WPDEV_SIMPLY_API_KEY)?",
+        false,
+      )
+    ) {
+      const acc = (
+        await ask(rl, "Simply.com account number", draft.simply?.account ?? "")
+      )
+        .trim()
+        .toUpperCase();
+      if (!/^S\d+$/i.test(acc)) {
+        throw new Error(
+          `Invalid Simply account "${acc}". Use your Control Panel account (form S + digits).`,
+        );
+      }
+      draft = { ...draft, simply: { account: acc } };
     }
 
     try {

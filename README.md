@@ -10,6 +10,28 @@ Local **WordPress in Docker** (MySQL + Apache) plus a small CLI to **pull** or *
 - **Docker** with Compose v2  
 - For **pull** / **push** only: `ssh`, `rsync`, SSH access to the server, **WP-CLI** on the remote WordPress root  
 
+### SSH keys and `wp-dev init`
+
+**`init` does not create or install SSH keys.** It only saves what you type into `wp-dev.config.json`:
+
+- **`identityFile` (optional):** path to an **existing** private key file (for example `~/.ssh/id_ed25519`). Only the **path** is stored; never paste the private key into the terminal.
+- **If you leave that empty:** the CLI uses normal OpenSSH behavior (`~/.ssh/config`, **ssh-agent**, default key filenames like `id_ed25519` / `id_rsa`).
+
+To set up keys from scratch: run `ssh-keygen -t ed25519 -C "you@example"` on your machine, then add the **`.pub`** line to the server user’s `~/.ssh/authorized_keys`.
+
+### Simply.com API (optional hosting automation)
+
+Official docs: **[Simply.com API](https://www.simply.com/en/docs/api/)** — REST JSON at `https://api.simply.com/2/`, **HTTP Basic** auth (username = account number `S…`, password = API key from the Simply control panel).
+
+**In this project:**
+
+1. Add **`simply.account`** (e.g. `"S123456"`) to `wp-dev.config.json`, or run **`wp-dev init`** and accept the Simply step.
+2. Set the API key **only in the environment** (not in the JSON file):  
+   `export WPDEV_SIMPLY_API_KEY='your-api-key'`
+3. Run **`npx wp-dev simply test`** — calls **`GET /my/products/`** to verify credentials.
+
+That checks connectivity to Simply’s API. **Deploying WordPress files/DB** to staging/production is still done with **`pull`** / **`push`** over SSH; you can use the Simply API separately for DNS, products, or other endpoints listed in their [OpenAPI doc](https://api.simply.com/2/doc/).
+
 ---
 
 ## Quick start (follow in order)
@@ -94,6 +116,7 @@ Then either:
 | `npx wp-dev backup local` (or `staging` / `production`) | SQL-only backup under `~/.wp-dev/backups/...` |
 | `npx wp-dev restore <env> <file.sql>` | Import a SQL dump |
 | `npx wp-dev logs` | Show **`logs/wp-dev.log`** path and recent lines (`-n 200` for more) |
+| `npx wp-dev simply test` | Check [Simply.com API](https://www.simply.com/en/docs/api/) credentials (`WPDEV_SIMPLY_API_KEY` + `simply.account` in config) |
 
 Use **`--dry-run`** on **pull** or **push** to preview **rsync** only (no database steps).
 
