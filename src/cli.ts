@@ -10,6 +10,8 @@ import { cmdPush } from "./commands/push.js";
 import { cmdBackup, type BackupTarget } from "./commands/backup.js";
 import { cmdRestore, type RestoreTarget } from "./commands/restore.js";
 import { cmdLogs } from "./commands/logs.js";
+import { cmdInit } from "./commands/init.js";
+import { ensureWpflowConfigJson } from "./config/load.js";
 import { initLogger, logError, logInfo } from "./utils/logger.js";
 
 function parseRemoteEnv(s: string): RemoteEnvName {
@@ -49,6 +51,28 @@ async function main(): Promise<void> {
     .name("wpflow")
     .description("WordPress local Docker + pull/push staging & production")
     .version("0.1.0");
+
+  program
+    .command("init")
+    .description(
+      "Interactively set project id, local URL, staging/production SSH (updates wpflow.config.json; no pull)",
+    )
+    .action(async () => {
+      try {
+        await cmdInit();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        try {
+          const dir = ensureWpflowConfigJson();
+          initLogger(dir);
+          logError(`init failed: ${msg}`);
+        } catch {
+          /* no project root */
+        }
+        console.error(msg);
+        process.exitCode = 1;
+      }
+    });
 
   program
     .command("up")

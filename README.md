@@ -37,17 +37,25 @@ Same effect as:
 npm install && npm run build
 ```
 
-### 3. Configure `wpflow.config.json`
+### 3. Configure remotes (interactive) or edit the file by hand
 
-Open **`wpflow.config.json`** in this repo (same folder as `package.json`).
+**Option A — prompts (no pull/push, only writes config):**
 
-| What | Why |
-|------|-----|
-| **`project`** | Short **unique** name per clone. Used for `docker compose -p` and `~/.wpflow/backups/<project>/`. |
-| **`local.url`** | URL you open in the browser. Default compose port is **8888** → often `http://localhost:8888`. |
-| **`staging`** / **`production`** | For sync: `host`, `user`, `path` (remote WordPress root), `url`. Optional: `port`, `identityFile`. |
+```bash
+npx wpflow init
+```
 
-You can leave staging/production as placeholders until you use **pull** / **push**.
+Asks for **`project`**, **`local.url`**, and (if you choose to update them) **staging** / **production**: SSH host, user, optional **port**, remote WordPress **path**, site **URL**, and optional **private key file path** (path only — never paste key contents). Updates **`wpflow.config.json`** in this repo.
+
+Requires a normal terminal (TTY). Skip any remote block with **n** at the “Update …?” prompt to leave existing values.
+
+**Option B — editor:** open **`wpflow.config.json`** and set the same fields yourself.
+
+| Field | Purpose |
+|------|---------|
+| **`project`** | Short **unique** name per clone (`docker compose -p`, backups). |
+| **`local.url`** | Browser URL (often `http://localhost:8888`). |
+| **`staging` / `production`** | `host`, `user`, `path`, `url`; optional `port`, `identityFile`. |
 
 ### 4. (Optional) Change the HTTP port
 
@@ -78,6 +86,7 @@ Then either:
 
 | Command | What it does |
 |---------|----------------|
+| `npx wpflow init` | Interactive **SSH / URL** setup → writes **`wpflow.config.json`** (no sync) |
 | `npx wpflow up` | Start Docker (MySQL + WordPress + wpcli) |
 | `npx wpflow down` | Stop Docker |
 | `npx wpflow pull staging` or `production` | Remote → local (DB + files, then URL replace) |

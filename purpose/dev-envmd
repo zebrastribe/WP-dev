@@ -149,6 +149,7 @@ src/
 
 ## 7. CLI Commands (must implement)
 
+* `wpflow init` (interactive: project, local URL, staging/production SSH — updates `wpflow.config.json`; no pull)
 * `wpflow up`
 * `wpflow down`
 * `wpflow pull staging`
