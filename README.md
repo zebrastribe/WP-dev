@@ -6,88 +6,48 @@ Local **WordPress in Docker** (MySQL + Apache) plus a small CLI to **pull** or *
 
 ## What you need
 
-- **Node.js** 20 or newer  
-- **Docker** with Compose v2  
-- For **pull** / **push** only: `ssh`, `rsync`, SSH access to the server, **WP-CLI** on the remote WordPress root  
+- **Node.js** 20+  
+- **Docker** + **Docker Compose v2** (`docker compose`) — checked automatically by **`npm run setup`** and before **`wp-dev up`** / **`down`**.  
+- **pull** / **push** only: `ssh`, `rsync`, **WP-CLI** on the remote WordPress root  
 
 ### SSH keys and `wp-dev init`
 
-**`init` does not create or install SSH keys.** It only saves what you type into `wp-dev.config.json`:
+**`init` does not create SSH keys.** It only saves optional **`identityFile`** (path to an existing private key). Leave it empty to use OpenSSH defaults (`~/.ssh/config`, agent, default key names). See **`ssh-keygen`** + **`authorized_keys`** to create keys.
 
-- **`identityFile` (optional):** path to an **existing** private key file (for example `~/.ssh/id_ed25519`). Only the **path** is stored; never paste the private key into the terminal.
-- **If you leave that empty:** the CLI uses normal OpenSSH behavior (`~/.ssh/config`, **ssh-agent**, default key filenames like `id_ed25519` / `id_rsa`).
+### Simply.com API (optional)
 
-To set up keys from scratch: run `ssh-keygen -t ed25519 -C "you@example"` on your machine, then add the **`.pub`** line to the server user’s `~/.ssh/authorized_keys`.
-
-### Simply.com API (optional hosting automation)
-
-Official docs: **[Simply.com API](https://www.simply.com/en/docs/api/)** — REST JSON at `https://api.simply.com/2/`, **HTTP Basic** auth (username = account number `S…`, password = API key from the Simply control panel).
-
-**In this project:**
-
-1. Add **`simply.account`** (e.g. `"S123456"`) to `wp-dev.config.json`, or run **`wp-dev init`** and accept the Simply step.
-2. Set the API key **only in the environment** (not in the JSON file):  
-   `export WPDEV_SIMPLY_API_KEY='your-api-key'`
-3. Run **`npx wp-dev simply test`** — calls **`GET /my/products/`** to verify credentials.
-
-That checks connectivity to Simply’s API. **Deploying WordPress files/DB** to staging/production is still done with **`pull`** / **`push`** over SSH; you can use the Simply API separately for DNS, products, or other endpoints listed in their [OpenAPI doc](https://api.simply.com/2/doc/).
+Optional [Simply.com API](https://www.simply.com/en/docs/api/): add **`simply.account`** to `wp-dev.config.json`, set **`WPDEV_SIMPLY_API_KEY`**, then **`npx wp-dev simply test`**. WordPress sync stays **`pull`** / **`push`** over SSH.
 
 ---
 
-## Quick start (follow in order)
+## Quick start (minimal steps)
 
-### 1. Clone and go into the project
-
-Use any folder you like; this example clones next to your other dev work:
+### 1. Clone and enter the repo
 
 ```bash
 git clone https://github.com/zebrastribe/WP-dev.git ~/Documents/dev/WP-dev
 cd ~/Documents/dev/WP-dev
 ```
 
-### 2. One command: install, default config, and build
-
-Runs `npm install` (which creates **`wp-dev.config.json`** from the example if it is missing), then compiles the CLI to **`dist/`**.
+### 2. One command: Docker check + install + build
 
 ```bash
 npm run setup
 ```
 
-Same effect as:
+This runs **`npm run check`** first (`docker version` + `docker compose version`), then **`npm install`** (creates **`wp-dev.config.json`** from the example if missing), then **`npm run build`**.
 
-```bash
-npm install && npm run build
-```
+If Docker fails: install/start [Docker](https://docs.docker.com/get-docker/), ensure **Compose v2** works (`docker compose version`), then run **`npm run setup`** again.
 
-### 3. Configure remotes (interactive) or edit the file by hand
+Re-check Docker anytime: **`npm run check`**.
 
-**Option A — prompts (no pull/push, only writes config):**
+### 3. Config (optional)
 
-```bash
-npx wp-dev init
-```
+- **`npx wp-dev init`** — interactive; or edit **`wp-dev.config.json`** (`project`, `local.url`, staging/production SSH).
 
-Asks for **`project`**, **`local.url`**, and (if you choose to update them) **staging** / **production**: SSH host, user, optional **port**, remote WordPress **path**, site **URL**, and optional **private key file path** (path only — never paste key contents). Updates **`wp-dev.config.json`** in this repo.
+### 4. Port clash (optional)
 
-Requires a normal terminal (TTY). Skip any remote block with **n** at the “Update …?” prompt to leave existing values.
-
-**Option B — editor:** open **`wp-dev.config.json`** and set the same fields yourself.
-
-| Field | Purpose |
-|------|---------|
-| **`project`** | Short **unique** name per clone (`docker compose -p`, backups). |
-| **`local.url`** | Browser URL (often `http://localhost:8888`). |
-| **`staging` / `production`** | `host`, `user`, `path`, `url`; optional `port`, `identityFile`. |
-
-### 4. (Optional) Change the HTTP port
-
-Only if **8888** is already in use:
-
-```bash
-cp docker/.env.example docker/.env
-```
-
-Edit **`docker/.env`** and set e.g. `WP_PORT=8890`, then set **`local.url`** in `wp-dev.config.json` to match (`http://localhost:8890`).
+If **8888** is busy: `cp docker/.env.example docker/.env`, set **`WP_PORT`**, match **`local.url`**.
 
 ### 5. Start WordPress
 
@@ -95,12 +55,7 @@ Edit **`docker/.env`** and set e.g. `WP_PORT=8890`, then set **`local.url`** in 
 npx wp-dev up
 ```
 
-Site files live in **`wordpress/`** (bind-mounted into the container). The **`wpcli`** service runs WP-CLI; that is the default **`composeService`** in config.
-
-Then either:
-
-- Open **`local.url`** and complete the WordPress installer, or  
-- When SSH remotes are correct: **`npx wp-dev pull production`** (or `staging`) to copy a live site down.
+Open **`local.url`** (installer) or **`npx wp-dev pull production`** when remotes are ready.
 
 ---
 
@@ -108,23 +63,21 @@ Then either:
 
 | Command | What it does |
 |---------|----------------|
-| `npx wp-dev init` | Interactive **SSH / URL** setup → writes **`wp-dev.config.json`** (no sync) |
-| `npx wp-dev up` | Start Docker (MySQL + WordPress + wpcli) |
-| `npx wp-dev down` | Stop Docker |
-| `npx wp-dev pull staging` or `production` | Remote → local (DB + files, then URL replace) |
-| `npx wp-dev push staging` or `production` | Local → remote (production asks you to type `yes`) |
-| `npx wp-dev backup local` (or `staging` / `production`) | SQL-only backup under `~/.wp-dev/backups/...` |
-| `npx wp-dev restore <env> <file.sql>` | Import a SQL dump |
-| `npx wp-dev logs` | Show **`logs/wp-dev.log`** path and recent lines (`-n 200` for more) |
-| `npx wp-dev simply test` | Check [Simply.com API](https://www.simply.com/en/docs/api/) credentials (`WPDEV_SIMPLY_API_KEY` + `simply.account` in config) |
+| `npm run check` | Verify Docker + Compose only (no install) |
+| `npx wp-dev init` | Interactive config → **`wp-dev.config.json`** |
+| `npx wp-dev up` / `down` | Start / stop Docker stack (checks Docker first) |
+| `npx wp-dev pull` / `push` | Sync with staging or production |
+| `npx wp-dev backup` / `restore` | DB export / import |
+| `npx wp-dev logs` | Tail **`logs/wp-dev.log`** |
+| `npx wp-dev simply test` | [Simply.com](https://www.simply.com/en/docs/api/) API check |
 
-Use **`--dry-run`** on **pull** or **push** to preview **rsync** only (no database steps).
+**`--dry-run`** on **pull** / **push** previews rsync only.
 
 ---
 
 ## Logging
 
-Runs append lines to **`logs/wp-dev.log`** next to `wp-dev.config.json` (`logs/` is gitignored). Warnings and errors are also printed to the terminal. **`npx wp-dev logs`** prints the path and tail of the file.
+**`logs/wp-dev.log`** next to `wp-dev.config.json` (gitignored). **`npx wp-dev logs`** shows the path and recent lines.
 
 ---
 
@@ -134,16 +87,14 @@ Runs append lines to **`logs/wp-dev.log`** next to `wp-dev.config.json` (`logs/`
 npm test
 ```
 
-On GitHub, **Actions** runs `npm ci`, `npm test`, and `npm run build` on pushes and pull requests to **`main`**.
+CI runs **`npm run check`**, **`npm ci`**, **`npm test`**, **`npm run build`** on **`main`**.
 
 ---
 
 ## Public repo / safety
 
-Safe to share the repo if you **never commit** real secrets. These paths are **gitignored**: `wp-dev.config.json`, `docker/.env`, `wordpress/*` (except `.gitkeep`), `logs/`. Use **`wp-dev.config.example.json`** as the template only.
+Gitignored: **`wp-dev.config.json`**, **`docker/.env`**, **`wordpress/*`**, **`logs/`**. Template: **`wp-dev.config.example.json`**.
 
-If you still have an old **`wpflow.config.json`**, rename it to **`wp-dev.config.json`** (or delete it and run **`npm install`** so the example is copied again).
-
-**`wp-config.php`** is excluded from rsync so your local Docker DB settings are not overwritten when you pull from a server.
+Old **`wpflow.config.json`** → rename to **`wp-dev.config.json`** or re-run **`npm install`**.
 
 Design notes: **`purpose/dev-envmd`**.

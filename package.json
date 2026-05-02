@@ -7,7 +7,8 @@
     "wp-dev": "./dist/cli.js"
   },
   "scripts": {
-    "setup": "npm install && npm run build",
+    "check": "node scripts/check-docker.mjs",
+    "setup": "node scripts/check-docker.mjs && npm install && npm run build",
     "build": "tsc",
     "dev": "node --import tsx src/cli.ts",
     "wp-dev": "node dist/cli.js",
