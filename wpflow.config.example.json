@@ -1,0 +1,22 @@
+{
+  "project": "my-site",
+  "local": {
+    "url": "http://localhost:8888",
+    "path": "./docker",
+    "composeFile": "docker-compose.yml",
+    "composeService": "wpcli",
+    "wpRoot": "./wordpress"
+  },
+  "staging": {
+    "host": "staging.example.com",
+    "user": "deploy",
+    "path": "/var/www/staging",
+    "url": "https://staging.example.com"
+  },
+  "production": {
+    "host": "example.com",
+    "user": "deploy",
+    "path": "/var/www/live",
+    "url": "https://example.com"
+  }
+}

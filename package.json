@@ -1,0 +1,29 @@
+{
+  "name": "wpflow",
+  "version": "0.1.0",
+  "description": "Linux-first WordPress deployment CLI: local Docker, pull/push staging & production",
+  "type": "module",
+  "bin": {
+    "wpflow": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "node --import tsx src/cli.ts",
+    "wpflow": "node dist/cli.js",
+    "postinstall": "node scripts/ensure-config.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "execa": "^9.5.2",
+    "node-ssh": "^13.2.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

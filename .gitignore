@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+docker/.env
+wpflow.config.json
+wordpress/*
+!wordpress/.gitkeep
+.DS_Store

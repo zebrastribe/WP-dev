@@ -1,0 +1,239 @@
+You are building a **Linux-first WordPress deployment CLI tool** called `wpflow`.
+
+The goal of this tool is NOT to be a full platform, but a **reliable developer utility** that standardizes WordPress workflows across local, staging, and production environments.
+
+Keep V1 minimal, stable, and production-safe.
+
+---
+
+# 🚨 V1 SCOPE (STRICT)
+
+Only implement:
+
+## 1. Local Development Environment
+
+* Provide a Docker-based WordPress setup
+* Use docker-compose
+* Includes:
+
+  * WordPress (web)
+  * MySQL
+  * A **WP-CLI** sidecar (`wordpress:cli-php*`, same bind mount) — the main WordPress image does not ship `wp`; local DB commands must use this service.
+* One command to start/stop:
+
+  * `wpflow up`
+  * `wpflow down`
+
+---
+
+## 2. Environment Configuration System
+
+Each project must use a config file:
+
+`wpflow.config.json`
+
+Example:
+
+```json
+{
+  "project": "example",
+  "local": {
+    "url": "http://example.local",
+    "path": "./docker"
+  },
+  "staging": {
+    "host": "staging.example.com",
+    "user": "user",
+    "path": "/var/www/staging",
+    "url": "https://staging.example.com"
+  },
+  "production": {
+    "host": "example.com",
+    "user": "user",
+    "path": "/var/www/live",
+    "url": "https://example.com"
+  }
+}
+```
+
+---
+
+## 3. Core Sync Engine (IMPORTANT)
+
+### A. Pull Command
+
+`wpflow pull <env>`
+
+Must:
+
+1. SSH into remote server
+2. Create DB backup using WP-CLI
+3. Export DB
+4. Download DB to local
+5. Run rsync (incremental) for files
+6. Import DB locally
+7. Run WP-CLI search-replace:
+
+   * remote URL → local URL
+
+---
+
+### B. Push Command
+
+`wpflow push <env>`
+
+Must:
+
+1. Backup remote DB before changes
+2. Run rsync (incremental file sync)
+3. Export local DB
+4. Upload DB to server
+5. Import DB remotely using WP-CLI
+6. Run search-replace:
+
+   * local URL → remote URL
+
+---
+
+## 4. Safety Requirements (CRITICAL)
+
+* NEVER overwrite a database without backup
+* Always confirm before pushing to production
+* Add `--dry-run` support for pull/push
+* Fail immediately on SSH errors
+* Validate WP install exists before executing WP-CLI commands
+
+---
+
+## 5. Technology Constraints (Linux-first)
+
+Use:
+
+* Node.js (TypeScript preferred)
+* SSH via `node-ssh`
+* Shell execution via `execa`
+* rsync for file sync
+* WP-CLI for database operations
+
+System dependencies assumed:
+
+* ssh
+* rsync
+* docker
+* WP-CLI installed locally and remotely (or detect and fail gracefully)
+
+---
+
+## 6. Architecture Requirements
+
+Keep code modular:
+
+```
+src/
+  cli/
+  commands/
+    pull.ts
+    push.ts
+    up.ts
+    down.ts
+  services/
+    ssh.ts
+    rsync.ts
+    wpcli.ts
+    backup.ts
+  config/
+  utils/
+```
+
+---
+
+## 7. CLI Commands (must implement)
+
+* `wpflow up`
+* `wpflow down`
+* `wpflow pull staging`
+* `wpflow pull production`
+* `wpflow push staging`
+* `wpflow push production`
+* `wpflow backup <env>`
+
+---
+
+## 8. Backup System (required)
+
+Before ANY destructive DB operation:
+
+* Export DB using WP-CLI
+* Save locally under:
+
+  ```
+  ~/.wpflow/backups/<project>/<env>/
+  ```
+* Timestamp files:
+
+  ```
+  db-YYYY-MM-DD-HH-MM.sql
+  ```
+
+Add:
+
+* `wpflow restore <env> <file>`
+
+---
+
+## 9. File Sync Rules
+
+Use rsync:
+
+* incremental sync only
+* preserve permissions
+* exclude:
+
+  * node_modules
+  * .git
+  * cache folders
+
+---
+
+## 10. URL Handling
+
+All environment switches must:
+
+* automatically run WP-CLI search-replace
+* never manually edit DB SQL
+
+---
+
+# ❌ OUT OF SCOPE (DO NOT IMPLEMENT IN V1)
+
+* No GUI/dashboard
+* No API integrations (including hosting APIs)
+* No real-time sync
+* No diff-based DB merging
+* No background sync daemon
+* No multi-user system
+
+---
+
+# 🎯 SUCCESS CRITERIA
+
+V1 is complete when:
+
+* A developer can:
+
+  1. spin up local WP (`wpflow up`)
+  2. pull production into local (`wpflow pull production`)
+  3. push local to staging (`wpflow push staging`)
+* All operations are safe, repeatable, and use backups
+
+---
+
+# 🧠 DESIGN PHILOSOPHY
+
+This tool should behave like:
+
+* a **safe deployment wrapper**
+* not a platform
+* not a CMS manager
+
+Simplicity and reliability > features.
