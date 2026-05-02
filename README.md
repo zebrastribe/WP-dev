@@ -1,86 +1,115 @@
 # wpflow
 
-Small CLI for a **self-contained WordPress dev setup**: Docker (MySQL + WordPress on your machine), plus optional **pull** / **push** of files and database to staging or production over SSH (rsync + WP-CLI).
+Local **WordPress in Docker** (MySQL + Apache) plus a small CLI to **pull** or **push** files and database to **staging** / **production** over SSH (rsync + WP-CLI).
 
-## Should you put this on GitHub?
+---
 
-Yes, if you want a reusable template or team workflow. Do **not** commit secrets: this repo ignores `wpflow.config.json` and `docker/.env`; each developer creates their own from the examples.
+## What you need
 
-## Prerequisites
+- **Node.js** 20 or newer  
+- **Docker** with Compose v2  
+- For **pull** / **push** only: `ssh`, `rsync`, SSH access to the server, **WP-CLI** on the remote WordPress root  
 
-- **Node.js** 20+
-- **Docker** (with Compose v2)
-- For **pull** / **push**: `ssh`, `rsync`, SSH key access to the server, **WP-CLI** on the remote WordPress root
+---
 
-## New dev environment (from a clone)
+## Quick start (follow in order)
 
-1. **Clone** the repository to a folder of your choice (each clone has its own `wordpress/` tree and Docker project name).
+### 1. Clone and go into the project
 
-2. **Install dependencies and build**
+Use any folder you like; this example clones next to your other dev work:
 
-   ```bash
-   cd /path/to/WP-dev
-   npm install
-   npm run build
-   ```
+```bash
+git clone https://github.com/zebrastribe/WP-dev.git ~/Documents/dev/WP-dev
+cd ~/Documents/dev/WP-dev
+```
 
-   `npm install` creates `wpflow.config.json` from `wpflow.config.example.json` if it does not exist yet.
+### 2. One command: install, default config, and build
 
-   Run **`npm test`** to execute the Vitest suite (config validation, Docker project id, logger).
+Runs `npm install` (which creates **`wpflow.config.json`** from the example if it is missing), then compiles the CLI to **`dist/`**.
 
-3. **Configure the project**
+```bash
+npm run setup
+```
 
-   Edit `wpflow.config.json`:
+Same effect as:
 
-   - Set **`project`** to something **unique** per clone (used for `docker compose -p` and for `~/.wpflow/backups/<project>/`).
-   - Set **`local.url`** to match how you will open the site (default port is in `docker/.env` or compose; example uses `http://localhost:8888`).
-   - Set **`staging`** / **`production`** (`host`, `user`, `path`, `url`). Optional: `port`, `identityFile` for SSH.
+```bash
+npm install && npm run build
+```
 
-4. **Optional: Docker env**
+### 3. Configure `wpflow.config.json`
 
-   ```bash
-   cp docker/.env.example docker/.env
-   ```
+Open **`wpflow.config.json`** in this repo (same folder as `package.json`).
 
-   Adjust `WP_PORT` if the default port is already in use (running two clones at once needs different ports).
+| What | Why |
+|------|-----|
+| **`project`** | Short **unique** name per clone. Used for `docker compose -p` and `~/.wpflow/backups/<project>/`. |
+| **`local.url`** | URL you open in the browser. Default compose port is **8888** → often `http://localhost:8888`. |
+| **`staging`** / **`production`** | For sync: `host`, `user`, `path` (remote WordPress root), `url`. Optional: `port`, `identityFile`. |
 
-5. **Start WordPress**
+You can leave staging/production as placeholders until you use **pull** / **push**.
 
-   ```bash
-   npx wpflow up
-   ```
+### 4. (Optional) Change the HTTP port
 
-   WordPress files live in **`wordpress/`** in the repo root (bind-mounted into the **wordpress** web container). WP-CLI runs in a separate **wpcli** service (`wordpress:cli-php8.2`), which is what `composeService` in config refers to by default.
+Only if **8888** is already in use:
 
-6. **First content**
+```bash
+cp docker/.env.example docker/.env
+```
 
-   - **Greenfield:** open `local.url` in a browser and run the WordPress installer.
-   - **Copy an existing site:** after SSH and paths are correct, run e.g. `npx wpflow pull production` (see `npx wpflow --help` and `pull` / `push` help).
+Edit **`docker/.env`** and set e.g. `WP_PORT=8890`, then set **`local.url`** in `wpflow.config.json` to match (`http://localhost:8890`).
 
-## Useful commands
+### 5. Start WordPress
 
-| Command | Purpose |
-|--------|---------|
-| `npx wpflow up` | Start local stack |
-| `npx wpflow down` | Stop local stack |
-| `npx wpflow pull staging` \| `production` | Sync remote files + DB into local; URLs rewritten to `local.url` |
-| `npx wpflow push staging` \| `production` | Sync local to remote (production asks for typing `yes`) |
-| `npx wpflow backup <env>` | DB-only export under `~/.wpflow/backups/...` |
-| `npx wpflow restore <env> <file.sql>` | Import a SQL backup |
-| `npx wpflow logs` | Print **`logs/wpflow.log`** path and the last lines (append-only audit trail next to `wpflow.config.json`) |
-| `npx wpflow logs -n 200` | Show more lines from the end of the log |
+```bash
+npx wpflow up
+```
 
-Add **`--dry-run`** on `pull` or `push` to preview rsync only (no database steps).
+Site files live in **`wordpress/`** (bind-mounted into the container). The **`wpcli`** service runs WP-CLI; that is the default **`composeService`** in config.
+
+Then either:
+
+- Open **`local.url`** and complete the WordPress installer, or  
+- When SSH remotes are correct: **`npx wpflow pull production`** (or `staging`) to copy a live site down.
+
+---
+
+## Commands you will use
+
+| Command | What it does |
+|---------|----------------|
+| `npx wpflow up` | Start Docker (MySQL + WordPress + wpcli) |
+| `npx wpflow down` | Stop Docker |
+| `npx wpflow pull staging` or `production` | Remote → local (DB + files, then URL replace) |
+| `npx wpflow push staging` or `production` | Local → remote (production asks you to type `yes`) |
+| `npx wpflow backup local` (or `staging` / `production`) | SQL-only backup under `~/.wpflow/backups/...` |
+| `npx wpflow restore <env> <file.sql>` | Import a SQL dump |
+| `npx wpflow logs` | Show **`logs/wpflow.log`** path and recent lines (`-n 200` for more) |
+
+Use **`--dry-run`** on **pull** or **push** to preview **rsync** only (no database steps).
+
+---
 
 ## Logging
 
-Each run writes ISO-timestamped lines to **`logs/wpflow.log`** under the same directory as `wpflow.config.json`. The **`logs/`** folder is gitignored. **Warnings and errors** are also printed to stderr. Use **`wpflow logs`** to view the file path and recent output in the terminal, or open `logs/wpflow.log` in your editor.
+Runs append lines to **`logs/wpflow.log`** next to `wpflow.config.json` (`logs/` is gitignored). Warnings and errors are also printed to the terminal. **`npx wpflow logs`** prints the path and tail of the file.
 
-## CI
+---
 
-GitHub Actions runs **`npm ci`**, **`npm test`**, and **`npm run build`** on pushes and pull requests to `main` (see `.github/workflows/ci.yml`).
+## Tests and CI
 
-## Notes
+```bash
+npm test
+```
 
-- **`wp-config.php`** is excluded from rsync so local Docker DB settings are not overwritten by remote config; adjust if your workflow differs.
-- Global spec / design notes: `purpose/dev-envmd`.
+On GitHub, **Actions** runs `npm ci`, `npm test`, and `npm run build` on pushes and pull requests to **`main`**.
+
+---
+
+## Public repo / safety
+
+Safe to share the repo if you **never commit** real secrets. These paths are **gitignored**: `wpflow.config.json`, `docker/.env`, `wordpress/*` (except `.gitkeep`), `logs/`. Use **`wpflow.config.example.json`** as the template only.
+
+**`wp-config.php`** is excluded from rsync so your local Docker DB settings are not overwritten when you pull from a server.
+
+Design notes: **`purpose/dev-envmd`**.

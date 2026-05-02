@@ -7,6 +7,7 @@
     "wpflow": "./dist/cli.js"
   },
   "scripts": {
+    "setup": "npm install && npm run build",
     "build": "tsc",
     "dev": "node --import tsx src/cli.ts",
     "wpflow": "node dist/cli.js",
