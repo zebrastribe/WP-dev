@@ -1195,7 +1195,7 @@ export function Wizard() {
                 onClick={() => void copyCommand("npm run wp-dev -- pull production", "pull")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Copy: pull production
+                Copy Terminal Command: pull production to localhost
               </button>
               <button
                 type="button"
@@ -1203,7 +1203,7 @@ export function Wizard() {
                 onClick={() => void copyCommand("npm run wp-dev -- pull staging", "pull")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Copy: pull staging
+                Copy Terminal Command: pull staging to localhost
               </button>
               <button
                 type="button"
@@ -1211,7 +1211,14 @@ export function Wizard() {
                 onClick={() => void copyCommand("npm run wp-dev -- push staging", "push")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Copy: push staging
+                Copy Terminal Command: push staging from localhost
+              </button>
+              <button
+                type="button"
+                onClick={() => void copyCommand("npm run wp-dev -- push production", "push")}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Copy Terminal Command: push production from localhost
               </button>
             </div>
           </div>
