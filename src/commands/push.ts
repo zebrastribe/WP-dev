@@ -140,6 +140,10 @@ export async function cmdPush(
       await ssh.exec(`rm -f ${remoteImport}`);
       logInfo(`push ${env}: search-replace ${config.local.url} -> ${remote.url}`);
       await wpRemoteSearchReplace(ssh, wpPath, config.local.url, remote.url);
+      if (env === "staging" && config.production.url !== remote.url) {
+        logInfo(`push ${env}: search-replace ${config.production.url} -> ${remote.url}`);
+        await wpRemoteSearchReplace(ssh, wpPath, config.production.url, remote.url);
+      }
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
