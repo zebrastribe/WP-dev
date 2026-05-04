@@ -8,6 +8,7 @@ export function apiPhpUrl(
     | "save"
     | "save-docker-env"
     | "simply-status"
+    | "staging-db-secrets"
     | "simply-test"
     | "simply-setup-staging"
     | "staging-https-check"
@@ -178,6 +179,35 @@ export async function loadSimplyStatus(): Promise<SimplyStatusResponse> {
   } catch (e) {
     logAdmin("warn", "loadSimplyStatus: fetch failed", e instanceof Error ? e.message : String(e));
     return { ok: false, error: "network_error" };
+  }
+}
+
+export type StagingDbSecretsResponse =
+  | { ok: true; host: string; name: string; user: string; password: string; prefix: string }
+  | { ok: false; error: string };
+
+export async function loadStagingDbSecrets(): Promise<StagingDbSecretsResponse> {
+  try {
+    const res = await fetch(apiPhpUrl("staging-db-secrets"), {
+      method: "GET",
+      credentials: "same-origin",
+    });
+    const data = (await res.json()) as unknown;
+    if (!res.ok || !data || typeof data !== "object") {
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
+    const o = data as Record<string, unknown>;
+    if (o.ok !== true) return { ok: false, error: String(o.error ?? "unknown_error") };
+    return {
+      ok: true,
+      host: String(o.host ?? ""),
+      name: String(o.name ?? ""),
+      user: String(o.user ?? ""),
+      password: String(o.password ?? ""),
+      prefix: String(o.prefix ?? ""),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }
 }
 

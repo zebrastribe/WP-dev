@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   checkStagingDbConnection,
   checkStagingHttps,
+  loadStagingDbSecrets,
   loadSimplyStatus,
   loadWpDevConfig,
   saveDockerEnvSecrets,
@@ -92,25 +93,10 @@ function defaults(): WizardData {
 
 function toJson(data: WizardData): Record<string, unknown> {
   const normalizeRemote = (r: Remote): Remote => {
-    const db = r.db;
-    if (!db) return { ...r };
-    const host = db.host.trim();
-    const name = db.name.trim();
-    const user = db.user.trim();
-    const password = db.password.trim();
-    const prefix = (db.prefix ?? "").trim();
-    if (!host || !name || !user || !password) {
-      return { ...r, db: undefined };
-    }
+    // Keep DB secrets out of wp-dev.config.json; they are stored in local docker/.env.
     return {
       ...r,
-      db: {
-        host,
-        name,
-        user,
-        password,
-        ...(prefix ? { prefix } : {}),
-      },
+      db: undefined,
     };
   };
   const o: Record<string, unknown> = {
@@ -223,34 +209,14 @@ export function Wizard() {
               user: String((loaded.staging as Remote)?.user ?? "deploy"),
               path: String((loaded.staging as Remote)?.path ?? STAGING_PLACEHOLDER.path),
               url: String((loaded.staging as Remote)?.url ?? STAGING_PLACEHOLDER.url),
-              db:
-                (loaded.staging as Remote)?.db &&
-                typeof (loaded.staging as Remote).db === "object"
-                  ? {
-                      host: String((loaded.staging as Remote).db?.host ?? ""),
-                      name: String((loaded.staging as Remote).db?.name ?? ""),
-                      user: String((loaded.staging as Remote).db?.user ?? ""),
-                      password: String((loaded.staging as Remote).db?.password ?? ""),
-                      prefix: String((loaded.staging as Remote).db?.prefix ?? ""),
-                    }
-                  : undefined,
+              db: undefined,
             },
             production: {
               host: String((loaded.production as Remote)?.host ?? ""),
               user: String((loaded.production as Remote)?.user ?? ""),
               path: String((loaded.production as Remote)?.path ?? ""),
               url: String((loaded.production as Remote)?.url ?? ""),
-              db:
-                (loaded.production as Remote)?.db &&
-                typeof (loaded.production as Remote).db === "object"
-                  ? {
-                      host: String((loaded.production as Remote).db?.host ?? ""),
-                      name: String((loaded.production as Remote).db?.name ?? ""),
-                      user: String((loaded.production as Remote).db?.user ?? ""),
-                      password: String((loaded.production as Remote).db?.password ?? ""),
-                      prefix: String((loaded.production as Remote).db?.prefix ?? ""),
-                    }
-                  : undefined,
+              db: undefined,
             },
             simply:
               loaded.simply &&
@@ -267,6 +233,22 @@ export function Wizard() {
               ? `Loaded wp-dev.config.json and adjusted local.url in the form to this browser (${aligned.value}). Click Save to persist this port change.`
               : `Loaded existing wp-dev.config.json (project “${String(loaded.project)}”). Edit any step and save to update.`,
           });
+          const secrets = await loadStagingDbSecrets();
+          if (secrets.ok) {
+            setData((d) => ({
+              ...d,
+              staging: {
+                ...d.staging,
+                db: {
+                  host: secrets.host,
+                  name: secrets.name,
+                  user: secrets.user,
+                  password: secrets.password,
+                  prefix: secrets.prefix,
+                },
+              },
+            }));
+          }
         } else {
           const raw = localStorage.getItem(DRAFT_KEY);
           if (raw) {
@@ -440,6 +422,32 @@ export function Wizard() {
             "\n\nSaved WPDEV_SIMPLY_API_KEY to docker/.env. Run `wp-dev down && wp-dev up` so the stack picks it up, then `wp-dev simply test`.";
           logAdmin("info", "Wizard: Simply API key written to docker/.env");
           await refreshSimplyStatus();
+        }
+      }
+      if (
+        hasStagingServer &&
+        data.staging.db?.host?.trim() &&
+        data.staging.db?.name?.trim() &&
+        data.staging.db?.user?.trim() &&
+        data.staging.db?.password?.trim()
+      ) {
+        const dbSecretRes = await saveDockerEnvSecrets(
+          {
+            WPDEV_STAGING_DB_HOST: data.staging.db.host.trim(),
+            WPDEV_STAGING_DB_NAME: data.staging.db.name.trim(),
+            WPDEV_STAGING_DB_USER: data.staging.db.user.trim(),
+            WPDEV_STAGING_DB_PASSWORD: data.staging.db.password,
+            ...(data.staging.db.prefix?.trim()
+              ? { WPDEV_STAGING_DB_PREFIX: data.staging.db.prefix.trim() }
+              : {}),
+          },
+          saveToken.trim() || undefined,
+        );
+        if (!dbSecretRes.ok) {
+          extra += `\n\nStaging DB secrets were NOT saved to docker/.env: ${"error" in dbSecretRes ? dbSecretRes.error : "unknown"}.`;
+        } else {
+          extra +=
+            "\n\nSaved staging DB credentials to docker/.env (gitignored local file).";
         }
       }
       localStorage.removeItem(DRAFT_KEY);
