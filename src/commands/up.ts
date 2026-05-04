@@ -3,6 +3,7 @@ import { writeWpDevConfig } from "../config/load.js";
 import { compose } from "../services/docker-compose.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
 import { logInfo } from "../utils/logger.js";
+import { getPublishedLocalAccess } from "../utils/published-local-urls.js";
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import net from "node:net";
@@ -85,20 +86,17 @@ function maybeUpdateLocalUrlPort(
   }
 }
 
-function printAccessUrls(loaded: LoadedConfig): void {
-  const localUrl = loaded.config.local.url;
-  let adminUrl = "";
-  try {
-    const u = new URL(localUrl);
-    u.pathname = "/admin/";
-    u.search = "";
-    u.hash = "";
-    adminUrl = u.toString();
-  } catch {
-    adminUrl = "http://localhost:8888/admin/";
-  }
-  console.error(`\nLocal WordPress: ${localUrl}`);
-  console.error(`Browser admin:   ${adminUrl}\n`);
+function printPublishedAccessUrls(loaded: LoadedConfig): void {
+  const { site, admin, warnings } = getPublishedLocalAccess(loaded);
+  for (const w of warnings) console.error(w);
+  console.error(`\nLocal WordPress: ${site}`);
+  console.error(`Browser admin:   ${admin}`);
+  console.error(
+    `\nTo stop this stack and free the published port: npm run wp-dev -- down`,
+  );
+  console.error(
+    `(Each clone has its own Compose project; WP_PORT is in docker/.env.)\n`,
+  );
 }
 
 export async function cmdUp(loaded: LoadedConfig): Promise<void> {
@@ -126,5 +124,5 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
     await compose(loaded.configDir, loaded.config, ["up", "-d"], { stdio: "pipe" });
   }
 
-  printAccessUrls(loaded);
+  printPublishedAccessUrls(loaded);
 }

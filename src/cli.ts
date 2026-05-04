@@ -133,9 +133,18 @@ async function main(): Promise<void> {
 
   program
     .command("down")
-    .description("Stop local WordPress (docker compose down)")
-    .action(async () => {
-      await runWithConfig("down", cmdDown);
+    .description(
+      "Stop local WordPress (docker compose down) — frees the published WP_PORT for this clone",
+    )
+    .option(
+      "--remove-orphans",
+      "Remove containers for this Compose project not defined in the current compose file",
+    )
+    .action(async (opts: { removeOrphans?: boolean }) => {
+      const ro = Boolean(opts.removeOrphans);
+      await runWithConfig(`down${ro ? " --remove-orphans" : ""}`, (loaded) =>
+        cmdDown(loaded, { removeOrphans: ro }),
+      );
     });
 
   program

@@ -145,7 +145,7 @@ npm ci --prefix docs/admin && npm run build:wp --prefix docs/admin   # admin, if
 | **`npm run check`** | Docker + Compose available |
 | **`npm run setup`** | check → install → build (CLI + admin) |
 | **`wp-dev init`** | Interactive **`wp-dev.config.json`** |
-| **`wp-dev up`** / **`down`** | Local stack |
+| **`wp-dev up`** / **`down`** | Local stack; **`down`** frees **`WP_PORT`** for this clone. Optional **`down --remove-orphans`** cleans leftover containers. After **`up`**, the CLI prints **browser URLs** using **`docker/.env` `WP_PORT`** when it differs from **`local.url`**. |
 | **`wp-dev fix-permissions`** | Fix **`wordpress/`** ownership for rsync (host vs `www-data`) |
 | **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`** = pull dry-run only |
 | **`wp-dev pull`** / **`push`** | Sync; **`--dry-run`**, **`pull --no-backup-local`** |
@@ -187,7 +187,7 @@ npm ci --prefix docs/admin && npm run build:wp --prefix docs/admin   # admin, if
 
 ## Simply.com staging DNS (API)
 
-With **`simply.account`** (for example **`S123456`** or **`UE84785`**) + **`WPDEV_SIMPLY_API_KEY`**, **`wp-dev`** can read the Simply product, suggest an IPv4, and **`POST`** an **A** record for **`staging.<apex>`** (default label **`staging`**) when there is no conflict. **`--keep-existing-dns`** / **`--staging-label`** adjust behavior. It does **not** create hosting, SSL, or WordPress on the server — you still use **`pull`** / **`push`** for files and DB.
+With **`simply.account`** (for example **`S123456`** or **`UE12345`**) + **`WPDEV_SIMPLY_API_KEY`**, **`wp-dev`** can read the Simply product, suggest an IPv4, and **`POST`** an **A** record for **`staging.<apex>`** (default label **`staging`**) when there is no conflict. **`--keep-existing-dns`** / **`--staging-label`** adjust behavior. It does **not** create hosting, SSL, or WordPress on the server — you still use **`pull`** / **`push`** for files and DB.
 
 ---
 

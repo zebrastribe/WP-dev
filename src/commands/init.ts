@@ -177,7 +177,7 @@ export async function cmdInit(): Promise<void> {
         "",
         "wp-dev init — writes wp-dev.config.json (no pull/push).",
         "SSH: optional key file path only; empty = OpenSSH defaults.",
-        "Only local.url is your Docker site in the browser (e.g. http://localhost:8888). Staging / production are remote pull/push targets — not a second local URL.",
+        "Only local.url is your Docker site in the browser (must match WP_PORT in docker/.env when using localhost). Staging / production are remote pull/push targets — not a second local URL.",
         "Optional: with Simply.com API credentials, init can add a staging DNS A record and fill staging hints — not full hosting setup.",
         "",
       ].join("\n"),
@@ -302,7 +302,7 @@ export async function cmdInit(): Promise<void> {
         .toUpperCase();
       if (!/^(S|UE)\d+$/.test(acc)) {
         throw new Error(
-          `Invalid Simply account "${acc}". Use your Control Panel account (form S123456 or UE84785).`,
+          `Invalid Simply account "${acc}". Use your Control Panel account (form S123456 or UE12345).`,
         );
       }
       draft = { ...draft, simply: { account: acc } };
