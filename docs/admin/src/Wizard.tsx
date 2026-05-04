@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  checkStagingDbConnection,
   checkStagingHttps,
   loadSimplyStatus,
   loadWpDevConfig,
@@ -170,6 +171,7 @@ export function Wizard() {
   const [simplySetupBusy, setSimplySetupBusy] = useState(false);
   const [sslCheckBusy, setSslCheckBusy] = useState(false);
   const [readinessBusy, setReadinessBusy] = useState(false);
+  const [dbCheckBusy, setDbCheckBusy] = useState(false);
   const [alert, setAlert] = useState<WizardAlert | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -663,7 +665,8 @@ export function Wizard() {
                   Required for push staging: staging.db settings
                 </summary>
                 <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">
-                  Use a dedicated staging DB (own name/user/password), not the production DB.
+                  Use a dedicated staging DB (own name/user/password), not the production DB. Prefix is optional:
+                  push staging will reuse your local prefix when possible, otherwise default to <code>wp_</code>.
                 </p>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   {(["host", "name", "user", "password", "prefix"] as const).map((key) => (
@@ -683,6 +686,42 @@ export function Wizard() {
                       />
                     </label>
                   ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={dbCheckBusy}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                    onClick={async () => {
+                      setDbCheckBusy(true);
+                      try {
+                        const r = await checkStagingDbConnection({
+                          host: data.staging.db?.host?.trim() || undefined,
+                          name: data.staging.db?.name?.trim() || undefined,
+                          user: data.staging.db?.user?.trim() || undefined,
+                          password: data.staging.db?.password || undefined,
+                          port: 3306,
+                        });
+                        if (r.ok) {
+                          setAlert({
+                            tone: "success",
+                            text:
+                              `Staging DB connection OK (${r.database ?? "database"}).` +
+                              (r.server ? `\nServer: ${r.server}` : ""),
+                          });
+                        } else {
+                          setAlert({
+                            tone: "error",
+                            text: `Staging DB check failed: ${r.error}${r.detail ? `\n${r.detail}` : ""}`,
+                          });
+                        }
+                      } finally {
+                        setDbCheckBusy(false);
+                      }
+                    }}
+                  >
+                    {dbCheckBusy ? "Checking DB..." : "Check staging DB connection"}
+                  </button>
                 </div>
               </details>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40">

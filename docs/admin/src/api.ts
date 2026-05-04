@@ -10,7 +10,8 @@ export function apiPhpUrl(
     | "simply-status"
     | "simply-test"
     | "simply-setup-staging"
-    | "staging-https-check",
+    | "staging-https-check"
+    | "staging-db-check",
 ): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return `${origin}/admin/api.php?action=${action}`;
@@ -302,6 +303,47 @@ export async function checkStagingHttps(payload?: {
             (o.http as Record<string, unknown> | undefined)?.redirectsToHttps,
           ),
         },
+      };
+    }
+    return {
+      ok: false,
+      error: String(o.error ?? `HTTP ${res.status}`),
+      detail: typeof o.detail === "string" ? o.detail : undefined,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export type StagingDbCheckResponse =
+  | { ok: true; message: string; server?: string; database?: string }
+  | { ok: false; error: string; detail?: string };
+
+export async function checkStagingDbConnection(payload: {
+  host?: string;
+  port?: number;
+  name?: string;
+  user?: string;
+  password?: string;
+}): Promise<StagingDbCheckResponse> {
+  try {
+    const res = await fetch(apiPhpUrl("staging-db-check"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(payload ?? {}),
+    });
+    const data = (await res.json()) as unknown;
+    if (!data || typeof data !== "object") {
+      return { ok: false, error: "invalid_response" };
+    }
+    const o = data as Record<string, unknown>;
+    if (res.ok && o.ok === true) {
+      return {
+        ok: true,
+        message: String(o.message ?? "Connection OK"),
+        server: typeof o.server === "string" ? o.server : undefined,
+        database: typeof o.database === "string" ? o.database : undefined,
       };
     }
     return {
