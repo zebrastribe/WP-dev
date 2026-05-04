@@ -136,6 +136,16 @@ npm ci --prefix docs/admin && npm run build:wp --prefix docs/admin   # admin, if
 
 **`npm run setup`** is a safe full refresh after **`git pull`**. Ignored data (**`wp-dev.config.json`**, **`docker/.env`**, **`wordpress/`**, log files) stays on disk.
 
+Quick full refresh (recommended when you use the browser admin and local stack):
+
+```bash
+git pull
+npm run build
+npm run admin:build:wp
+npm run wp-dev -- down
+npm run wp-dev -- up
+```
+
 ---
 
 ## Common commands
