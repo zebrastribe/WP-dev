@@ -529,6 +529,13 @@ export function Wizard() {
                 {" "}
                 {simplyKeyPresent === false ? "Save API key below, then verify." : "You can verify API access now."}
               </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                <strong>Important:</strong> wp-dev can automate Simply DNS + wp-dev config updates, but Simply's
+                public API does not currently expose the same subdomain folder mapping flow as the Control Panel.
+                After DNS setup, create/verify the subdomain in Simply Subdomains and set the folder (for example
+                <code className="rounded bg-amber-100 px-1 dark:bg-amber-900"> /staging </code>), then issue/verify
+                SSL for that hostname.
+              </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
