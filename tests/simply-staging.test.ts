@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  dnsNameMatchesFqdn,
   findSimplyProductForApex,
   isPlausibleIpv4,
   pickStagingTargetIpv4,
@@ -80,5 +81,16 @@ describe("pickStagingTargetIpv4", () => {
         apex,
       ),
     ).toBe("203.0.113.9");
+  });
+});
+
+describe("dnsNameMatchesFqdn", () => {
+  it("matches full fqdn and short label forms", () => {
+    expect(dnsNameMatchesFqdn("staging.stri.be", "staging.stri.be", "stri.be")).toBe(true);
+    expect(dnsNameMatchesFqdn("staging", "staging.stri.be", "stri.be")).toBe(true);
+  });
+
+  it("does not match other names", () => {
+    expect(dnsNameMatchesFqdn("dev", "staging.stri.be", "stri.be")).toBe(false);
   });
 });
