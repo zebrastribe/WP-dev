@@ -3,7 +3,13 @@ import { validateWpDevConfigJson } from "./validateConfig";
 
 /** Same-origin /admin/api.php (Docker) or dev proxy to WP port. */
 export function apiPhpUrl(
-  action: "load" | "save" | "save-docker-env" | "simply-status" | "simply-test",
+  action:
+    | "load"
+    | "save"
+    | "save-docker-env"
+    | "simply-status"
+    | "simply-test"
+    | "simply-setup-staging",
 ): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return `${origin}/admin/api.php?action=${action}`;
@@ -206,6 +212,49 @@ export async function verifySimplyApi(
     };
     logAdmin("warn", "verifySimplyApi: failed", `${out.error} ${ms}ms`);
     return out;
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export type SimplySetupStagingResponse =
+  | { ok: true; lines: string[]; staging?: { host?: string; path?: string; url?: string; user?: string } }
+  | { ok: false; error: string; detail?: string };
+
+export async function setupSimplyStagingFromUi(payload: {
+  account?: string;
+  apiKey?: string;
+  apex?: string;
+  stagingLabel?: string;
+  keepExistingDns?: boolean;
+}): Promise<SimplySetupStagingResponse> {
+  try {
+    const res = await fetch(apiPhpUrl("simply-setup-staging"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(payload),
+    });
+    const data = (await res.json()) as unknown;
+    if (!data || typeof data !== "object") {
+      return { ok: false, error: "invalid_response" };
+    }
+    const o = data as Record<string, unknown>;
+    if (res.ok && o.ok === true) {
+      return {
+        ok: true,
+        lines: Array.isArray(o.lines) ? o.lines.map((x) => String(x)) : [],
+        staging:
+          o.staging && typeof o.staging === "object"
+            ? (o.staging as { host?: string; path?: string; url?: string; user?: string })
+            : undefined,
+      };
+    }
+    return {
+      ok: false,
+      error: String(o.error ?? `HTTP ${res.status}`),
+      detail: typeof o.detail === "string" ? o.detail : undefined,
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }
