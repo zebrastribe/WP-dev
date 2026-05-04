@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  checkStagingHttps,
   loadSimplyStatus,
   loadWpDevConfig,
   saveDockerEnvSecrets,
@@ -117,6 +118,7 @@ export function Wizard() {
   const [simplyKeyPresent, setSimplyKeyPresent] = useState<boolean | null>(null);
   const [simplyTestBusy, setSimplyTestBusy] = useState(false);
   const [simplySetupBusy, setSimplySetupBusy] = useState(false);
+  const [sslCheckBusy, setSslCheckBusy] = useState(false);
   const [alert, setAlert] = useState<WizardAlert | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -610,7 +612,49 @@ export function Wizard() {
                 >
                   {simplySetupBusy ? "Creating staging..." : "Create staging DNS + config now"}
                 </button>
+                <button
+                  type="button"
+                  disabled={sslCheckBusy}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                  onClick={async () => {
+                    setSslCheckBusy(true);
+                    try {
+                      const r = await checkStagingHttps({ url: data.staging.url.trim() || undefined });
+                      if (!r.ok) {
+                        setAlert({
+                          tone: "error",
+                          text: `Staging HTTPS check failed: ${r.error}${r.detail ? `\n${r.detail}` : ""}`,
+                        });
+                        return;
+                      }
+                      const lines = [
+                        `HTTPS ${r.url}: ${r.https.ok ? "OK" : "NOT OK"} (HTTP ${r.https.status})`,
+                        `HTTP -> HTTPS redirect: ${r.http.redirectsToHttps ? "YES" : "NO"} (HTTP ${r.http.status})`,
+                      ];
+                      if (!r.http.redirectsToHttps) {
+                        lines.push("Tip: configure redirect from http to https in hosting settings.");
+                      }
+                      if (!r.https.ok) {
+                        lines.push(
+                          "Tip: ensure SSL cert is issued for staging hostname and DNS has propagated.",
+                        );
+                      }
+                      setAlert({
+                        tone: r.https.ok ? "success" : "info",
+                        text: lines.join("\n"),
+                      });
+                    } finally {
+                      setSslCheckBusy(false);
+                    }
+                  }}
+                >
+                  {sslCheckBusy ? "Checking HTTPS..." : "Verify staging HTTPS"}
+                </button>
               </div>
+              <p className="text-xs text-slate-500">
+                SSL checklist: DNS for staging hostname resolves, hosting/vhost serves the hostname, cert is issued,
+                and HTTP redirects to HTTPS.
+              </p>
             </div>
           )}
         </div>

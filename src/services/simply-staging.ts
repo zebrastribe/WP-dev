@@ -1,6 +1,5 @@
 import type { WpDevConfig } from "../config/schema.js";
 import {
-  domainPathSlug,
   parseMainDomain,
 } from "../utils/domain-defaults.js";
 import { normalizeSiteUrl } from "../utils/remote-config-helpers.js";
@@ -220,11 +219,13 @@ export async function applySimplyStagingDnsToDraft(
       draft.staging.host = sshHost;
       lines.push(`Config: staging SSH host set to ${sshHost} (from Simply product).`);
     }
-    const slugPath = `/var/www/${domainPathSlug(apex)}/public_html`;
-    if (draft.staging.path === STAGING_PLACEHOLDER_SSH_PATH) {
-      draft.staging.path = slugPath;
-      lines.push(`Config: staging path guess ${slugPath} — verify in Simply panel (Shared hosting).`);
-    }
+  }
+  if (draft.staging.path === STAGING_PLACEHOLDER_SSH_PATH) {
+    const subdomainPath = `/${label}`;
+    draft.staging.path = subdomainPath;
+    lines.push(
+      `Config: staging path set to ${subdomainPath} (Simply subdomain folder; verify in Simply panel).`,
+    );
   }
 
   draft.staging.url = normalizeSiteUrl(`https://${stagingFqdn}`, "https");
