@@ -31,6 +31,18 @@ function normalizeDnsName(name: string): string {
   return name.trim().toLowerCase().replace(/\.$/, "");
 }
 
+export function dnsNameMatchesFqdn(name: string, fqdn: string, apex: string): boolean {
+  const n = normalizeDnsName(name);
+  const f = normalizeDnsName(fqdn);
+  const a = normalizeDnsName(apex);
+  if (n === f) return true;
+  // Some providers return relative labels (e.g. "staging" instead of "staging.example.com").
+  if (n !== "" && !n.includes(".")) {
+    return `${n}.${a}` === f;
+  }
+  return false;
+}
+
 /** IPv4 dotted quad, each octet 0–255. */
 export function isPlausibleIpv4(s: string): boolean {
   if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(s.trim())) return false;
@@ -81,13 +93,12 @@ export function pickStagingTargetIpv4(
   return byName(apexNorm)?.data?.trim() || byName(wantWww)?.data?.trim();
 }
 
-function findRecordAtName(records: DnsRecordRow[], fqdn: string): DnsRecordRow | undefined {
-  const t = normalizeDnsName(fqdn);
-  return records.find((r) => normalizeDnsName(r.name || "") === t);
+function findRecordAtName(records: DnsRecordRow[], fqdn: string, apex: string): DnsRecordRow | undefined {
+  return records.find((r) => dnsNameMatchesFqdn(r.name || "", fqdn, apex));
 }
 
-function findStagingARecord(records: DnsRecordRow[], stagingFqdn: string): DnsRecordRow | undefined {
-  const r = findRecordAtName(records, stagingFqdn);
+function findStagingARecord(records: DnsRecordRow[], stagingFqdn: string, apex: string): DnsRecordRow | undefined {
+  const r = findRecordAtName(records, stagingFqdn, apex);
   if (!r || (r.type || "").toUpperCase() !== "A") return undefined;
   return r;
 }
@@ -178,8 +189,8 @@ export async function applySimplyStagingDnsToDraft(
     );
   }
 
-  const atName = findRecordAtName(records, stagingFqdn);
-  const existingA = findStagingARecord(records, stagingFqdn);
+  const atName = findRecordAtName(records, stagingFqdn, apex);
+  const existingA = findStagingARecord(records, stagingFqdn, apex);
 
   if (existingA?.data?.trim() === ip) {
     lines.push(
@@ -239,6 +250,9 @@ export async function applySimplyStagingDnsToDraft(
 
   lines.push(
     "DNS propagation can take minutes. Install WordPress (or vhost) for staging on the host if it is not already there — wp-dev only manages DNS + config hints.",
+  );
+  lines.push(
+    "Simply subdomain folder mapping is separate from DNS. Ensure the subdomain exists in Simply Subdomains and points to the same folder as staging.path.",
   );
 
   return lines;

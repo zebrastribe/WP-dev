@@ -169,6 +169,21 @@ function wpdev_normalize_dns_name(string $s): string
     return rtrim(strtolower(trim($s)), '.');
 }
 
+function wpdev_dns_name_matches_fqdn(string $name, string $fqdn, string $apex): bool
+{
+    $n = wpdev_normalize_dns_name($name);
+    $f = wpdev_normalize_dns_name($fqdn);
+    $a = wpdev_normalize_dns_name($apex);
+    if ($n === $f) {
+        return true;
+    }
+    // Some APIs return short labels (e.g. "staging") instead of full FQDN.
+    if ($n !== '' && strpos($n, '.') === false) {
+        return ($n . '.' . $a) === $f;
+    }
+    return false;
+}
+
 /**
  * @param array<string, string> $headers
  * @return array{status:int, body:string}
@@ -733,8 +748,8 @@ if ($method === 'POST' && $action === 'simply-setup-staging') {
         if (!is_array($r)) {
             continue;
         }
-        $name = wpdev_normalize_dns_name((string) ($r['name'] ?? ''));
-        if ($name !== wpdev_normalize_dns_name($stagingFqdn)) {
+        $nameRaw = (string) ($r['name'] ?? '');
+        if (!wpdev_dns_name_matches_fqdn($nameRaw, $stagingFqdn, $apex)) {
             continue;
         }
         $existingAtName = $r;
@@ -794,6 +809,7 @@ if ($method === 'POST' && $action === 'simply-setup-staging') {
     $staging['url'] = 'https://' . $stagingFqdn;
     $cfg['staging'] = $staging;
     $lines[] = 'Config: staging.url set to https://' . $stagingFqdn;
+    $lines[] = 'Note: Simply subdomain folder mapping is separate from DNS. Ensure subdomain "' . $stagingFqdn . '" exists in Subdomains and points to ' . ($staging['path'] ?? ('/' . $label)) . '.';
 
     $encoded = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     if (!is_string($encoded) || file_put_contents($configPath, $encoded, LOCK_EX) === false) {
