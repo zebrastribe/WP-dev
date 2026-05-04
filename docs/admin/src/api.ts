@@ -177,12 +177,16 @@ export type SimplyTestResponse =
   | { ok: true; status: number }
   | { ok: false; error: string; detail?: string; status?: number };
 
-export async function verifySimplyApi(): Promise<SimplyTestResponse> {
+export async function verifySimplyApi(
+  payload?: { account?: string; apiKey?: string },
+): Promise<SimplyTestResponse> {
   const t0 = performance.now();
   try {
     const res = await fetch(apiPhpUrl("simply-test"), {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
+      body: JSON.stringify(payload ?? {}),
     });
     const ms = Math.round(performance.now() - t0);
     const data = (await res.json()) as unknown;

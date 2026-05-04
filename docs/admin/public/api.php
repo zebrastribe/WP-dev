@@ -67,7 +67,11 @@ function wpdev_dotenv_value(string $path, string $key): ?string
         return null;
     }
     $raw = (string) file_get_contents($path);
-    $pat = '/^' . preg_quote($key, '/') . '=(.*)$/m';
+    // Accept common dotenv variants:
+    //   KEY=value
+    //   export KEY=value
+    // with optional leading/trailing whitespace.
+    $pat = '/^\s*(?:export\s+)?' . preg_quote($key, '/') . '\s*=\s*(.*)\s*$/m';
     if (preg_match($pat, $raw, $m) !== 1) {
         return null;
     }
@@ -168,35 +172,62 @@ if ($method === 'GET' && $action === 'simply-status') {
 }
 
 if ($method === 'POST' && $action === 'simply-test') {
-    $key = wpdev_simply_api_key();
+    $body = file_get_contents('php://input');
+    $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
+    $input = is_array($in) ? $in : [];
+
+    $key = null;
+    $inKey = $input['apiKey'] ?? null;
+    if (is_string($inKey) && trim($inKey) !== '') {
+        $key = trim($inKey);
+    } else {
+        $key = wpdev_simply_api_key();
+    }
+
+    $account = null;
+    $inAccount = $input['account'] ?? null;
+    if (is_string($inAccount) && trim($inAccount) !== '') {
+        $account = trim($inAccount);
+    } else {
+        if (is_file($configPath) && is_readable($configPath)) {
+            $cfgRaw = file_get_contents($configPath);
+            $cfg = is_string($cfgRaw) && $cfgRaw !== '' ? json_decode($cfgRaw, true) : null;
+            if (is_array($cfg) && isset($cfg['simply']) && is_array($cfg['simply'])) {
+                $acc = $cfg['simply']['account'] ?? null;
+                if (is_string($acc) && trim($acc) !== '') {
+                    $account = trim($acc);
+                }
+            }
+        }
+    }
+
     if ($key === null) {
         http_response_code(400);
-        echo json_encode(['ok' => false, 'error' => 'no_api_key'], JSON_UNESCAPED_SLASHES);
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => 'no_api_key',
+                'detail' => 'No key provided and WPDEV_SIMPLY_API_KEY not found in PHP env or /wp-dev-repo/docker/.env',
+            ],
+            JSON_UNESCAPED_SLASHES
+        );
         wpdev_admin_api_log('POST simply-test 400 no_api_key');
         exit;
     }
-    if (!is_file($configPath) || !is_readable($configPath)) {
+    if ($account === null) {
         http_response_code(400);
-        echo json_encode(['ok' => false, 'error' => 'missing_config'], JSON_UNESCAPED_SLASHES);
-        wpdev_admin_api_log('POST simply-test 400 missing_config');
-        exit;
-    }
-    $cfgRaw = file_get_contents($configPath);
-    $cfg = is_string($cfgRaw) && $cfgRaw !== '' ? json_decode($cfgRaw, true) : null;
-    if (!is_array($cfg) || !isset($cfg['simply']) || !is_array($cfg['simply'])) {
-        http_response_code(400);
-        echo json_encode(['ok' => false, 'error' => 'missing_simply_account'], JSON_UNESCAPED_SLASHES);
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => 'missing_simply_account',
+                'detail' => 'No account provided and simply.account was not found in wp-dev.config.json',
+            ],
+            JSON_UNESCAPED_SLASHES
+        );
         wpdev_admin_api_log('POST simply-test 400 missing_simply_account');
         exit;
     }
-    $account = $cfg['simply']['account'] ?? null;
-    if (!is_string($account) || trim($account) === '') {
-        http_response_code(400);
-        echo json_encode(['ok' => false, 'error' => 'missing_simply_account'], JSON_UNESCAPED_SLASHES);
-        wpdev_admin_api_log('POST simply-test 400 empty_simply_account');
-        exit;
-    }
-    $account = trim($account);
+
     $auth = base64_encode($account . ':' . $key);
     $ctx = stream_context_create([
         'http' => [

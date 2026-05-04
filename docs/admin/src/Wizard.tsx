@@ -533,7 +533,10 @@ export function Wizard() {
                   onClick={async () => {
                     setSimplyTestBusy(true);
                     try {
-                      const r = await verifySimplyApi();
+                      const r = await verifySimplyApi({
+                        account: data.simply?.account?.trim() || undefined,
+                        apiKey: simplyApiKey.trim() || undefined,
+                      });
                       if (r.ok) {
                         setAlert({
                           tone: "success",
