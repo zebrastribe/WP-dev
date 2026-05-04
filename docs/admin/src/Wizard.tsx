@@ -14,6 +14,7 @@ import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 const STEP_LABELS = ["Welcome", "Production", "Staging", "Simply", "Save"] as const;
 
 type WizardAlert = { tone: "info" | "success" | "error"; text: string };
+type ChecklistStatus = "done" | "warn" | "todo";
 
 const PULL_TERMINAL_HINT = [
   "The wizard cannot show pull progress — pull runs in your terminal, not in the browser.",
@@ -44,6 +45,13 @@ type Remote = {
   user: string;
   path: string;
   url: string;
+  db?: {
+    host: string;
+    name: string;
+    user: string;
+    password: string;
+    prefix?: string;
+  };
 };
 
 export type WizardData = {
@@ -82,11 +90,33 @@ function defaults(): WizardData {
 }
 
 function toJson(data: WizardData): Record<string, unknown> {
+  const normalizeRemote = (r: Remote): Remote => {
+    const db = r.db;
+    if (!db) return { ...r };
+    const host = db.host.trim();
+    const name = db.name.trim();
+    const user = db.user.trim();
+    const password = db.password.trim();
+    const prefix = (db.prefix ?? "").trim();
+    if (!host || !name || !user || !password) {
+      return { ...r, db: undefined };
+    }
+    return {
+      ...r,
+      db: {
+        host,
+        name,
+        user,
+        password,
+        ...(prefix ? { prefix } : {}),
+      },
+    };
+  };
   const o: Record<string, unknown> = {
     project: data.project.trim(),
     local: { ...data.local },
-    staging: { ...data.staging },
-    production: { ...data.production },
+    staging: normalizeRemote(data.staging),
+    production: normalizeRemote(data.production),
   };
   if (data.simply?.account?.trim()) {
     o.simply = { account: data.simply.account.trim().toUpperCase() };
@@ -95,6 +125,18 @@ function toJson(data: WizardData): Record<string, unknown> {
 }
 
 const DRAFT_KEY = "wpdev-wizard-draft";
+
+function checklistTone(status: ChecklistStatus): string {
+  if (status === "done") return "text-emerald-700 dark:text-emerald-300";
+  if (status === "warn") return "text-amber-700 dark:text-amber-300";
+  return "text-slate-600 dark:text-slate-300";
+}
+
+function checklistBadge(status: ChecklistStatus): string {
+  if (status === "done") return "OK";
+  if (status === "warn") return "Check";
+  return "TODO";
+}
 
 function alignLocalUrlToCurrentBrowser(url: string): { value: string; changed: boolean } {
   try {
@@ -127,6 +169,7 @@ export function Wizard() {
   const [simplyTestBusy, setSimplyTestBusy] = useState(false);
   const [simplySetupBusy, setSimplySetupBusy] = useState(false);
   const [sslCheckBusy, setSslCheckBusy] = useState(false);
+  const [readinessBusy, setReadinessBusy] = useState(false);
   const [alert, setAlert] = useState<WizardAlert | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -177,12 +220,34 @@ export function Wizard() {
               user: String((loaded.staging as Remote)?.user ?? "deploy"),
               path: String((loaded.staging as Remote)?.path ?? STAGING_PLACEHOLDER.path),
               url: String((loaded.staging as Remote)?.url ?? STAGING_PLACEHOLDER.url),
+              db:
+                (loaded.staging as Remote)?.db &&
+                typeof (loaded.staging as Remote).db === "object"
+                  ? {
+                      host: String((loaded.staging as Remote).db?.host ?? ""),
+                      name: String((loaded.staging as Remote).db?.name ?? ""),
+                      user: String((loaded.staging as Remote).db?.user ?? ""),
+                      password: String((loaded.staging as Remote).db?.password ?? ""),
+                      prefix: String((loaded.staging as Remote).db?.prefix ?? ""),
+                    }
+                  : undefined,
             },
             production: {
               host: String((loaded.production as Remote)?.host ?? ""),
               user: String((loaded.production as Remote)?.user ?? ""),
               path: String((loaded.production as Remote)?.path ?? ""),
               url: String((loaded.production as Remote)?.url ?? ""),
+              db:
+                (loaded.production as Remote)?.db &&
+                typeof (loaded.production as Remote).db === "object"
+                  ? {
+                      host: String((loaded.production as Remote).db?.host ?? ""),
+                      name: String((loaded.production as Remote).db?.name ?? ""),
+                      user: String((loaded.production as Remote).db?.user ?? ""),
+                      password: String((loaded.production as Remote).db?.password ?? ""),
+                      prefix: String((loaded.production as Remote).db?.prefix ?? ""),
+                    }
+                  : undefined,
             },
             simply:
               loaded.simply &&
@@ -270,8 +335,32 @@ export function Wizard() {
     setData((d) => ({ ...d, local: { ...d.local, [key]: val } }));
   };
 
-  const patchRemote = (env: "staging" | "production", key: keyof Remote, val: string) => {
+  const patchRemote = (
+    env: "staging" | "production",
+    key: "host" | "user" | "path" | "url",
+    val: string,
+  ) => {
     setData((d) => ({ ...d, [env]: { ...d[env], [key]: val } }));
+  };
+  const patchRemoteDb = (
+    env: "staging" | "production",
+    key: "host" | "name" | "user" | "password" | "prefix",
+    val: string,
+  ) => {
+    setData((d) => ({
+      ...d,
+      [env]: {
+        ...d[env],
+        db: {
+          host: d[env].db?.host ?? "",
+          name: d[env].db?.name ?? "",
+          user: d[env].db?.user ?? "",
+          password: d[env].db?.password ?? "",
+          prefix: d[env].db?.prefix ?? "",
+          [key]: val,
+        },
+      },
+    }));
   };
 
   const copyCommand = async (cmd: string, kind: "plain" | "pull" | "push" = "plain") => {
@@ -370,6 +459,68 @@ export function Wizard() {
   const input =
     "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
 
+  const stagingDb = data.staging.db;
+  const productionDb = data.production.db;
+  const checklist: { status: ChecklistStatus; label: string; detail: string }[] = [
+    {
+      status: hasStagingServer ? "done" : ("todo" as ChecklistStatus),
+      label: "Real staging server enabled",
+      detail: hasStagingServer ? "Using real staging host/path/url." : "Enable real staging server first.",
+    },
+    {
+      status:
+        data.staging.host.trim() && data.staging.user.trim() && data.staging.path.trim() && data.staging.url.trim()
+          ? ("done" as ChecklistStatus)
+          : ("todo" as ChecklistStatus),
+      label: "Staging SSH + URL configured",
+      detail: "Need staging.host, staging.user, staging.path, staging.url.",
+    },
+    {
+      status:
+        stagingDb?.host?.trim() &&
+        stagingDb?.name?.trim() &&
+        stagingDb?.user?.trim() &&
+        stagingDb?.password?.trim()
+          ? ("done" as ChecklistStatus)
+          : ("todo" as ChecklistStatus),
+      label: "Dedicated staging DB configured",
+      detail: "Need staging.db.host/name/user/password for one-command push bootstrap.",
+    },
+    {
+      status:
+        stagingDb?.host?.trim() &&
+        stagingDb?.name?.trim() &&
+        productionDb?.host?.trim() &&
+        productionDb?.name?.trim() &&
+        stagingDb.host.trim() === productionDb.host.trim() &&
+        stagingDb.name.trim() === productionDb.name.trim()
+          ? ("warn" as ChecklistStatus)
+          : ("done" as ChecklistStatus),
+      label: "Staging DB is different from production DB",
+      detail:
+        "Using same DB host+name as production is unsafe. Staging should use its own database.",
+    },
+    {
+      status:
+        data.staging.path.trim().startsWith("/") &&
+        !data.staging.path.trim().includes("/public_html")
+          ? ("warn" as ChecklistStatus)
+          : ("done" as ChecklistStatus),
+      label: "Staging path format looks compatible",
+      detail:
+        "On shared hosting, a relative path like `staging` often works better than `/staging`.",
+    },
+    {
+      status:
+        /^https:\/\//i.test(data.staging.url.trim()) && data.staging.url.includes(".")
+          ? ("done" as ChecklistStatus)
+          : ("todo" as ChecklistStatus),
+      label: "Staging URL is HTTPS",
+      detail: "Expected e.g. https://staging.example.com",
+    },
+  ];
+  const readinessBlocking = checklist.filter((x) => x.status !== "done");
+
   if (loading) {
     return (
       <p className="text-sm text-slate-600 dark:text-slate-400">
@@ -453,6 +604,30 @@ export function Wizard() {
               />
             </label>
           ))}
+          <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+            <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
+              Optional: production.db bootstrap settings
+            </summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {(["host", "name", "user", "password", "prefix"] as const).map((key) => (
+                <label key={key} className="block capitalize">
+                  <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                    production.db.{key}
+                  </span>
+                  <input
+                    className={input}
+                    type={key === "password" ? "password" : "text"}
+                    value={String(
+                      key === "prefix"
+                        ? (data.production.db?.prefix ?? "")
+                        : (data.production.db?.[key] ?? ""),
+                    )}
+                    onChange={(e) => patchRemoteDb("production", key, e.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          </details>
         </div>
       )}
 
@@ -483,6 +658,88 @@ export function Wizard() {
                   />
                 </label>
               ))}
+              <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
+                  Required for push staging: staging.db settings
+                </summary>
+                <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+                  Use a dedicated staging DB (own name/user/password), not the production DB.
+                </p>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {(["host", "name", "user", "password", "prefix"] as const).map((key) => (
+                    <label key={key} className="block capitalize">
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                        staging.db.{key}
+                      </span>
+                      <input
+                        className={input}
+                        type={key === "password" ? "password" : "text"}
+                        value={String(
+                          key === "prefix"
+                            ? (data.staging.db?.prefix ?? "")
+                            : (data.staging.db?.[key] ?? ""),
+                        )}
+                        onChange={(e) => patchRemoteDb("staging", key, e.target.value)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </details>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  Active Staging Checklist
+                </p>
+                <div className="space-y-2">
+                  {checklist.map((item) => (
+                    <div key={item.label} className="rounded border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={checklistTone(item.status)}>{item.label}</span>
+                        <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${checklistTone(item.status)}`}>
+                          {checklistBadge(item.status)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-slate-500 dark:text-slate-400">{item.detail}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 rounded border border-slate-200 bg-white p-2 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                  Recommended flow: save config, then run <code>npm run wp-dev -- push staging</code>, then run
+                  {" "}Verify staging HTTPS.
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={readinessBusy}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                    onClick={() => {
+                      setReadinessBusy(true);
+                      try {
+                        if (readinessBlocking.length === 0) {
+                          setAlert({
+                            tone: "success",
+                            text:
+                              "Staging readiness check passed.\n" +
+                              "You can run: npm run wp-dev -- push staging",
+                          });
+                          return;
+                        }
+                        const items = readinessBlocking.map((x) => `- ${x.label}: ${x.detail}`).join("\n");
+                        setAlert({
+                          tone: "error",
+                          text:
+                            "Staging readiness check failed. Fix these items first:\n" +
+                            items +
+                            "\n\nThen rerun readiness check and push staging.",
+                        });
+                      } finally {
+                        setReadinessBusy(false);
+                      }
+                    }}
+                  >
+                    {readinessBusy ? "Checking..." : "Run readiness check"}
+                  </button>
+                </div>
+              </div>
             </div>
           ) : (
             <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">

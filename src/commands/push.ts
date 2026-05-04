@@ -9,8 +9,10 @@ import { rsyncPush } from "../services/rsync.js";
 import {
   assertLocalWpInstalled,
   assertRemoteWpInstalled,
-  checkRemoteWpInstalled,
+  resolveRemoteWpPath,
   wpLocalDbExportToFile,
+  wpLocalGetTablePrefix,
+  wpRemoteBootstrapConfigFromRemoteDb,
   wpRemoteDbExport,
   wpRemoteDbImport,
   wpRemoteSearchReplace,
@@ -54,12 +56,29 @@ export async function cmdPush(
   }
 
   await assertLocalWpInstalled(configDir, config);
+  if (env === "staging") {
+    if (!remote.db) {
+      throw new Error(
+        "staging.db is required for push staging. Configure dedicated staging DB credentials (host/name/user/password) in wp-dev.config.json.",
+      );
+    }
+    const prodDb = config.production.db;
+    if (
+      prodDb &&
+      remote.db.host.trim() === prodDb.host.trim() &&
+      remote.db.name.trim() === prodDb.name.trim()
+    ) {
+      throw new Error(
+        "staging.db must be separate from production.db (different DB host/name) to avoid overwriting production data.",
+      );
+    }
+  }
 
   logInfo(`push ${env}: connect ssh ${remote.user}@${remote.host}`);
   const ssh = await connectSsh(remote);
   let prePushBackup = "";
   try {
-    const remoteWp = await checkRemoteWpInstalled(ssh, remote.path);
+    let remoteWp = await resolveRemoteWpPath(ssh, remote.path);
     const shouldBootstrapStaging = env === "staging" && !remoteWp.installed;
     if (!remoteWp.installed && !shouldBootstrapStaging) {
       await assertRemoteWpInstalled(ssh, remote.path);
@@ -67,13 +86,34 @@ export async function cmdPush(
     if (shouldBootstrapStaging) {
       logInfo(`push ${env}: remote WP not installed yet — bootstrap files only`);
       await rsyncPush(remote, localWpRoot, { dryRun: false });
-      console.error(
-        `Seeded files to ${env}, but remote WordPress is not installed at ${remote.path} yet.\n` +
-          `Next: open ${remote.url}/wp-admin/install.php (or finish host installer), then run:\n` +
-          `  npm run wp-dev -- push ${env}\n` +
-          `to sync database and run URL search-replace.`,
-      );
-      return;
+      if (!remote.db) {
+        console.error(
+          `Seeded files to ${env}, but remote WordPress is not installed at ${remote.path} yet.\n` +
+            `Add "${env}.db" settings in wp-dev.config.json so wp-dev can create remote wp-config.php automatically,\n` +
+            `or finish installer at ${remote.url}/wp-admin/install.php, then run:\n` +
+            `  npm run wp-dev -- push ${env}`,
+        );
+        return;
+      }
+      const localPrefix = await wpLocalGetTablePrefix(configDir, config);
+      logInfo(`push ${env}: bootstrap remote wp-config.php from ${env}.db settings`);
+      await wpRemoteBootstrapConfigFromRemoteDb(ssh, remote.path.replace(/^\/+/, ""), remote, localPrefix);
+      remoteWp = await resolveRemoteWpPath(ssh, remote.path);
+      if (remoteWp.installed) {
+        logInfo(
+          `push ${env}: remote WP became available after seed at ${remoteWp.path ?? remote.path}`,
+        );
+      } else {
+        console.error(
+          `Seeded files to ${env}, but remote WordPress is still not available at ${remote.path}.\n` +
+            `Verify ${env}.db credentials and remote path, then rerun push.`,
+        );
+        return;
+      }
+    }
+    const wpPath = remoteWp.path ?? remote.path;
+    if (wpPath !== remote.path) {
+      logInfo(`push ${env}: using remote wp path ${wpPath} (configured: ${remote.path})`);
     }
 
     const backupDir = ensureBackupDir(config.project, env);
@@ -81,7 +121,7 @@ export async function cmdPush(
     prePushBackup = join(backupDir, `pre-push-${preName}`);
     const remotePreDump = `/tmp/wp-dev-pre-push-${Date.now()}.sql`;
     logInfo(`push ${env}: remote pre-push db backup -> ${prePushBackup}`);
-    await wpRemoteDbExport(ssh, remote.path, remotePreDump);
+    await wpRemoteDbExport(ssh, wpPath, remotePreDump);
     await ssh.getFile(remotePreDump, prePushBackup);
     await ssh.exec(`rm -f ${remotePreDump}`);
 
@@ -95,10 +135,10 @@ export async function cmdPush(
       logInfo(`push ${env}: export local db, import on remote`);
       await wpLocalDbExportToFile(configDir, config, localDump);
       await ssh.putFile(localDump, remoteImport);
-      await wpRemoteDbImport(ssh, remote.path, remoteImport);
+      await wpRemoteDbImport(ssh, wpPath, remoteImport);
       await ssh.exec(`rm -f ${remoteImport}`);
       logInfo(`push ${env}: search-replace ${config.local.url} -> ${remote.url}`);
-      await wpRemoteSearchReplace(ssh, remote.path, config.local.url, remote.url);
+      await wpRemoteSearchReplace(ssh, wpPath, config.local.url, remote.url);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
