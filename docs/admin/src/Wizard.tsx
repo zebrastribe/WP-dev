@@ -19,11 +19,10 @@ type WizardAlert = { tone: "info" | "success" | "error"; text: string };
 type ChecklistStatus = "done" | "warn" | "todo";
 
 const PULL_TERMINAL_HINT = [
-  "The wizard cannot show pull progress — pull runs in your terminal, not in the browser.",
-  "Run the copied command in the repo root (folder with package.json).",
-  "Time: often a few minutes; large media or DB can take 30+ minutes.",
-  "Done: the command exits and wp-dev logs command … finished ok (see logs/wp-dev.log on the host).",
-  "Failed: the terminal prints an error — copy it; try wp-dev doctor production first if SSH or path is wrong.",
+  "Run commands in a terminal (not in the browser).",
+  "Use the repo root (folder with package.json).",
+  "Pull/push can take time for large media or DB.",
+  "If a command fails, copy the error and run: npm run wp-dev -- doctor <env>",
 ].join("\n");
 
 const PUSH_TERMINAL_HINT = [
@@ -1187,7 +1186,7 @@ export function Wizard() {
             </button>
           </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
-            <p className="mb-2 font-medium text-slate-800 dark:text-slate-200">After save: pull in a terminal</p>
+            <p className="mb-2 font-medium text-slate-800 dark:text-slate-200">Run these in terminal</p>
             <p className="mb-3 whitespace-pre-line text-xs text-slate-600 dark:text-slate-400">{PULL_TERMINAL_HINT}</p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -1219,44 +1218,6 @@ export function Wizard() {
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Copy Terminal Command: push production from localhost
-              </button>
-            </div>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
-            <p className="mb-2 font-medium text-slate-800 dark:text-slate-200">Recommended promotion flow</p>
-            <ol className="list-inside list-decimal space-y-1 text-xs text-slate-600 dark:text-slate-400">
-              <li>Pull production data to localhost.</li>
-              <li>Push localhost data to staging.</li>
-              <li>Promote staging data to production (via localhost mirror).</li>
-            </ol>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void copyCommand("npm run wp-dev -- pull production", "pull")}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Copy step 1
-              </button>
-              <button
-                type="button"
-                disabled={!hasStagingServer}
-                onClick={() => void copyCommand("npm run wp-dev -- push staging", "push")}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Copy step 2
-              </button>
-              <button
-                type="button"
-                disabled={!hasStagingServer}
-                onClick={() =>
-                  void copyCommand(
-                    "npm run wp-dev -- pull staging && npm run wp-dev -- push production",
-                    "plain",
-                  )
-                }
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Copy step 3
               </button>
             </div>
           </div>
