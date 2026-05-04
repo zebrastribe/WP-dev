@@ -117,18 +117,24 @@ if ($method === 'POST' && $action === 'save') {
         exit;
     }
     $tmp = $configPath . '.' . bin2hex(random_bytes(4)) . '.tmp';
-    if (file_put_contents($tmp, $encoded) === false) {
-        http_response_code(500);
-        echo json_encode(['ok' => false, 'error' => 'write_tmp_failed'], JSON_UNESCAPED_SLASHES);
-        wpdev_admin_api_log('POST save 500 write_tmp_failed');
-        exit;
+    $wrote = false;
+    if (file_put_contents($tmp, $encoded) !== false) {
+        if (rename($tmp, $configPath)) {
+            $wrote = true;
+        } else {
+            @unlink($tmp);
+            wpdev_admin_api_log('POST save warn rename_failed; trying direct write');
+        }
+    } else {
+        wpdev_admin_api_log('POST save warn write_tmp_failed; trying direct write');
     }
-    if (!rename($tmp, $configPath)) {
-        @unlink($tmp);
-        http_response_code(500);
-        echo json_encode(['ok' => false, 'error' => 'rename_failed'], JSON_UNESCAPED_SLASHES);
-        wpdev_admin_api_log('POST save 500 rename_failed');
-        exit;
+    if (!$wrote) {
+        if (file_put_contents($configPath, $encoded, LOCK_EX) === false) {
+            http_response_code(500);
+            echo json_encode(['ok' => false, 'error' => 'write_config_failed'], JSON_UNESCAPED_SLASHES);
+            wpdev_admin_api_log('POST save 500 write_config_failed');
+            exit;
+        }
     }
     $proj = is_string($data['project']) ? $data['project'] : '?';
     wpdev_admin_api_log("POST save 200 ok project={$proj}");

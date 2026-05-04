@@ -415,10 +415,10 @@ export function Wizard() {
           </label>
           {useSimply && (
             <label className="block">
-              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">simply.account (S123456 or UE84785)</span>
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">simply.account (S123456 or UE12345)</span>
               <input
                 className={input}
-                placeholder="S123456 or UE84785"
+                placeholder="S123456 or UE12345"
                 value={data.simply?.account ?? ""}
                 onChange={(e) =>
                   setData((d) => ({

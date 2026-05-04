@@ -72,9 +72,9 @@ describe("wpDevConfigSchema", () => {
         path: "/p",
         url: "https://p",
       },
-      simply: { account: "UE84785" },
+      simply: { account: "UE12345" },
     });
-    expect(parsed.simply?.account).toBe("UE84785");
+    expect(parsed.simply?.account).toBe("UE12345");
   });
 
   it("rejects invalid local url", () => {

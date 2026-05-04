@@ -142,7 +142,7 @@ export function ConfigAssistant() {
           <input
             type="text"
             className="w-full max-w-xs rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-900"
-            placeholder="S123456 or UE84785"
+            placeholder="S123456 or UE12345"
             value={
               parsed && typeof parsed.simply === "object" && parsed.simply
                 ? String((parsed.simply as { account?: string }).account ?? "")
