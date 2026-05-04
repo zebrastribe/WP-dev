@@ -119,26 +119,41 @@ export async function assertRemoteWpInstalled(
   ssh: SshSession,
   remotePath: string,
 ): Promise<void> {
-  const r = await ssh.exec(`wp core is-installed ${remoteWpPathFlag(remotePath)}`);
-  if (r.code !== 0) {
-    const base = remotePath.replace(/\/$/, "");
-    const alt = `${base}/public_html`;
-    const altCheck = await ssh.exec(`wp core is-installed ${remoteWpPathFlag(alt)}`);
-    let hint = "";
-    if (altCheck.code === 0) {
-      hint =
-        `\nHint: WordPress seems installed at ${alt}. ` +
-        `Update staging.path/production.path in wp-dev.config.json to that path.`;
-    } else {
-      hint =
-        `\nHint: ${remotePath} appears to be a folder mapping without a WordPress install yet. ` +
-        `wp-dev push requires remote WP-CLI to work and keeps remote wp-config.php (rsync excludes it). ` +
-        `Install WordPress in that folder first, or point path to an existing install.`;
-    }
+  const check = await checkRemoteWpInstalled(ssh, remotePath);
+  if (!check.installed) {
     throw new Error(
-      `Remote WordPress not found or WP-CLI failed at path: ${remotePath}. stderr: ${r.stderr}${hint}`,
+      `Remote WordPress not found or WP-CLI failed at path: ${remotePath}. stderr: ${check.stderr ?? ""}${check.hint ?? ""}`,
     );
   }
+}
+
+export async function checkRemoteWpInstalled(
+  ssh: SshSession,
+  remotePath: string,
+): Promise<{ installed: boolean; stderr?: string; hint?: string }> {
+  const r = await ssh.exec(`wp core is-installed ${remoteWpPathFlag(remotePath)}`);
+  if (r.code === 0) {
+    return { installed: true };
+  }
+  const base = remotePath.replace(/\/$/, "");
+  const alt = `${base}/public_html`;
+  const altCheck = await ssh.exec(`wp core is-installed ${remoteWpPathFlag(alt)}`);
+  if (altCheck.code === 0) {
+    return {
+      installed: false,
+      stderr: r.stderr,
+      hint:
+        `\nHint: WordPress seems installed at ${alt}. ` +
+        `Update staging.path/production.path in wp-dev.config.json to that path.`,
+    };
+  }
+  return {
+    installed: false,
+    stderr: r.stderr,
+    hint:
+      `\nHint: ${remotePath} appears to be a folder mapping without a WordPress install yet. ` +
+      `For first-time staging setup, run push staging once to seed files, complete the remote WordPress installer, then run push staging again.`,
+  };
 }
 
 function shellQuote(s: string): string {

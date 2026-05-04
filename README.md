@@ -117,6 +117,7 @@ Each **`wp-dev up`** / **`down`** uses **`docker compose -p <id>`** where **`<id
 
 - **`pull`:** if WordPress is **already** installed locally, a **pre-pull** DB dump is written under **`~/.wp-dev/backups/<project>/local/`** before overwrite (skip on first empty install, or use **`--no-backup-local`**).  
 - **`push`:** writes a **pre-push** SQL snapshot on the remote before overwriting the server DB (path printed when done).  
+- **First-time `push staging` bootstrap:** if no WordPress install exists yet at `staging.path`, wp-dev seeds files only and prints next steps. Finish remote WP install (`/wp-admin/install.php`), then run `push staging` again for DB + search-replace.
 - **`wp-dev backup`** / **`wp-dev restore`** — manual DB export/import.  
 - **`pull --dry-run`** / **`push --dry-run`** — rsync preview only (no DB steps).
 
