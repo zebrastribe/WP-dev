@@ -72,33 +72,74 @@ export async function rsyncPush(
   localDir: string,
   options: RsyncOptions,
 ): Promise<void> {
-  const excludes = [...DEFAULT_EXCLUDES, ...(options.excludes ?? [])];
-  const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
-  const remoteUrl = `${remote.user}@${remote.host}:${remote.path.replace(/\/$/, "")}/`;
-  const args = [
-    "-avz",
-    ...excludeArgs,
-    "--no-owner",
-    "--no-group",
-    "-e",
-    buildSshRsyncEnv(remote),
-    ...(options.dryRun ? ["--dry-run"] : []),
-    localDir.replace(/\/$/, "") + "/",
-    remoteUrl,
-  ];
-  const r = await execa("rsync", args, {
-    reject: false,
-    stdout: "inherit",
-    stderr: "pipe",
-  });
-  if (r.stderr) process.stderr.write(r.stderr);
-  if (r.exitCode !== 0) {
-    const err = r.stderr ?? "";
-    let hint = "";
-    if (/Permission denied|mkstemp|Operation not permitted/i.test(err)) {
-      hint =
-        "\n\nLikely fix: host rsync cannot write into wordpress/ (ownership). Run:\n  npm run wp-dev -- fix-permissions\nThen retry.";
+  const runPush = async (targetPath: string) => {
+    const excludes = [...DEFAULT_EXCLUDES, ...(options.excludes ?? [])];
+    const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
+    const remoteUrl = `${remote.user}@${remote.host}:${targetPath.replace(/\/$/, "")}/`;
+    const args = [
+      "-avz",
+      ...excludeArgs,
+      "--no-owner",
+      "--no-group",
+      "-e",
+      buildSshRsyncEnv(remote),
+      ...(options.dryRun ? ["--dry-run"] : []),
+      localDir.replace(/\/$/, "") + "/",
+      remoteUrl,
+    ];
+    return execa("rsync", args, {
+      reject: false,
+      stdout: "inherit",
+      stderr: "pipe",
+    });
+  };
+
+  const first = await runPush(remote.path);
+  if (first.stderr) process.stderr.write(first.stderr);
+  if (first.exitCode === 0) return;
+
+  const firstErr = first.stderr ?? "";
+  const canRetryRelative =
+    remote.path.startsWith("/") &&
+    /mkdir .* failed: Permission denied|recv_generator: mkdir .* failed: Permission denied/i.test(firstErr);
+  if (canRetryRelative) {
+    const relPath = remote.path.replace(/^\/+/, "");
+    const retry = await runPush(relPath);
+    if (retry.stderr) process.stderr.write(retry.stderr);
+    if (retry.exitCode === 0) {
+      process.stderr.write(
+        `\n[wp-dev] push retry succeeded using relative remote path "${relPath}" instead of "${remote.path}".\n` +
+          `Update your config path to "${relPath}" for shared hosting compatibility.\n`,
+      );
+      return;
     }
-    throw new Error(`rsync push failed with exit code ${r.exitCode}${hint}`);
+    const err = retry.stderr ?? "";
+    let hint = "";
+    if (/mkdir .* failed: Permission denied|recv_generator: mkdir .* failed: Permission denied/i.test(err)) {
+      hint =
+        `\n\nRemote path is not writable: ${relPath}\n` +
+        "Check staging.path/production.path and ensure the SSH user can create/write files there.";
+    } else if (/Permission denied|mkstemp|Operation not permitted/i.test(err)) {
+      hint =
+        "\n\nRsync hit a permission error during push. Verify remote directory permissions first. " +
+        "If the error clearly references local wordpress/ ownership, run:\n  npm run wp-dev -- fix-permissions\nThen retry.";
+    }
+    throw new Error(`rsync push failed with exit code ${retry.exitCode}${hint}`);
+  }
+
+  {
+    const err = firstErr;
+    let hint = "";
+    if (/mkdir .* failed: Permission denied|recv_generator: mkdir .* failed: Permission denied/i.test(err)) {
+      hint =
+        `\n\nRemote path is not writable: ${remote.path}\n` +
+        "Check staging.path/production.path and ensure the SSH user can create/write files there. " +
+        "On shared hosting this is often a relative subdomain folder (e.g. /staging) inside your account, not a system root path.";
+    } else if (/Permission denied|mkstemp|Operation not permitted/i.test(err)) {
+      hint =
+        "\n\nRsync hit a permission error during push. Verify remote directory permissions first. " +
+        "If the error clearly references local wordpress/ ownership, run:\n  npm run wp-dev -- fix-permissions\nThen retry.";
+    }
+    throw new Error(`rsync push failed with exit code ${first.exitCode}${hint}`);
   }
 }
