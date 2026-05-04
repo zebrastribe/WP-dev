@@ -167,6 +167,12 @@ npm run wp-dev -- up
 
 **Run the CLI:** **`npx wp-dev …`** or **`node dist/cli.js …`**. If **`Permission denied`** on **`dist/cli.js`**, **`chmod +x dist/cli.js`** or **`npm run wp-dev -- …`**.
 
+For first-time remote bootstrap without manual installer, set remote DB settings:
+- **`staging.db.host`**, **`staging.db.name`**, **`staging.db.user`**, **`staging.db.password`**, optional **`staging.db.prefix`**
+- keep staging DB separate from production DB.
+- same keys under **`production.db`** only if you also want production bootstrap flows.
+Then `push staging` can seed files, create remote `wp-config.php`, import DB, and run search-replace in one flow.
+
 ---
 
 ## First pull checklist (shared hosting)

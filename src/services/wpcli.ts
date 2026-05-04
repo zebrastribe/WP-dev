@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { execa } from "execa";
-import type { WpDevConfig } from "../config/schema.js";
+import type { RemoteEnvConfig, WpDevConfig } from "../config/schema.js";
 import type { SshSession } from "./ssh.js";
 import {
   getComposeProjectDir,
@@ -119,7 +119,7 @@ export async function assertRemoteWpInstalled(
   ssh: SshSession,
   remotePath: string,
 ): Promise<void> {
-  const check = await checkRemoteWpInstalled(ssh, remotePath);
+  const check = await resolveRemoteWpPath(ssh, remotePath);
   if (!check.installed) {
     throw new Error(
       `Remote WordPress not found or WP-CLI failed at path: ${remotePath}. stderr: ${check.stderr ?? ""}${check.hint ?? ""}`,
@@ -127,31 +127,29 @@ export async function assertRemoteWpInstalled(
   }
 }
 
-export async function checkRemoteWpInstalled(
+export async function resolveRemoteWpPath(
   ssh: SshSession,
   remotePath: string,
-): Promise<{ installed: boolean; stderr?: string; hint?: string }> {
-  const r = await ssh.exec(`wp core is-installed ${remoteWpPathFlag(remotePath)}`);
-  if (r.code === 0) {
-    return { installed: true };
-  }
+): Promise<{ installed: boolean; path?: string; stderr?: string; hint?: string }> {
   const base = remotePath.replace(/\/$/, "");
-  const alt = `${base}/public_html`;
-  const altCheck = await ssh.exec(`wp core is-installed ${remoteWpPathFlag(alt)}`);
-  if (altCheck.code === 0) {
-    return {
-      installed: false,
-      stderr: r.stderr,
-      hint:
-        `\nHint: WordPress seems installed at ${alt}. ` +
-        `Update staging.path/production.path in wp-dev.config.json to that path.`,
-    };
+  const rel = base.replace(/^\/+/, "");
+  const candidates = Array.from(
+    new Set([base, rel, `${base}/public_html`, `${rel}/public_html`].filter(Boolean)),
+  );
+
+  let firstErr = "";
+  for (const p of candidates) {
+    const r = await ssh.exec(`wp core is-installed ${remoteWpPathFlag(p)}`);
+    if (!firstErr) firstErr = r.stderr ?? "";
+    if (r.code === 0) {
+      return { installed: true, path: p };
+    }
   }
   return {
     installed: false,
-    stderr: r.stderr,
+    stderr: firstErr,
     hint:
-      `\nHint: ${remotePath} appears to be a folder mapping without a WordPress install yet. ` +
+      `\nHint: No WordPress install detected at ${candidates.join(", ")}. ` +
       `For first-time staging setup, run push staging once to seed files, complete the remote WordPress installer, then run push staging again.`,
   };
 }
@@ -227,6 +225,55 @@ export async function wpRemoteSearchReplace(
   if (r.code !== 0) {
     throw new Error(`Remote wp search-replace failed: ${r.stderr || r.stdout}`);
   }
+}
+
+export async function wpLocalGetTablePrefix(
+  configDir: string,
+  config: WpDevConfig,
+): Promise<string | undefined> {
+  const r = await wpLocalRaw(configDir, config, ["config", "get", "table_prefix", "--type=variable"]);
+  if (r.exitCode !== 0) return undefined;
+  const prefix = (r.stdout || "").trim();
+  return prefix !== "" ? prefix : undefined;
+}
+
+export async function wpRemoteBootstrapConfigFromRemoteDb(
+  ssh: SshSession,
+  remotePath: string,
+  remote: RemoteEnvConfig,
+  fallbackTablePrefix?: string,
+): Promise<void> {
+  if (!remote.db) {
+    throw new Error(
+      `Remote DB settings are missing for ${remotePath}. Add staging.db/production.db in wp-dev.config.json to enable first-time bootstrap.`,
+    );
+  }
+  const dbPrefix = remote.db.prefix?.trim() || fallbackTablePrefix || "wp_";
+  const base = remotePath.replace(/\/$/, "");
+  const rel = base.replace(/^\/+/, "");
+  const candidates = Array.from(
+    new Set([base, rel, `${base}/public_html`, `${rel}/public_html`].filter(Boolean)),
+  );
+  let lastErr = "";
+  for (const p of candidates) {
+    const r = await wpRemoteExec(ssh, p, [
+      "config",
+      "create",
+      `--dbname=${remote.db.name}`,
+      `--dbuser=${remote.db.user}`,
+      `--dbpass=${remote.db.password}`,
+      `--dbhost=${remote.db.host}`,
+      `--dbprefix=${dbPrefix}`,
+      "--skip-check",
+      "--force",
+    ]);
+    if (r.code === 0) return;
+    lastErr = r.stderr || r.stdout;
+  }
+  throw new Error(
+    `Remote wp config create failed at ${remotePath}: ${lastErr}. ` +
+      `Verify staging.db settings and remote path.`,
+  );
 }
 
 function upsertDotenvKey(envPath: string, key: string, value: string): void {

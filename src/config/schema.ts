@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+const remoteDbSchema = z.object({
+  host: z.string().min(1),
+  name: z.string().min(1),
+  user: z.string().min(1),
+  password: z.string().min(1),
+  prefix: z.string().min(1).optional(),
+});
+
 const remoteEnvSchema = z.object({
   host: z.string().min(1),
   user: z.string().min(1),
@@ -7,6 +15,7 @@ const remoteEnvSchema = z.object({
   url: z.string().url(),
   port: z.coerce.number().int().positive().optional(),
   identityFile: z.string().optional(),
+  db: remoteDbSchema.optional(),
 });
 
 /** Optional [Simply.com REST API](https://www.simply.com/en/docs/api/) — use for DNS/hosting automation; API key via `WPDEV_SIMPLY_API_KEY`. */
