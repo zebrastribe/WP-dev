@@ -166,18 +166,21 @@ async function main(): Promise<void> {
     )
     .argument("[env]", "staging | production (default: both)")
     .option("--rsync", "After WP-CLI check, run rsync pull --dry-run (no DB, no file writes)")
-    .action(async (env: string | undefined, opts: { rsync?: boolean }) => {
+    .option("--http", "Probe remote URL status/redirect chain and verify final host")
+    .action(async (env: string | undefined, opts: { rsync?: boolean; http?: boolean }) => {
       const rsync = Boolean(opts.rsync);
+      const http = Boolean(opts.http);
       const envTrim = env?.trim();
       const parsedEnv =
         envTrim && envTrim.length > 0 ? parseRemoteEnv(envTrim) : undefined;
       const label = parsedEnv
-        ? `doctor ${parsedEnv}${rsync ? " --rsync" : ""}`
-        : `doctor${rsync ? " --rsync" : ""}`;
+        ? `doctor ${parsedEnv}${rsync ? " --rsync" : ""}${http ? " --http" : ""}`
+        : `doctor${rsync ? " --rsync" : ""}${http ? " --http" : ""}`;
       await runWithConfig(label, (loaded) =>
         cmdDoctor(loaded, {
           env: parsedEnv,
           rsyncDryRun: rsync,
+          httpCheck: http,
         }),
       );
     });

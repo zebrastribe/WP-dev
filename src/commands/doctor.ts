@@ -14,6 +14,7 @@ import { logInfo } from "../utils/logger.js";
 export type DoctorOptions = {
   env?: RemoteEnvName;
   rsyncDryRun: boolean;
+  httpCheck: boolean;
 };
 
 function printSimplyStagingDnsHint(loaded: LoadedConfig): void {
@@ -49,10 +50,61 @@ async function tryDns(host: string): Promise<{ ok: true } | { ok: false; err: st
   }
 }
 
+type HttpProbe = {
+  ok: boolean;
+  status: number;
+  finalUrl: string;
+  hops: string[];
+  error?: string;
+};
+
+async function probeHttpUrl(url: string): Promise<HttpProbe> {
+  const hops: string[] = [];
+  let current = url;
+  for (let i = 0; i < 6; i++) {
+    let res: Response;
+    try {
+      res = await fetch(current, { method: "GET", redirect: "manual" });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return {
+        ok: false,
+        status: 0,
+        finalUrl: current,
+        hops,
+        error: msg,
+      };
+    }
+    const status = res.status;
+    const loc = res.headers.get("location");
+    if (loc && status >= 300 && status < 400) {
+      const next = new URL(loc, current).toString();
+      hops.push(`${status} -> ${next}`);
+      current = next;
+      continue;
+    }
+    hops.push(`${status} @ ${current}`);
+    return {
+      ok: status >= 200 && status < 400,
+      status,
+      finalUrl: current,
+      hops,
+    };
+  }
+  return {
+    ok: false,
+    status: 0,
+    finalUrl: current,
+    hops,
+    error: "too_many_redirects",
+  };
+}
+
 async function checkOneRemote(
   loaded: LoadedConfig,
   env: RemoteEnvName,
   rsyncDryRun: boolean,
+  httpCheck: boolean,
 ): Promise<"ok" | "skip" | "fail"> {
   const remote = getRemoteEnv(loaded.config, env);
   const label = `${remote.user}@${remote.host}:${remote.path}`;
@@ -106,6 +158,28 @@ async function checkOneRemote(
   }
 
   if (sshFailed) return "fail";
+  if (httpCheck) {
+    const probe = await probeHttpUrl(remote.url);
+    if (!probe.ok) {
+      console.error(
+        `HTTP: FAIL — ${remote.url} -> status ${probe.status || "n/a"}${probe.error ? ` (${probe.error})` : ""}`,
+      );
+      if (probe.hops.length > 0) {
+        console.error(`HTTP hops: ${probe.hops.join(" | ")}`);
+      }
+      return "fail";
+    }
+    const expectedHost = new URL(remote.url).hostname.toLowerCase();
+    const finalHost = new URL(probe.finalUrl).hostname.toLowerCase();
+    if (expectedHost !== finalHost) {
+      console.error(
+        `HTTP: FAIL — ${remote.url} ends at ${probe.finalUrl} (host mismatch: expected ${expectedHost}, got ${finalHost})`,
+      );
+      console.error(`HTTP hops: ${probe.hops.join(" | ")}`);
+      return "fail";
+    }
+    console.error(`HTTP: OK (${probe.hops.join(" | ")})`);
+  }
   return "ok";
 }
 
@@ -127,7 +201,7 @@ export async function cmdDoctor(loaded: LoadedConfig, options: DoctorOptions): P
   let skipped = 0;
   const skippedEnvs: RemoteEnvName[] = [];
   for (const env of targets) {
-    const r = await checkOneRemote(loaded, env, options.rsyncDryRun);
+    const r = await checkOneRemote(loaded, env, options.rsyncDryRun, options.httpCheck);
     if (r === "fail") failed += 1;
     if (r === "skip") {
       skipped += 1;
