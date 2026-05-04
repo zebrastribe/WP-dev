@@ -13,7 +13,7 @@ const remoteEnvSchema = z.object({
 const simplySchema = z.object({
   account: z
     .string()
-    .regex(/^S\d+$/, "Simply.com account must look like S123456"),
+    .regex(/^(S|UE)\d+$/, "Simply.com account must look like S123456 or UE84785"),
 });
 
 const localSchema = z.object({

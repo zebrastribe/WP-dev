@@ -16,7 +16,7 @@ export function assertSimplyConfigured(config: WpDevConfig): {
 } {
   if (!config.simply) {
     throw new Error(
-      `Add a "simply" block with "account" (e.g. S123456) to wp-dev.config.json, and set ${SIMPLY_API_KEY_ENV} to your API key.`,
+      `Add a "simply" block with "account" (e.g. S123456 or UE84785) to wp-dev.config.json, and set ${SIMPLY_API_KEY_ENV} to your API key.`,
     );
   }
   const apiKey = getSimplyApiKey();

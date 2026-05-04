@@ -72,6 +72,25 @@ function toJson(data: WizardData): Record<string, unknown> {
 
 const DRAFT_KEY = "wpdev-wizard-draft";
 
+function alignLocalUrlToCurrentBrowser(url: string): { value: string; changed: boolean } {
+  try {
+    const saved = new URL(url);
+    const browser = new URL(window.location.origin);
+    const isLocal =
+      saved.hostname === "localhost" ||
+      saved.hostname === "127.0.0.1" ||
+      saved.hostname === "::1";
+    if (!isLocal) return { value: url, changed: false };
+    if (saved.origin === browser.origin) return { value: url, changed: false };
+    saved.protocol = browser.protocol;
+    saved.hostname = browser.hostname;
+    saved.port = browser.port;
+    return { value: saved.toString().replace(/\/$/, ""), changed: true };
+  } catch {
+    return { value: url, changed: false };
+  }
+}
+
 export function Wizard() {
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardData>(defaults);
@@ -101,10 +120,19 @@ export function Wizard() {
         const loaded = await loadWpDevConfig();
         if (cancelled) return;
         if (loaded && typeof loaded.project === "string") {
+          const loadedLocalUrl = String((loaded.local as WizardData["local"])?.url ?? defaults().local.url);
+          const aligned = alignLocalUrlToCurrentBrowser(loadedLocalUrl);
+          if (aligned.changed) {
+            logAdmin(
+              "warn",
+              "Wizard: local.url did not match current browser origin; adjusted in form",
+              `from=${loadedLocalUrl} to=${aligned.value}`,
+            );
+          }
           setData({
             project: String(loaded.project),
             local: {
-              url: String((loaded.local as WizardData["local"])?.url ?? defaults().local.url),
+              url: aligned.value,
               path: String((loaded.local as WizardData["local"])?.path ?? "./docker"),
               composeFile: String(
                 (loaded.local as WizardData["local"])?.composeFile ?? "docker-compose.yml",
@@ -137,7 +165,9 @@ export function Wizard() {
           setUseSimply(Boolean(loaded.simply));
           setAlert({
             tone: "info",
-            text: `Loaded existing wp-dev.config.json (project “${String(loaded.project)}”). Edit any step and save to update.`,
+            text: aligned.changed
+              ? `Loaded wp-dev.config.json and adjusted local.url in the form to this browser (${aligned.value}). Click Save to persist this port change.`
+              : `Loaded existing wp-dev.config.json (project “${String(loaded.project)}”). Edit any step and save to update.`,
           });
         } else {
           const raw = localStorage.getItem(DRAFT_KEY);
@@ -385,10 +415,10 @@ export function Wizard() {
           </label>
           {useSimply && (
             <label className="block">
-              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">simply.account (S + digits)</span>
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">simply.account (S123456 or UE84785)</span>
               <input
                 className={input}
-                placeholder="S123456"
+                placeholder="S123456 or UE84785"
                 value={data.simply?.account ?? ""}
                 onChange={(e) =>
                   setData((d) => ({

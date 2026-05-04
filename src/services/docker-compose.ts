@@ -56,7 +56,12 @@ export async function compose(
     },
   ).then((r) => {
     if (r.exitCode !== 0) {
-      throw new Error(`docker compose failed with exit code ${r.exitCode}`);
+      const detail = [r.stderr?.trim(), r.stdout?.trim()].filter(Boolean).join("\n");
+      throw new Error(
+        detail.length > 0
+          ? `docker compose failed with exit code ${r.exitCode}: ${detail}`
+          : `docker compose failed with exit code ${r.exitCode}`,
+      );
     }
   });
 }

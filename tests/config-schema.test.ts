@@ -52,6 +52,31 @@ describe("wpDevConfigSchema", () => {
     expect(parsed.simply?.account).toBe("S999999");
   });
 
+  it("accepts optional simply block with UE account format", () => {
+    const parsed = wpDevConfigSchema.parse({
+      project: "x",
+      local: {
+        url: "http://localhost:8888",
+        path: "./docker",
+        wpRoot: "./wordpress",
+      },
+      staging: {
+        host: "s",
+        user: "u",
+        path: "/p",
+        url: "https://s",
+      },
+      production: {
+        host: "p",
+        user: "u",
+        path: "/p",
+        url: "https://p",
+      },
+      simply: { account: "UE84785" },
+    });
+    expect(parsed.simply?.account).toBe("UE84785");
+  });
+
   it("rejects invalid local url", () => {
     expect(() =>
       wpDevConfigSchema.parse({

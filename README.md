@@ -187,7 +187,7 @@ npm ci --prefix docs/admin && npm run build:wp --prefix docs/admin   # admin, if
 
 ## Simply.com staging DNS (API)
 
-With **`simply.account`** + **`WPDEV_SIMPLY_API_KEY`**, **`wp-dev`** can read the Simply product, suggest an IPv4, and **`POST`** an **A** record for **`staging.<apex>`** (default label **`staging`**) when there is no conflict. **`--keep-existing-dns`** / **`--staging-label`** adjust behavior. It does **not** create hosting, SSL, or WordPress on the server — you still use **`pull`** / **`push`** for files and DB.
+With **`simply.account`** (for example **`S123456`** or **`UE84785`**) + **`WPDEV_SIMPLY_API_KEY`**, **`wp-dev`** can read the Simply product, suggest an IPv4, and **`POST`** an **A** record for **`staging.<apex>`** (default label **`staging`**) when there is no conflict. **`--keep-existing-dns`** / **`--staging-label`** adjust behavior. It does **not** create hosting, SSL, or WordPress on the server — you still use **`pull`** / **`push`** for files and DB.
 
 ---
 

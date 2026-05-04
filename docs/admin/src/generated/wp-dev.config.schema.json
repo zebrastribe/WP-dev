@@ -119,7 +119,7 @@
           "properties": {
             "account": {
               "type": "string",
-              "pattern": "^S\\d+$"
+              "pattern": "^(S|UE)\\d+$"
             }
           },
           "required": [

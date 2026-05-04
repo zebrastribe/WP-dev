@@ -300,9 +300,9 @@ export async function cmdInit(): Promise<void> {
       )
         .trim()
         .toUpperCase();
-      if (!/^S\d+$/.test(acc)) {
+      if (!/^(S|UE)\d+$/.test(acc)) {
         throw new Error(
-          `Invalid Simply account "${acc}". Use your Control Panel account (form S + digits).`,
+          `Invalid Simply account "${acc}". Use your Control Panel account (form S123456 or UE84785).`,
         );
       }
       draft = { ...draft, simply: { account: acc } };
