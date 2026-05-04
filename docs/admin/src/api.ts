@@ -333,9 +333,19 @@ export async function checkStagingDbConnection(payload: {
       credentials: "same-origin",
       body: JSON.stringify(payload ?? {}),
     });
-    const data = (await res.json()) as unknown;
+    const raw = await res.text();
+    let data: unknown = null;
+    try {
+      data = raw ? (JSON.parse(raw) as unknown) : null;
+    } catch {
+      return {
+        ok: false,
+        error: `HTTP ${res.status}`,
+        detail: raw ? raw.slice(0, 240) : "non_json_response",
+      };
+    }
     if (!data || typeof data !== "object") {
-      return { ok: false, error: "invalid_response" };
+      return { ok: false, error: "invalid_response", detail: `HTTP ${res.status}` };
     }
     const o = data as Record<string, unknown>;
     if (res.ok && o.ok === true) {
