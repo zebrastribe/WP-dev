@@ -7,6 +7,14 @@ const STEP_LABELS = ["Welcome", "Production", "Staging", "Simply", "Save"] as co
 
 type WizardAlert = { tone: "info" | "success" | "error"; text: string };
 
+const PULL_TERMINAL_HINT = [
+  "The wizard cannot show pull progress — pull runs in your terminal, not in the browser.",
+  "Run the copied command in the repo root (folder with package.json).",
+  "Time: often a few minutes; large media or DB can take 30+ minutes.",
+  "Done: the command exits and wp-dev logs command … finished ok (see logs/wp-dev.log on the host).",
+  "Failed: the terminal prints an error — copy it; try wp-dev doctor production first if SSH or path is wrong.",
+].join("\n");
+
 /** Staging placeholder when user has no real staging server (from repo example config). */
 const STAGING_PLACEHOLDER = {
   host: EXAMPLE_WP_DEV_CONFIG.staging.host,
@@ -231,11 +239,22 @@ export function Wizard() {
     setData((d) => ({ ...d, [env]: { ...d[env], [key]: val } }));
   };
 
-  const copyCommand = async (cmd: string) => {
+  const copyCommand = async (cmd: string, kind: "plain" | "pull" = "plain") => {
     try {
       await navigator.clipboard.writeText(cmd);
       logAdmin("info", "Wizard: copied command", cmd);
-      setAlert({ tone: "info", text: `Copied command: ${cmd}` });
+      if (kind === "pull") {
+        logAdmin(
+          "info",
+          "Wizard: run copied pull in a terminal — browser has no live progress; watch terminal exit code and logs/wp-dev.log",
+        );
+        setAlert({
+          tone: "info",
+          text: `Copied:\n${cmd}\n\n${PULL_TERMINAL_HINT}`,
+        });
+      } else {
+        setAlert({ tone: "info", text: `Copied command: ${cmd}` });
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logAdmin("error", "Wizard: copy command failed", msg);
@@ -306,7 +325,7 @@ export function Wizard() {
             ? "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
             : "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100";
       return (
-        <div role="status" className={`rounded-lg border px-4 py-3 text-sm ${cls}`}>
+        <div role="status" className={`whitespace-pre-line rounded-lg border px-4 py-3 text-sm ${cls}`}>
           {alert.text}
         </div>
       );
@@ -496,13 +515,12 @@ export function Wizard() {
             </button>
           </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
-            <p className="mb-2 text-slate-700 dark:text-slate-300">
-              Next step after save: run pull from terminal to use this config.
-            </p>
+            <p className="mb-2 font-medium text-slate-800 dark:text-slate-200">After save: pull in a terminal</p>
+            <p className="mb-3 whitespace-pre-line text-xs text-slate-600 dark:text-slate-400">{PULL_TERMINAL_HINT}</p>
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => void copyCommand("npm run wp-dev -- pull production")}
+                onClick={() => void copyCommand("npm run wp-dev -- pull production", "pull")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Copy: pull production
@@ -510,7 +528,7 @@ export function Wizard() {
               <button
                 type="button"
                 disabled={!hasStagingServer}
-                onClick={() => void copyCommand("npm run wp-dev -- pull staging")}
+                onClick={() => void copyCommand("npm run wp-dev -- pull staging", "pull")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Copy: pull staging
