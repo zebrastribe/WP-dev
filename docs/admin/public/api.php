@@ -319,6 +319,20 @@ if ($method === 'GET' && $action === 'simply-status') {
     exit;
 }
 
+if ($method === 'GET' && $action === 'staging-db-secrets') {
+    $out = [
+        'ok' => true,
+        'host' => wpdev_dotenv_value($dockerEnvPath, 'WPDEV_STAGING_DB_HOST'),
+        'name' => wpdev_dotenv_value($dockerEnvPath, 'WPDEV_STAGING_DB_NAME'),
+        'user' => wpdev_dotenv_value($dockerEnvPath, 'WPDEV_STAGING_DB_USER'),
+        'password' => wpdev_dotenv_value($dockerEnvPath, 'WPDEV_STAGING_DB_PASSWORD'),
+        'prefix' => wpdev_dotenv_value($dockerEnvPath, 'WPDEV_STAGING_DB_PREFIX'),
+    ];
+    wpdev_admin_api_log('GET staging-db-secrets 200');
+    echo json_encode($out, JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 if ($method === 'POST' && $action === 'simply-test') {
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
@@ -538,7 +552,14 @@ if ($method === 'POST' && $action === 'save-docker-env') {
         wpdev_admin_api_log('POST save-docker-env 400 invalid_json');
         exit;
     }
-    $allowed = ['WPDEV_SIMPLY_API_KEY'];
+    $allowed = [
+        'WPDEV_SIMPLY_API_KEY',
+        'WPDEV_STAGING_DB_HOST',
+        'WPDEV_STAGING_DB_NAME',
+        'WPDEV_STAGING_DB_USER',
+        'WPDEV_STAGING_DB_PASSWORD',
+        'WPDEV_STAGING_DB_PREFIX',
+    ];
     $updates = [];
     foreach ($allowed as $key) {
         if (!array_key_exists($key, $data)) {

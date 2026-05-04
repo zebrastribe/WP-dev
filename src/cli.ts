@@ -15,7 +15,7 @@ import { cmdSimplySetupStagingDns, cmdSimplyTest } from "./commands/simply.js";
 import { cmdFixPermissions } from "./commands/fix-permissions.js";
 import { cmdDoctor } from "./commands/doctor.js";
 import { ensureWpDevConfigJson } from "./config/load.js";
-import { hydrateSimplyApiKeyFromComposeEnv } from "./services/simply.js";
+import { hydrateSimplyApiKeyFromComposeEnv, hydrateStagingDbFromComposeEnv } from "./services/simply.js";
 import { initLogger, logError, logInfo } from "./utils/logger.js";
 
 function parseRemoteEnv(s: string): RemoteEnvName {
@@ -39,6 +39,7 @@ async function runWithConfig(
 ): Promise<void> {
   const loaded = loadConfig();
   hydrateSimplyApiKeyFromComposeEnv(loaded.configDir, loaded.config);
+  hydrateStagingDbFromComposeEnv(loaded.configDir, loaded.config);
   initLogger(loaded.configDir);
   logInfo(`command ${label}`);
   try {

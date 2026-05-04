@@ -7,6 +7,11 @@ const API_BASE = "https://api.simply.com/2";
 
 /** Env var for Simply.com API key (HTTP Basic password). See https://www.simply.com/en/docs/api/ */
 export const SIMPLY_API_KEY_ENV = "WPDEV_SIMPLY_API_KEY";
+export const STAGING_DB_HOST_ENV = "WPDEV_STAGING_DB_HOST";
+export const STAGING_DB_NAME_ENV = "WPDEV_STAGING_DB_NAME";
+export const STAGING_DB_USER_ENV = "WPDEV_STAGING_DB_USER";
+export const STAGING_DB_PASSWORD_ENV = "WPDEV_STAGING_DB_PASSWORD";
+export const STAGING_DB_PREFIX_ENV = "WPDEV_STAGING_DB_PREFIX";
 
 export function readDotenvKeyFromFile(filePath: string, key: string): string | undefined {
   if (!existsSync(filePath)) return undefined;
@@ -36,6 +41,27 @@ export function hydrateSimplyApiKeyFromComposeEnv(
   const envPath = join(getComposeProjectDir(configDir, config), ".env");
   const v = readDotenvKeyFromFile(envPath, SIMPLY_API_KEY_ENV);
   if (v) process.env[SIMPLY_API_KEY_ENV] = v;
+}
+
+/** Hydrate optional staging.db credentials from docker/.env (gitignored local file). */
+export function hydrateStagingDbFromComposeEnv(
+  configDir: string,
+  config: WpDevConfig,
+): void {
+  const envPath = join(getComposeProjectDir(configDir, config), ".env");
+  const host = readDotenvKeyFromFile(envPath, STAGING_DB_HOST_ENV)?.trim();
+  const name = readDotenvKeyFromFile(envPath, STAGING_DB_NAME_ENV)?.trim();
+  const user = readDotenvKeyFromFile(envPath, STAGING_DB_USER_ENV)?.trim();
+  const password = readDotenvKeyFromFile(envPath, STAGING_DB_PASSWORD_ENV)?.trim();
+  const prefix = readDotenvKeyFromFile(envPath, STAGING_DB_PREFIX_ENV)?.trim();
+  if (!host || !name || !user || !password) return;
+  config.staging.db = {
+    host,
+    name,
+    user,
+    password,
+    ...(prefix ? { prefix } : {}),
+  };
 }
 
 export function getSimplyApiKey(): string | undefined {
