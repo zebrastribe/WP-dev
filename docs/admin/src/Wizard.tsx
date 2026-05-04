@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { loadWpDevConfig, saveDockerEnvSecrets, saveWpDevConfig } from "./api";
+import {
+  loadSimplyStatus,
+  loadWpDevConfig,
+  saveDockerEnvSecrets,
+  saveWpDevConfig,
+  verifySimplyApi,
+} from "./api";
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
@@ -107,6 +113,8 @@ export function Wizard() {
   const [saveToken, setSaveToken] = useState("");
   /** Never stored in localStorage draft; optional write to host docker/.env after config save. */
   const [simplyApiKey, setSimplyApiKey] = useState("");
+  const [simplyKeyPresent, setSimplyKeyPresent] = useState<boolean | null>(null);
+  const [simplyTestBusy, setSimplyTestBusy] = useState(false);
   const [alert, setAlert] = useState<WizardAlert | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -229,6 +237,19 @@ export function Wizard() {
     return () => window.clearTimeout(t);
   }, [data]);
 
+  const refreshSimplyStatus = useCallback(async () => {
+    const r = await loadSimplyStatus();
+    if (r.ok) {
+      setSimplyKeyPresent(r.apiKeyPresent);
+      return;
+    }
+    setSimplyKeyPresent(null);
+  }, []);
+
+  useEffect(() => {
+    void refreshSimplyStatus();
+  }, [refreshSimplyStatus]);
+
   const patch = useCallback(<K extends keyof WizardData>(key: K, val: WizardData[K]) => {
     setData((d) => ({ ...d, [key]: val }));
   }, []);
@@ -305,6 +326,7 @@ export function Wizard() {
           extra =
             "\n\nSaved WPDEV_SIMPLY_API_KEY to docker/.env. Run `wp-dev down && wp-dev up` so the stack picks it up, then `wp-dev simply test`.";
           logAdmin("info", "Wizard: Simply API key written to docker/.env");
+          await refreshSimplyStatus();
         }
       }
       localStorage.removeItem(DRAFT_KEY);
@@ -497,6 +519,48 @@ export function Wizard() {
                   onChange={(e) => setSimplyApiKey(e.target.value)}
                 />
               </label>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
+                Server key status:{" "}
+                {simplyKeyPresent === null ? "unknown" : simplyKeyPresent ? "present" : "missing"}.
+                {" "}
+                {simplyKeyPresent === false ? "Save API key below, then verify." : "You can verify API access now."}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={simplyTestBusy}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                  onClick={async () => {
+                    setSimplyTestBusy(true);
+                    try {
+                      const r = await verifySimplyApi();
+                      if (r.ok) {
+                        setAlert({
+                          tone: "success",
+                          text: `Simply API verified (HTTP ${r.status}).`,
+                        });
+                        return;
+                      }
+                      const detail = r.detail ? `\n${r.detail}` : "";
+                      setAlert({
+                        tone: "error",
+                        text: `Simply API verify failed: ${r.error}${detail}`,
+                      });
+                    } finally {
+                      setSimplyTestBusy(false);
+                    }
+                  }}
+                >
+                  {simplyTestBusy ? "Verifying..." : "Verify Simply API now"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                  onClick={() => void refreshSimplyStatus()}
+                >
+                  Refresh key status
+                </button>
+              </div>
             </div>
           )}
         </div>

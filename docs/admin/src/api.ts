@@ -2,12 +2,17 @@ import { logAdmin } from "./adminLog";
 import { validateWpDevConfigJson } from "./validateConfig";
 
 /** Same-origin /admin/api.php (Docker) or dev proxy to WP port. */
-export function apiPhpUrl(action: "load" | "save" | "save-docker-env"): string {
+export function apiPhpUrl(
+  action: "load" | "save" | "save-docker-env" | "simply-status" | "simply-test",
+): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return `${origin}/admin/api.php?action=${action}`;
 }
 
 export type SaveResponse = { ok: true } | { ok: false; error: string };
+export type SimplyStatusResponse =
+  | { ok: true; simplyAccount: string | null; apiKeyPresent: boolean }
+  | { ok: false; error: string };
 
 export async function loadWpDevConfig(): Promise<Record<string, unknown> | null> {
   const url = apiPhpUrl("load");
@@ -137,5 +142,67 @@ export async function saveDockerEnvSecrets(
   } catch (e) {
     logAdmin("error", "saveDockerEnvSecrets: fetch failed", e instanceof Error ? e.message : String(e));
     return { ok: false, error: "network_error" };
+  }
+}
+
+export async function loadSimplyStatus(): Promise<SimplyStatusResponse> {
+  const t0 = performance.now();
+  try {
+    const res = await fetch(apiPhpUrl("simply-status"), {
+      method: "GET",
+      credentials: "same-origin",
+    });
+    const ms = Math.round(performance.now() - t0);
+    const data = (await res.json()) as unknown;
+    if (!res.ok || !data || typeof data !== "object") {
+      logAdmin("warn", "loadSimplyStatus: unexpected response", `HTTP ${res.status} ${ms}ms`);
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
+    const o = data as Record<string, unknown>;
+    if (o.ok === true) {
+      return {
+        ok: true,
+        simplyAccount: typeof o.simplyAccount === "string" ? o.simplyAccount : null,
+        apiKeyPresent: Boolean(o.apiKeyPresent),
+      };
+    }
+    return { ok: false, error: String(o.error ?? "unknown_error") };
+  } catch (e) {
+    logAdmin("warn", "loadSimplyStatus: fetch failed", e instanceof Error ? e.message : String(e));
+    return { ok: false, error: "network_error" };
+  }
+}
+
+export type SimplyTestResponse =
+  | { ok: true; status: number }
+  | { ok: false; error: string; detail?: string; status?: number };
+
+export async function verifySimplyApi(): Promise<SimplyTestResponse> {
+  const t0 = performance.now();
+  try {
+    const res = await fetch(apiPhpUrl("simply-test"), {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    const ms = Math.round(performance.now() - t0);
+    const data = (await res.json()) as unknown;
+    if (!data || typeof data !== "object") {
+      return { ok: false, error: "invalid_response" };
+    }
+    const o = data as Record<string, unknown>;
+    if (res.ok && o.ok === true) {
+      logAdmin("info", "verifySimplyApi: ok", `HTTP ${res.status} ${ms}ms`);
+      return { ok: true, status: Number(o.status ?? res.status) };
+    }
+    const out: SimplyTestResponse = {
+      ok: false,
+      error: String(o.error ?? `HTTP ${res.status}`),
+      detail: typeof o.detail === "string" ? o.detail : undefined,
+      status: typeof o.status === "number" ? o.status : res.status,
+    };
+    logAdmin("warn", "verifySimplyApi: failed", `${out.error} ${ms}ms`);
+    return out;
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }
 }

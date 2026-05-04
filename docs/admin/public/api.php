@@ -61,6 +61,52 @@ function wpdev_upsert_dotenv_file(string $path, array $updates): void
     }
 }
 
+function wpdev_dotenv_value(string $path, string $key): ?string
+{
+    if (!is_file($path) || !is_readable($path)) {
+        return null;
+    }
+    $raw = (string) file_get_contents($path);
+    $pat = '/^' . preg_quote($key, '/') . '=(.*)$/m';
+    if (preg_match($pat, $raw, $m) !== 1) {
+        return null;
+    }
+    $v = trim((string) ($m[1] ?? ''));
+    if ($v === '') {
+        return null;
+    }
+    $q1 = substr($v, 0, 1);
+    $q2 = substr($v, -1);
+    if (($q1 === '"' && $q2 === '"') || ($q1 === "'" && $q2 === "'")) {
+        $v = substr($v, 1, -1);
+    }
+    $v = trim($v);
+    return $v === '' ? null : $v;
+}
+
+function wpdev_simply_api_key(): ?string
+{
+    global $dockerEnvPath;
+    $fromEnv = getenv('WPDEV_SIMPLY_API_KEY');
+    if (is_string($fromEnv) && trim($fromEnv) !== '') {
+        return trim($fromEnv);
+    }
+    return wpdev_dotenv_value($dockerEnvPath, 'WPDEV_SIMPLY_API_KEY');
+}
+
+function wpdev_parse_http_status_from_headers(array $headers): int
+{
+    foreach ($headers as $h) {
+        if (!is_string($h)) {
+            continue;
+        }
+        if (preg_match('/^HTTP\/\d+(?:\.\d+)?\s+(\d{3})\b/i', $h, $m) === 1) {
+            return (int) $m[1];
+        }
+    }
+    return 0;
+}
+
 function wpdev_admin_api_log(string $message): void
 {
     global $logDir, $logFile;
@@ -93,6 +139,98 @@ if ($method === 'GET' && $action === 'load') {
     $len = strlen($raw);
     wpdev_admin_api_log("GET load 200 bytes={$len}");
     echo $raw;
+    exit;
+}
+
+if ($method === 'GET' && $action === 'simply-status') {
+    $key = wpdev_simply_api_key();
+    $cfgRaw = is_file($configPath) && is_readable($configPath) ? file_get_contents($configPath) : false;
+    $account = null;
+    if (is_string($cfgRaw) && $cfgRaw !== '') {
+        $cfg = json_decode($cfgRaw, true);
+        if (is_array($cfg) && isset($cfg['simply']) && is_array($cfg['simply'])) {
+            $acc = $cfg['simply']['account'] ?? null;
+            if (is_string($acc) && trim($acc) !== '') {
+                $account = trim($acc);
+            }
+        }
+    }
+    wpdev_admin_api_log('GET simply-status 200');
+    echo json_encode(
+        [
+            'ok' => true,
+            'simplyAccount' => $account,
+            'apiKeyPresent' => $key !== null,
+        ],
+        JSON_UNESCAPED_SLASHES
+    );
+    exit;
+}
+
+if ($method === 'POST' && $action === 'simply-test') {
+    $key = wpdev_simply_api_key();
+    if ($key === null) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'no_api_key'], JSON_UNESCAPED_SLASHES);
+        wpdev_admin_api_log('POST simply-test 400 no_api_key');
+        exit;
+    }
+    if (!is_file($configPath) || !is_readable($configPath)) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'missing_config'], JSON_UNESCAPED_SLASHES);
+        wpdev_admin_api_log('POST simply-test 400 missing_config');
+        exit;
+    }
+    $cfgRaw = file_get_contents($configPath);
+    $cfg = is_string($cfgRaw) && $cfgRaw !== '' ? json_decode($cfgRaw, true) : null;
+    if (!is_array($cfg) || !isset($cfg['simply']) || !is_array($cfg['simply'])) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'missing_simply_account'], JSON_UNESCAPED_SLASHES);
+        wpdev_admin_api_log('POST simply-test 400 missing_simply_account');
+        exit;
+    }
+    $account = $cfg['simply']['account'] ?? null;
+    if (!is_string($account) || trim($account) === '') {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'missing_simply_account'], JSON_UNESCAPED_SLASHES);
+        wpdev_admin_api_log('POST simply-test 400 empty_simply_account');
+        exit;
+    }
+    $account = trim($account);
+    $auth = base64_encode($account . ':' . $key);
+    $ctx = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => "Authorization: Basic {$auth}\r\nAccept: application/json\r\n",
+            'timeout' => 15,
+            'ignore_errors' => true,
+        ],
+    ]);
+    $url = 'https://api.simply.com/2/my/products/';
+    $body = @file_get_contents($url, false, $ctx);
+    $headers = isset($http_response_header) && is_array($http_response_header) ? $http_response_header : [];
+    $status = wpdev_parse_http_status_from_headers($headers);
+    if ($body === false && $status === 0) {
+        http_response_code(502);
+        echo json_encode(
+            ['ok' => false, 'error' => 'request_failed', 'detail' => 'Could not reach Simply API.'],
+            JSON_UNESCAPED_SLASHES
+        );
+        wpdev_admin_api_log('POST simply-test 502 request_failed');
+        exit;
+    }
+    $preview = is_string($body) ? substr($body, 0, 240) : '';
+    if ($status >= 200 && $status < 300) {
+        wpdev_admin_api_log("POST simply-test 200 ok status={$status}");
+        echo json_encode(['ok' => true, 'status' => $status], JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+    http_response_code($status > 0 ? $status : 500);
+    echo json_encode(
+        ['ok' => false, 'error' => 'api_error', 'status' => $status, 'detail' => $preview],
+        JSON_UNESCAPED_SLASHES
+    );
+    wpdev_admin_api_log("POST simply-test {$status} api_error");
     exit;
 }
 
