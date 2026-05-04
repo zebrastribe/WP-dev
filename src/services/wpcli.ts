@@ -242,7 +242,7 @@ export async function wpRemoteBootstrapConfigFromRemoteDb(
   remotePath: string,
   remote: RemoteEnvConfig,
   fallbackTablePrefix?: string,
-): Promise<void> {
+): Promise<string> {
   if (!remote.db) {
     throw new Error(
       `Remote DB settings are missing for ${remotePath}. Add staging.db/production.db in wp-dev.config.json to enable first-time bootstrap.`,
@@ -267,7 +267,7 @@ export async function wpRemoteBootstrapConfigFromRemoteDb(
       "--skip-check",
       "--force",
     ]);
-    if (r.code === 0) return;
+    if (r.code === 0) return p;
     lastErr = r.stderr || r.stdout;
   }
   throw new Error(

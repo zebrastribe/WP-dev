@@ -77,6 +77,7 @@ export async function cmdPush(
   logInfo(`push ${env}: connect ssh ${remote.user}@${remote.host}`);
   const ssh = await connectSsh(remote);
   let prePushBackup = "";
+  let bootstrappedFreshRemote = false;
   try {
     let remoteWp = await resolveRemoteWpPath(ssh, remote.path);
     const shouldBootstrapStaging = env === "staging" && !remoteWp.installed;
@@ -97,33 +98,33 @@ export async function cmdPush(
       }
       const localPrefix = await wpLocalGetTablePrefix(configDir, config);
       logInfo(`push ${env}: bootstrap remote wp-config.php from ${env}.db settings`);
-      await wpRemoteBootstrapConfigFromRemoteDb(ssh, remote.path.replace(/^\/+/, ""), remote, localPrefix);
-      remoteWp = await resolveRemoteWpPath(ssh, remote.path);
-      if (remoteWp.installed) {
-        logInfo(
-          `push ${env}: remote WP became available after seed at ${remoteWp.path ?? remote.path}`,
-        );
-      } else {
-        console.error(
-          `Seeded files to ${env}, but remote WordPress is still not available at ${remote.path}.\n` +
-            `Verify ${env}.db credentials and remote path, then rerun push.`,
-        );
-        return;
-      }
+      const bootPath = await wpRemoteBootstrapConfigFromRemoteDb(
+        ssh,
+        remote.path.replace(/^\/+/, ""),
+        remote,
+        localPrefix,
+      );
+      remoteWp = { installed: true, path: bootPath };
+      bootstrappedFreshRemote = true;
+      logInfo(`push ${env}: bootstrap config created at ${bootPath}; proceeding with DB import`);
     }
     const wpPath = remoteWp.path ?? remote.path;
     if (wpPath !== remote.path) {
       logInfo(`push ${env}: using remote wp path ${wpPath} (configured: ${remote.path})`);
     }
 
-    const backupDir = ensureBackupDir(config.project, env);
-    const preName = timestampedDbName();
-    prePushBackup = join(backupDir, `pre-push-${preName}`);
-    const remotePreDump = `/tmp/wp-dev-pre-push-${Date.now()}.sql`;
-    logInfo(`push ${env}: remote pre-push db backup -> ${prePushBackup}`);
-    await wpRemoteDbExport(ssh, wpPath, remotePreDump);
-    await ssh.getFile(remotePreDump, prePushBackup);
-    await ssh.exec(`rm -f ${remotePreDump}`);
+    if (!bootstrappedFreshRemote) {
+      const backupDir = ensureBackupDir(config.project, env);
+      const preName = timestampedDbName();
+      prePushBackup = join(backupDir, `pre-push-${preName}`);
+      const remotePreDump = `/tmp/wp-dev-pre-push-${Date.now()}.sql`;
+      logInfo(`push ${env}: remote pre-push db backup -> ${prePushBackup}`);
+      await wpRemoteDbExport(ssh, wpPath, remotePreDump);
+      await ssh.getFile(remotePreDump, prePushBackup);
+      await ssh.exec(`rm -f ${remotePreDump}`);
+    } else {
+      logInfo(`push ${env}: bootstrap mode — skipping pre-push remote DB backup`);
+    }
 
     logInfo(`push ${env}: rsync files -> remote`);
     await rsyncPush(remote, localWpRoot, { dryRun: false });
@@ -146,5 +147,9 @@ export async function cmdPush(
     ssh.dispose();
   }
 
-  console.error(`Push to ${env} complete. Remote pre-push DB backup: ${prePushBackup}`);
+  if (prePushBackup) {
+    console.error(`Push to ${env} complete. Remote pre-push DB backup: ${prePushBackup}`);
+  } else {
+    console.error(`Push to ${env} complete.`);
+  }
 }
