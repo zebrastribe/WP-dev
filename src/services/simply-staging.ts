@@ -1,5 +1,6 @@
 import type { WpDevConfig } from "../config/schema.js";
 import {
+  domainPathSlug,
   parseMainDomain,
 } from "../utils/domain-defaults.js";
 import { normalizeSiteUrl } from "../utils/remote-config-helpers.js";
@@ -237,6 +238,16 @@ export async function applySimplyStagingDnsToDraft(
     lines.push(
       `Config: staging path set to ${subdomainPath} (Simply subdomain folder; verify in Simply panel).`,
     );
+  } else {
+    // Backward compatibility: older versions guessed /var/www/<apex-slug>/public_html.
+    const legacyGuess = `/var/www/${domainPathSlug(apex)}/public_html`;
+    if (draft.staging.path === legacyGuess) {
+      const subdomainPath = `/${label}`;
+      draft.staging.path = subdomainPath;
+      lines.push(
+        `Config: staging path migrated from legacy ${legacyGuess} to ${subdomainPath} (Simply subdomain folder).`,
+      );
+    }
   }
 
   draft.staging.url = normalizeSiteUrl(`https://${stagingFqdn}`, "https");

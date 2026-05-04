@@ -184,6 +184,11 @@ function wpdev_dns_name_matches_fqdn(string $name, string $fqdn, string $apex): 
     return false;
 }
 
+function wpdev_domain_slug(string $host): string
+{
+    return str_replace('.', '-', strtolower($host));
+}
+
 /**
  * @param array<string, string> $headers
  * @return array{status:int, body:string}
@@ -801,10 +806,15 @@ if ($method === 'POST' && $action === 'simply-setup-staging') {
         $staging['host'] = $sshHost;
         $lines[] = 'Config: staging.host set to ' . $sshHost;
     }
+    $legacyGuess = '/var/www/' . wpdev_domain_slug($apex) . '/public_html';
     if ($stagingPath === '/var/www/staging-not-used') {
         $guess = '/' . $label;
         $staging['path'] = $guess;
         $lines[] = 'Config: staging.path set to ' . $guess . ' (Simply subdomain folder; verify in hosting panel).';
+    } elseif ($stagingPath === $legacyGuess) {
+        $guess = '/' . $label;
+        $staging['path'] = $guess;
+        $lines[] = 'Config: staging.path migrated from legacy ' . $legacyGuess . ' to ' . $guess . ' (Simply subdomain folder).';
     }
     $staging['url'] = 'https://' . $stagingFqdn;
     $cfg['staging'] = $staging;
