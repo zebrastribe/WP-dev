@@ -101,7 +101,7 @@ function printPublishedAccessUrls(loaded: LoadedConfig): void {
 
 async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
   try {
-    // Best-effort: make bind-mounted config file writable for Apache/PHP in the container.
+    // Best-effort: make bind-mounted admin-write targets writable for Apache/PHP in the container.
     await compose(
       loaded.configDir,
       loaded.config,
@@ -113,17 +113,25 @@ async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
         "wordpress",
         "sh",
         "-lc",
-        "touch /wp-dev-repo/wp-dev.config.json && chmod 666 /wp-dev-repo/wp-dev.config.json",
+        [
+          "touch /wp-dev-repo/wp-dev.config.json",
+          "chmod 666 /wp-dev-repo/wp-dev.config.json",
+          "mkdir -p /wp-dev-repo/docker",
+          "touch /wp-dev-repo/docker/.env",
+          "chmod 777 /wp-dev-repo/docker",
+          "chmod 666 /wp-dev-repo/docker/.env",
+        ].join(" && "),
       ],
       { stdio: "pipe" },
     );
-    logInfo("admin save: ensured /wp-dev-repo/wp-dev.config.json is writable");
+    logInfo("admin save: ensured config and docker/.env mounts are writable");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    logInfo(`admin save: could not enforce writable config file (${msg})`);
+    logInfo(`admin save: could not enforce writable mounts (${msg})`);
     console.error(
-      "Warning: could not auto-fix admin save permissions. If save fails with write_config_failed, run:\n" +
-        "  chmod u+rw wp-dev.config.json\n",
+      "Warning: could not auto-fix admin save permissions. If save fails, run:\n" +
+        "  chmod u+rw wp-dev.config.json\n" +
+        "  chmod o+w docker docker/.env\n",
     );
   }
 }
