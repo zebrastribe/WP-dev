@@ -43,6 +43,7 @@ export async function wpLocalRaw(
     service,
     "wp",
     ...wpArgs,
+    ...(execOptions.runUserRoot ? (["--allow-root"] as const) : []),
     `--path=${CONTAINER_WP_PATH}`,
   ];
   const r = await execa("docker", args, {
