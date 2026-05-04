@@ -27,7 +27,11 @@ import {
   sanitizeStagingDnsLabel,
   SimplyStagingDnsConflictError,
 } from "../services/simply-staging.js";
-import { getSimplyApiKey, SIMPLY_API_KEY_ENV } from "../services/simply.js";
+import {
+  getSimplyApiKey,
+  hydrateSimplyApiKeyFromComposeEnv,
+  SIMPLY_API_KEY_ENV,
+} from "../services/simply.js";
 import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
 
 /** RFC 2606-style placeholder when the user has no staging server yet (avoids misleading real subdomains). */
@@ -162,6 +166,7 @@ export async function cmdInit(): Promise<void> {
   logInfo("command init (interactive)");
 
   const loaded = loadConfig();
+  hydrateSimplyApiKeyFromComposeEnv(loaded.configDir, loaded.config);
   let draft: WpDevConfig = {
     ...loaded.config,
     local: { ...loaded.config.local },

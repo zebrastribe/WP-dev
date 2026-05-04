@@ -15,6 +15,7 @@ import { cmdSimplySetupStagingDns, cmdSimplyTest } from "./commands/simply.js";
 import { cmdFixPermissions } from "./commands/fix-permissions.js";
 import { cmdDoctor } from "./commands/doctor.js";
 import { ensureWpDevConfigJson } from "./config/load.js";
+import { hydrateSimplyApiKeyFromComposeEnv } from "./services/simply.js";
 import { initLogger, logError, logInfo } from "./utils/logger.js";
 
 function parseRemoteEnv(s: string): RemoteEnvName {
@@ -37,6 +38,7 @@ async function runWithConfig(
   run: (loaded: LoadedConfig) => Promise<void>,
 ): Promise<void> {
   const loaded = loadConfig();
+  hydrateSimplyApiKeyFromComposeEnv(loaded.configDir, loaded.config);
   initLogger(loaded.configDir);
   logInfo(`command ${label}`);
   try {
@@ -188,13 +190,26 @@ async function main(): Promise<void> {
       "--no-backup-local",
       "Skip exporting local DB to ~/.wp-dev/backups/<project>/local/ before overwriting it",
     )
-    .action(async (env: string, opts: { dryRun?: boolean; backupLocal?: boolean }) => {
+    .option(
+      "--skip-simply-staging-dns",
+      "After pull production, skip auto simply setup-staging-dns when staging is still a placeholder",
+    )
+    .action(
+      async (
+        env: string,
+        opts: { dryRun?: boolean; backupLocal?: boolean; skipSimplyStagingDns?: boolean },
+      ) => {
       const e = parseRemoteEnv(env);
       const dry = Boolean(opts.dryRun);
       const backupLocal = Boolean(opts.backupLocal);
-      const label = `pull ${e}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}`;
+      const skipSimplyStagingDns = Boolean(opts.skipSimplyStagingDns);
+      const label = `pull ${e}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}`;
       await runWithConfig(label, (loaded) =>
-        cmdPull(loaded, e, { dryRun: dry, backupLocal }),
+        cmdPull(loaded, e, {
+          dryRun: dry,
+          backupLocal,
+          skipSimplyStagingDns,
+        }),
       );
     });
 

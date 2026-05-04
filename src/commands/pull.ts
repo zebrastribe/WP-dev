@@ -10,6 +10,7 @@ import { ensureBackupDir, timestampedDbName } from "../services/backup.js";
 import {
   assertRemoteWpInstalled,
   isLocalWpInstalled,
+  wpLocalAlignTablePrefixAfterImport,
   wpLocalDbExportToFile,
   wpLocalDbImportFromFile,
   wpLocalSearchReplace,
@@ -17,11 +18,17 @@ import {
 } from "../services/wpcli.js";
 import { logInfo } from "../utils/logger.js";
 import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
+import { cmdFixPermissions } from "./fix-permissions.js";
+import { cmdSimplySetupStagingDns } from "./simply.js";
+import { getSimplyApiKey } from "../services/simply.js";
+import { isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
 
 export type PullOptions = {
   dryRun: boolean;
   /** When true (default), export local DB before rsync/import if WordPress is installed locally. */
   backupLocal: boolean;
+  /** When true, skip auto simply setup-staging-dns after pull production. Default false. */
+  skipSimplyStagingDns?: boolean;
 };
 
 export async function cmdPull(
@@ -70,29 +77,60 @@ export async function cmdPull(
       await ssh.exec(`rm -f ${remoteDump.replace(/'/g, `'\\''`)}`);
 
       logInfo(`pull ${env}: rsync files -> ${localWpRoot}`);
+      try {
+        await cmdFixPermissions(loaded, { quiet: true });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logInfo(
+          `pull ${env}: fix-permissions failed (${msg}). If rsync errors with Permission denied, run: npm run wp-dev -- fix-permissions`,
+        );
+      }
       await rsyncPull(remote, localWpRoot, { dryRun: false });
 
       const sql = readFileSync(localDump, "utf8");
       if (!/CREATE TABLE|INSERT INTO/i.test(sql)) {
         throw new Error("Downloaded SQL dump looks empty or invalid.");
       }
+      const tablePrefix = detectTablePrefixFromSqlDump(sql);
 
       logInfo(`pull ${env}: local wp db import`);
       await wpLocalDbImportFromFile(configDir, config, localDump);
+      if (tablePrefix) {
+        logInfo(
+          `pull ${env}: align local table prefix to "${tablePrefix}" (docker/.env + wp-config.php)`,
+        );
+        await wpLocalAlignTablePrefixAfterImport(configDir, config, tablePrefix);
+      }
       logInfo(`pull ${env}: search-replace ${remote.url} -> ${config.local.url}`);
       await wpLocalSearchReplace(configDir, config, remote.url, config.local.url);
-
-      const tablePrefix = detectTablePrefixFromSqlDump(sql);
-      if (tablePrefix && tablePrefix !== "wp_") {
-        console.error(
-          `\nRemote DB uses table prefix "${tablePrefix}". Set WORDPRESS_TABLE_PREFIX=${tablePrefix} in docker/.env (see docker/.env.example), then run wp-dev down && wp-dev up. Pull does not sync wp-config.php.\n`,
-        );
-      }
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   } finally {
     ssh.dispose();
+  }
+
+  if (
+    env === "production" &&
+    !(options.skipSimplyStagingDns ?? false) &&
+    config.simply?.account &&
+    isStagingRemotePlaceholder(config) &&
+    getSimplyApiKey()
+  ) {
+    logInfo(
+      `pull ${env}: staging still placeholder — running simply setup-staging-dns (apex from production.url)`,
+    );
+    try {
+      await cmdSimplySetupStagingDns(loaded, undefined, {});
+      console.error(
+        "Simply: staging DNS + wp-dev.config.json staging hints updated. DNS may take a few minutes to propagate.",
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(
+        `Simply staging setup did not complete (${msg}). Fix API/DNS conflict, then run: npm run wp-dev -- simply setup-staging-dns`,
+      );
+    }
   }
 
   const backupNote =

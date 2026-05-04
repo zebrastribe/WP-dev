@@ -1,9 +1,42 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { WpDevConfig } from "../config/schema.js";
+import { getComposeProjectDir } from "./docker-compose.js";
 
 const API_BASE = "https://api.simply.com/2";
 
 /** Env var for Simply.com API key (HTTP Basic password). See https://www.simply.com/en/docs/api/ */
 export const SIMPLY_API_KEY_ENV = "WPDEV_SIMPLY_API_KEY";
+
+export function readDotenvKeyFromFile(filePath: string, key: string): string | undefined {
+  if (!existsSync(filePath)) return undefined;
+  const text = readFileSync(filePath, "utf8");
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = text.match(new RegExp(`^${escapedKey}=(.*)$`, "m"));
+  if (!m?.[1]) return undefined;
+  let v = m[1].trim();
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    v = v.slice(1, -1);
+  }
+  return v.trim() !== "" ? v.trim() : undefined;
+}
+
+/**
+ * If `WPDEV_SIMPLY_API_KEY` is not already set, read it from `docker/.env` (same file Compose uses).
+ * Called at CLI startup so `simply` / `pull` / `doctor` pick up keys saved from the admin UI.
+ */
+export function hydrateSimplyApiKeyFromComposeEnv(
+  configDir: string,
+  config: WpDevConfig,
+): void {
+  if (process.env[SIMPLY_API_KEY_ENV]?.trim()) return;
+  const envPath = join(getComposeProjectDir(configDir, config), ".env");
+  const v = readDotenvKeyFromFile(envPath, SIMPLY_API_KEY_ENV);
+  if (v) process.env[SIMPLY_API_KEY_ENV] = v;
+}
 
 export function getSimplyApiKey(): string | undefined {
   const v = process.env[SIMPLY_API_KEY_ENV];
@@ -16,13 +49,13 @@ export function assertSimplyConfigured(config: WpDevConfig): {
 } {
   if (!config.simply) {
     throw new Error(
-      `Add a "simply" block with "account" (e.g. S123456 or UE12345) to wp-dev.config.json, and set ${SIMPLY_API_KEY_ENV} to your API key.`,
+      `Add a "simply" block with "account" (e.g. S123456 or UE12345) to wp-dev.config.json, and set ${SIMPLY_API_KEY_ENV} to your Simply.com API key.`,
     );
   }
   const apiKey = getSimplyApiKey();
   if (!apiKey) {
     throw new Error(
-      `Set environment variable ${SIMPLY_API_KEY_ENV} to your Simply.com API key (Control Panel).`,
+      `Set ${SIMPLY_API_KEY_ENV} in your shell, in docker/.env, or save it from the wp-dev admin wizard (Simply step).`,
     );
   }
   return { account: config.simply.account, apiKey };

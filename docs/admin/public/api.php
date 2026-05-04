@@ -3,6 +3,7 @@
  * wp-dev admin: load/save wp-dev.config.json from the browser (same origin as /admin/).
  * Config and logs are bind-mounted at /wp-dev-repo/ (see docker-compose.yml).
  * Optional: set WPDEV_ADMIN_SAVE_TOKEN in docker/.env — then send header X-WP-DEV-Admin-Token on POST.
+ * POST action=save-docker-env: JSON {"WPDEV_SIMPLY_API_KEY":"…"} → upserts into host docker/.env (requires ../docker mount).
  * Validation uses wp-dev.config.schema.json (generated from Zod via `npm run generate:schema`).
  * Appends one line per request to /wp-dev-repo/logs/wp-dev-admin-api.log (no request body logged).
  */
@@ -13,10 +14,52 @@ require_once __DIR__ . '/schema-validate.inc.php';
 header('Content-Type: application/json; charset=utf-8');
 
 $configPath = '/wp-dev-repo/wp-dev.config.json';
+$dockerDir = '/wp-dev-repo/docker';
+$dockerEnvPath = $dockerDir . '/.env';
+$dockerEnvExamplePath = $dockerDir . '/.env.example';
 $logDir = '/wp-dev-repo/logs';
 $logFile = $logDir . '/wp-dev-admin-api.log';
 $token = getenv('WPDEV_ADMIN_SAVE_TOKEN') ?: '';
 $schemaPath = __DIR__ . '/wp-dev.config.schema.json';
+
+/**
+ * @param array<string, string> $updates
+ */
+function wpdev_upsert_dotenv_file(string $path, array $updates): void
+{
+    $filtered = [];
+    foreach ($updates as $k => $v) {
+        if (!is_string($k) || !is_string($v) || $v === '') {
+            continue;
+        }
+        if (preg_match('/[\r\n\0]/', $v) === 1) {
+            throw new InvalidArgumentException('invalid env value for ' . $k);
+        }
+        $filtered[$k] = $v;
+    }
+    if (count($filtered) === 0) {
+        return;
+    }
+    $cur = is_file($path) ? (string) file_get_contents($path) : '';
+    $next = $cur;
+    foreach ($filtered as $k => $v) {
+        $line = $k . '=' . $v;
+        $pat = '/^' . preg_quote($k, '/') . '=.*$/m';
+        if (preg_match($pat, $next) === 1) {
+            $next = preg_replace($pat, $line, $next, 1);
+        } else {
+            $next = $next === '' ? ($line . "\n") : (rtrim($next) . "\n" . $line . "\n");
+        }
+    }
+    $tmp = $path . '.' . bin2hex(random_bytes(3)) . '.tmp';
+    if (file_put_contents($tmp, $next) === false) {
+        throw new RuntimeException('tmp_write_failed');
+    }
+    if (!rename($tmp, $path)) {
+        @unlink($tmp);
+        throw new RuntimeException('rename_failed');
+    }
+}
 
 function wpdev_admin_api_log(string $message): void
 {
@@ -153,6 +196,81 @@ if ($method === 'POST' && $action === 'save') {
     }
     $proj = is_string($data['project']) ? $data['project'] : '?';
     wpdev_admin_api_log("POST save 200 ok project={$proj}");
+    echo json_encode(['ok' => true], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+if ($method === 'POST' && $action === 'save-docker-env') {
+    if ($token !== '' && ($_SERVER['HTTP_X_WP_DEV_ADMIN_TOKEN'] ?? '') !== $token) {
+        http_response_code(403);
+        echo json_encode(['ok' => false, 'error' => 'forbidden'], JSON_UNESCAPED_SLASHES);
+        wpdev_admin_api_log('POST save-docker-env 403 forbidden');
+        exit;
+    }
+    $body = file_get_contents('php://input');
+    if ($body === false || $body === '') {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'empty_body'], JSON_UNESCAPED_SLASHES);
+        wpdev_admin_api_log('POST save-docker-env 400 empty_body');
+        exit;
+    }
+    $data = json_decode($body, true);
+    if (!is_array($data)) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'invalid_json'], JSON_UNESCAPED_SLASHES);
+        wpdev_admin_api_log('POST save-docker-env 400 invalid_json');
+        exit;
+    }
+    $allowed = ['WPDEV_SIMPLY_API_KEY'];
+    $updates = [];
+    foreach ($allowed as $key) {
+        if (!array_key_exists($key, $data)) {
+            continue;
+        }
+        $val = $data[$key];
+        if (!is_string($val) || $val === '') {
+            continue;
+        }
+        $updates[$key] = $val;
+    }
+    if (count($updates) === 0) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'no_updates'], JSON_UNESCAPED_SLASHES);
+        wpdev_admin_api_log('POST save-docker-env 400 no_updates');
+        exit;
+    }
+    if (!is_dir($dockerDir) || !is_writable($dockerDir)) {
+        http_response_code(500);
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => 'docker_dir_not_writable',
+                'detail' => 'Mount ../docker into the wordpress service (see docker-compose.yml).',
+            ],
+            JSON_UNESCAPED_SLASHES
+        );
+        wpdev_admin_api_log('POST save-docker-env 500 docker_dir_not_writable');
+        exit;
+    }
+    if (!is_file($dockerEnvPath)) {
+        if (is_file($dockerEnvExamplePath)) {
+            copy($dockerEnvExamplePath, $dockerEnvPath);
+        } else {
+            file_put_contents($dockerEnvPath, "WP_PORT=8888\n");
+        }
+    }
+    try {
+        wpdev_upsert_dotenv_file($dockerEnvPath, $updates);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(
+            ['ok' => false, 'error' => 'write_env_failed', 'detail' => $e->getMessage()],
+            JSON_UNESCAPED_SLASHES
+        );
+        wpdev_admin_api_log('POST save-docker-env 500 write_env_failed');
+        exit;
+    }
+    wpdev_admin_api_log('POST save-docker-env 200 ok keys=' . implode(',', array_keys($updates)));
     echo json_encode(['ok' => true], JSON_UNESCAPED_SLASHES);
     exit;
 }

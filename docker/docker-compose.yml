@@ -42,9 +42,10 @@ services:
       WPDEV_ADMIN_SAVE_TOKEN: ${WPDEV_ADMIN_SAVE_TOKEN:-}
     volumes:
       - ../wordpress:/var/www/html
-      # wp-dev admin: only config + logs (not the whole repo).
+      # wp-dev admin: config + logs + docker/ (so api.php can upsert Simply API key into docker/.env).
       - ../wp-dev.config.json:/wp-dev-repo/wp-dev.config.json:rw
       - ../logs:/wp-dev-repo/logs:rw
+      - ../docker:/wp-dev-repo/docker:rw
     depends_on:
       db:
         condition: service_healthy

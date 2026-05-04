@@ -1,4 +1,11 @@
-import { copyFileSync, createReadStream, unlinkSync } from "node:fs";
+import {
+  copyFileSync,
+  createReadStream,
+  existsSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
@@ -13,11 +20,17 @@ import { resolveFromConfigDir } from "../config/load.js";
 
 const CONTAINER_WP_PATH = "/var/www/html";
 
+export type WpLocalRawOptions = {
+  input?: Readable | Buffer;
+  /** Run the wpcli container as root so it can edit wp-config.php after host-owned chown (fix-permissions). */
+  runUserRoot?: boolean;
+};
+
 export async function wpLocalRaw(
   configDir: string,
   config: WpDevConfig,
   wpArgs: string[],
-  execOptions: { input?: Readable | Buffer } = {},
+  execOptions: WpLocalRawOptions = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const projectDir = getComposeProjectDir(configDir, config);
   const service = config.local.composeService;
@@ -25,6 +38,7 @@ export async function wpLocalRaw(
     ...getDockerComposeLeadArgs(config),
     "run",
     "--rm",
+    ...(execOptions.runUserRoot ? (["--user", "0"] as const) : []),
     "-T",
     service,
     "wp",
@@ -183,6 +197,68 @@ export async function wpRemoteSearchReplace(
   ]);
   if (r.code !== 0) {
     throw new Error(`Remote wp search-replace failed: ${r.stderr || r.stdout}`);
+  }
+}
+
+function upsertDotenvKey(envPath: string, key: string, value: string): void {
+  const line = `${key}=${value}`;
+  const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${escapedKey}=.*$`, "m");
+  if (re.test(current)) {
+    const next = current.replace(re, line);
+    writeFileSync(envPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
+    return;
+  }
+  const prefix = current.trim().length > 0 ? `${current.replace(/\s*$/, "")}\n` : "";
+  writeFileSync(envPath, `${prefix}${line}\n`, "utf8");
+}
+
+function ensureComposeDotenv(configDir: string, config: WpDevConfig): string {
+  const projectDir = getComposeProjectDir(configDir, config);
+  const envPath = join(projectDir, ".env");
+  if (existsSync(envPath)) return envPath;
+  const example = join(projectDir, ".env.example");
+  if (existsSync(example)) {
+    copyFileSync(example, envPath);
+    return envPath;
+  }
+  writeFileSync(envPath, "WP_PORT=8888\n", "utf8");
+  return envPath;
+}
+
+/**
+ * After importing a remote dump, align local `$table_prefix` and Compose env so WP-CLI
+ * (search-replace, etc.) matches the imported tables. Pull excludes wp-config.php from rsync.
+ */
+export async function wpLocalAlignTablePrefixAfterImport(
+  configDir: string,
+  config: WpDevConfig,
+  tablePrefix: string,
+): Promise<void> {
+  await waitForLocalMysqlReady(configDir, config);
+  const envPath = ensureComposeDotenv(configDir, config);
+  upsertDotenvKey(envPath, "WORDPRESS_TABLE_PREFIX", tablePrefix);
+
+  let r = await wpLocalRaw(
+    configDir,
+    config,
+    ["config", "set", "table_prefix", tablePrefix, "--type=variable"],
+    { runUserRoot: true },
+  );
+  if (r.exitCode !== 0) {
+    r = await wpLocalRaw(
+      configDir,
+      config,
+      ["config", "set", "table_prefix", tablePrefix],
+      { runUserRoot: true },
+    );
+  }
+  if (r.exitCode !== 0) {
+    throw new Error(
+      `Could not set local table_prefix to "${tablePrefix}" (wp config set failed). stderr: ${r.stderr || r.stdout}\n` +
+        `Set WORDPRESS_TABLE_PREFIX=${tablePrefix} in docker/.env, run wp-dev down && wp-dev up, then pull again.`,
+    );
   }
 }
 

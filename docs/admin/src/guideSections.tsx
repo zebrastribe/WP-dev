@@ -178,11 +178,15 @@ export const Backups: FC = () => (
 export const SimplyDns: FC = () => (
   <Prose>
     <p>
-      Optional <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">simply.account</code> in config + env{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_SIMPLY_API_KEY</code>.{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">simply setup-staging-dns</code> can add an{" "}
+      Optional <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">simply.account</code> in{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev.config.json</code> plus{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_SIMPLY_API_KEY</code> in{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> (Wizard / Config Assistant can write the key; it is never stored in JSON).{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">simply setup-staging-dns</code> adds an{" "}
       <strong>A</strong> record for <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">&lt;label&gt;.&lt;apex&gt;</code>{" "}
-      (default label <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">staging</code>) and patch staging URL / hints.
+      (default <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">staging</code>) and patches staging hints. After{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">pull production</code>, wp-dev runs this automatically when staging is still a placeholder (skip with{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">--skip-simply-staging-dns</code>).
     </p>
     <ul className="list-inside list-disc space-y-1">
       <li>

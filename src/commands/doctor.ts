@@ -5,6 +5,8 @@ import { getRemoteEnv, type RemoteEnvName } from "../config/schema.js";
 import { connectSsh } from "../services/ssh.js";
 import { rsyncPull } from "../services/rsync.js";
 import { assertRemoteWpInstalled } from "../services/wpcli.js";
+import { getSimplyApiKey, SIMPLY_API_KEY_ENV } from "../services/simply.js";
+import { inferApexFromConfig } from "../services/simply-staging.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
 import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
 import { logInfo } from "../utils/logger.js";
@@ -13,6 +15,29 @@ export type DoctorOptions = {
   env?: RemoteEnvName;
   rsyncDryRun: boolean;
 };
+
+function printSimplyStagingDnsHint(loaded: LoadedConfig): void {
+  const apex = inferApexFromConfig(loaded.config, "");
+  const cmd = apex
+    ? `npm run wp-dev -- simply setup-staging-dns ${apex}`
+    : `npm run wp-dev -- simply setup-staging-dns`;
+  const { config } = loaded;
+  if (config.simply?.account && getSimplyApiKey()) {
+    console.error(
+      `Simply.com (${config.simply.account} + ${SIMPLY_API_KEY_ENV}): run \`${cmd}\` to create the staging A record and refresh staging.{host,path,user,url} from the API.`,
+    );
+    return;
+  }
+  if (config.simply?.account && !getSimplyApiKey()) {
+    console.error(
+      `Simply account "${config.simply.account}" is in config; set ${SIMPLY_API_KEY_ENV} in docker/.env (wp-dev admin wizard Simply step) or export it, then run \`${cmd}\`.`,
+    );
+    return;
+  }
+  console.error(
+    `Optional: add "simply":{"account":"S…"}, set ${SIMPLY_API_KEY_ENV} (wizard or docker/.env), then \`${cmd}\` — README "Simply.com staging DNS".`,
+  );
+}
 
 async function tryDns(host: string): Promise<{ ok: true } | { ok: false; err: string }> {
   try {
@@ -38,6 +63,9 @@ async function checkOneRemote(
     console.error(
       `SKIP: ${remote.host} looks like a placeholder (.invalid). Edit ${env} in wp-dev.config.json before pull ${env} / push ${env}.`,
     );
+    if (env === "staging") {
+      printSimplyStagingDnsHint(loaded);
+    }
     return "skip";
   }
 
@@ -97,10 +125,14 @@ export async function cmdDoctor(loaded: LoadedConfig, options: DoctorOptions): P
 
   let failed = 0;
   let skipped = 0;
+  const skippedEnvs: RemoteEnvName[] = [];
   for (const env of targets) {
     const r = await checkOneRemote(loaded, env, options.rsyncDryRun);
     if (r === "fail") failed += 1;
-    if (r === "skip") skipped += 1;
+    if (r === "skip") {
+      skipped += 1;
+      skippedEnvs.push(env);
+    }
   }
 
   console.error("");
@@ -108,9 +140,16 @@ export async function cmdDoctor(loaded: LoadedConfig, options: DoctorOptions): P
     console.error(`doctor finished with ${failed} failure(s). Fix SSH/WP-CLI above, then retry.`);
     throw new Error(`wp-dev doctor: ${failed} remote check(s) failed`);
   }
-  console.error(
-    skipped > 0
-      ? "doctor: all checked remotes passed or were skipped (staging placeholder)."
-      : "doctor: all checked remotes passed.",
-  );
+  if (skipped > 0) {
+    const skippedList = skippedEnvs.join(", ");
+    const checked = targets.length - skipped;
+    console.error(
+      `doctor: ${checked}/${targets.length} remote checks passed; skipped (${skippedList}) due to placeholder host config.`,
+    );
+    console.error(
+      "Update skipped env(s) in wp-dev.config.json to enable full checks.",
+    );
+    return;
+  }
+  console.error("doctor: all checked remotes passed.");
 }

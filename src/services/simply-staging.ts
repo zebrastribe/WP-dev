@@ -4,10 +4,11 @@ import {
   parseMainDomain,
 } from "../utils/domain-defaults.js";
 import { normalizeSiteUrl } from "../utils/remote-config-helpers.js";
-import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
+import {
+  isPlaceholderRemoteHost,
+  STAGING_PLACEHOLDER_SSH_PATH,
+} from "../utils/remote-placeholder.js";
 import { simplyGetJson, simplyPostJson } from "./simply.js";
-
-const STAGING_PLACEHOLDER_PATH = "/var/www/staging-not-used";
 
 type SimplyProduct = {
   object: string;
@@ -220,7 +221,7 @@ export async function applySimplyStagingDnsToDraft(
       lines.push(`Config: staging SSH host set to ${sshHost} (from Simply product).`);
     }
     const slugPath = `/var/www/${domainPathSlug(apex)}/public_html`;
-    if (draft.staging.path === STAGING_PLACEHOLDER_PATH) {
+    if (draft.staging.path === STAGING_PLACEHOLDER_SSH_PATH) {
       draft.staging.path = slugPath;
       lines.push(`Config: staging path guess ${slugPath} — verify in Simply panel (Shared hosting).`);
     }

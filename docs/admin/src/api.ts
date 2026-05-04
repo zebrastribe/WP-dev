@@ -2,7 +2,7 @@ import { logAdmin } from "./adminLog";
 import { validateWpDevConfigJson } from "./validateConfig";
 
 /** Same-origin /admin/api.php (Docker) or dev proxy to WP port. */
-export function apiPhpUrl(action: "load" | "save"): string {
+export function apiPhpUrl(action: "load" | "save" | "save-docker-env"): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return `${origin}/admin/api.php?action=${action}`;
 }
@@ -93,6 +93,49 @@ export async function saveWpDevConfig(
     return data as SaveResponse;
   } catch (e) {
     logAdmin("error", "saveWpDevConfig: network or fetch failed", e instanceof Error ? e.message : String(e));
+    return { ok: false, error: "network_error" };
+  }
+}
+
+/** Upsert secrets into host `docker/.env` (not wp-dev.config.json). Same auth as save when token is set. */
+export async function saveDockerEnvSecrets(
+  body: Record<string, string>,
+  token?: string,
+): Promise<SaveResponse> {
+  const t0 = performance.now();
+  logAdmin("info", "saveDockerEnvSecrets: POST started", `keys=${Object.keys(body).join(",")}`);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token?.trim()) headers["X-WP-DEV-Admin-Token"] = token.trim();
+  try {
+    const res = await fetch(apiPhpUrl("save-docker-env"), {
+      method: "POST",
+      headers,
+      credentials: "same-origin",
+      body: JSON.stringify(body),
+    });
+    const ms = Math.round(performance.now() - t0);
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch {
+      logAdmin("error", "saveDockerEnvSecrets: response is not JSON", `HTTP ${res.status} ${ms}ms`);
+      return { ok: false, error: "invalid_response" };
+    }
+    if (!res.ok) {
+      if (data && typeof data === "object" && "error" in data) {
+        const err = String((data as { error: unknown }).error);
+        const detail =
+          "detail" in data ? String((data as { detail: unknown }).detail) : "";
+        const msg = detail ? `${err} (${detail})` : err;
+        logAdmin("error", "saveDockerEnvSecrets: rejected", `HTTP ${res.status} ${msg} ${ms}ms`);
+        return { ok: false, error: msg };
+      }
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
+    logAdmin("info", "saveDockerEnvSecrets: ok", `${ms}ms`);
+    return data as SaveResponse;
+  } catch (e) {
+    logAdmin("error", "saveDockerEnvSecrets: fetch failed", e instanceof Error ? e.message : String(e));
     return { ok: false, error: "network_error" };
   }
 }

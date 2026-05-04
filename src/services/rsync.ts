@@ -46,11 +46,25 @@ export async function rsyncPull(
     remoteUrl,
     localDir.replace(/\/$/, "") + "/",
   ];
-  await execa("rsync", args, { stdio: "inherit", reject: false }).then((r) => {
-    if (r.exitCode !== 0) {
-      throw new Error(`rsync pull failed with exit code ${r.exitCode}`);
-    }
+  const r = await execa("rsync", args, {
+    reject: false,
+    stdout: "inherit",
+    stderr: "pipe",
   });
+  if (r.stderr) process.stderr.write(r.stderr);
+  if (r.exitCode !== 0) {
+    const err = r.stderr ?? "";
+    let hint = "";
+    if (/Permission denied|mkstemp|Operation not permitted/i.test(err)) {
+      hint =
+        "\n\nLikely fix: Docker created files under wordpress/ as www-data, so host rsync cannot write. From the repo root run:\n  npm run wp-dev -- fix-permissions\nThen retry this pull.";
+    }
+    if (/inflate returned/i.test(err)) {
+      hint +=
+        "\n\n(If you also see rsync inflate errors, they are often a follow-on after partial writes; retry after fix-permissions.)";
+    }
+    throw new Error(`rsync pull failed with exit code ${r.exitCode}${hint}`);
+  }
 }
 
 export async function rsyncPush(
@@ -72,9 +86,19 @@ export async function rsyncPush(
     localDir.replace(/\/$/, "") + "/",
     remoteUrl,
   ];
-  await execa("rsync", args, { stdio: "inherit", reject: false }).then((r) => {
-    if (r.exitCode !== 0) {
-      throw new Error(`rsync push failed with exit code ${r.exitCode}`);
-    }
+  const r = await execa("rsync", args, {
+    reject: false,
+    stdout: "inherit",
+    stderr: "pipe",
   });
+  if (r.stderr) process.stderr.write(r.stderr);
+  if (r.exitCode !== 0) {
+    const err = r.stderr ?? "";
+    let hint = "";
+    if (/Permission denied|mkstemp|Operation not permitted/i.test(err)) {
+      hint =
+        "\n\nLikely fix: host rsync cannot write into wordpress/ (ownership). Run:\n  npm run wp-dev -- fix-permissions\nThen retry.";
+    }
+    throw new Error(`rsync push failed with exit code ${r.exitCode}${hint}`);
+  }
 }

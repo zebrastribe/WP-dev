@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { logAdmin } from "./adminLog";
+import { saveDockerEnvSecrets } from "./api";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
 const DEFAULT_JSON = JSON.stringify(EXAMPLE_WP_DEV_CONFIG, null, 2);
 
 export function ConfigAssistant() {
   const [raw, setRaw] = useState(DEFAULT_JSON);
+  const [simplyApiKey, setSimplyApiKey] = useState("");
+  const [saveToken, setSaveToken] = useState("");
+  const [secretSaveMsg, setSecretSaveMsg] = useState<string | null>(null);
+  const [savingSecret, setSavingSecret] = useState(false);
   const prevParseOk = useRef<boolean | null>(null);
 
   useEffect(() => {
@@ -165,9 +170,63 @@ export function ConfigAssistant() {
             }}
             disabled={!parsed}
           />
-          <p className="mt-1 text-xs text-slate-500">
-            API key: environment variable <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_SIMPLY_API_KEY</code> — never paste keys here; use shell env.
-          </p>
+          <label className="mt-2 block">
+            <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+              Simply.com API key → host <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> (not JSON)
+            </span>
+            <input
+              type="password"
+              autoComplete="off"
+              className="w-full max-w-md rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-900"
+              placeholder="Paste key, then Save key below"
+              value={simplyApiKey}
+              onChange={(e) => setSimplyApiKey(e.target.value)}
+            />
+          </label>
+          <label className="mt-2 block">
+            <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+              Optional <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code> (same as docker/.env)
+            </span>
+            <input
+              type="password"
+              autoComplete="off"
+              className="w-full max-w-md rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-900"
+              value={saveToken}
+              onChange={(e) => setSaveToken(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={savingSecret || !simplyApiKey.trim()}
+            className="mt-2 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
+            onClick={async () => {
+              setSavingSecret(true);
+              setSecretSaveMsg(null);
+              try {
+                const r = await saveDockerEnvSecrets(
+                  { WPDEV_SIMPLY_API_KEY: simplyApiKey.trim() },
+                  saveToken.trim() || undefined,
+                );
+                if (!r.ok) {
+                  setSecretSaveMsg(`Failed: ${"error" in r ? r.error : "unknown"}`);
+                  logAdmin("warn", "ConfigAssistant: save-docker-env failed", "error" in r ? r.error : "");
+                } else {
+                  setSimplyApiKey("");
+                  setSecretSaveMsg("Saved to docker/.env. Run wp-dev down && wp-dev up on the host.");
+                  logAdmin("info", "ConfigAssistant: WPDEV_SIMPLY_API_KEY saved via API");
+                }
+              } catch (e) {
+                setSecretSaveMsg(e instanceof Error ? e.message : String(e));
+              } finally {
+                setSavingSecret(false);
+              }
+            }}
+          >
+            {savingSecret ? "Saving…" : "Save Simply API key to server"}
+          </button>
+          {secretSaveMsg && (
+            <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">{secretSaveMsg}</p>
+          )}
         </div>
       </div>
       <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">

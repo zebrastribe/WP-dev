@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { loadWpDevConfig, saveWpDevConfig } from "./api";
+import { loadWpDevConfig, saveDockerEnvSecrets, saveWpDevConfig } from "./api";
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
@@ -105,6 +105,8 @@ export function Wizard() {
   const [hasStagingServer, setHasStagingServer] = useState(false);
   const [useSimply, setUseSimply] = useState(false);
   const [saveToken, setSaveToken] = useState("");
+  /** Never stored in localStorage draft; optional write to host docker/.env after config save. */
+  const [simplyApiKey, setSimplyApiKey] = useState("");
   const [alert, setAlert] = useState<WizardAlert | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -289,11 +291,29 @@ export function Wizard() {
         });
         return;
       }
+      let extra = "";
+      if (useSimply && data.simply?.account && simplyApiKey.trim()) {
+        const keyRes = await saveDockerEnvSecrets(
+          { WPDEV_SIMPLY_API_KEY: simplyApiKey.trim() },
+          saveToken.trim() || undefined,
+        );
+        setSimplyApiKey("");
+        if (!keyRes.ok) {
+          extra = `\n\nSimply API key was NOT saved to docker/.env: ${"error" in keyRes ? keyRes.error : "unknown"}. Config JSON did save. Fix permissions/mount or save token, then save again with the key.`;
+          logAdmin("warn", "Wizard: docker/.env secret save failed", "error" in keyRes ? keyRes.error : "");
+        } else {
+          extra =
+            "\n\nSaved WPDEV_SIMPLY_API_KEY to docker/.env. Run `wp-dev down && wp-dev up` so the stack picks it up, then `wp-dev simply test`.";
+          logAdmin("info", "Wizard: Simply API key written to docker/.env");
+        }
+      }
       localStorage.removeItem(DRAFT_KEY);
       logAdmin("info", "Wizard: draft cleared after successful save");
       setAlert({
         tone: "success",
-        text: "Saved wp-dev.config.json. If you changed project or ports, run: wp-dev down && wp-dev up — then open your local WordPress URL.",
+        text:
+          "Saved wp-dev.config.json. If you changed project or ports, run: wp-dev down && wp-dev up — then open your local WordPress URL." +
+          extra,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -445,23 +465,39 @@ export function Wizard() {
               }}
               className="rounded border-slate-300"
             />
-            Add Simply.com account (API key stays in <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_SIMPLY_API_KEY</code> in your shell or .env)
+            Add Simply.com account + optional API key (saved to host <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> as{" "}
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_SIMPLY_API_KEY</code>, not in wp-dev.config.json)
           </label>
           {useSimply && (
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">simply.account (S123456 or UE12345)</span>
-              <input
-                className={input}
-                placeholder="S123456 or UE12345"
-                value={data.simply?.account ?? ""}
-                onChange={(e) =>
-                  setData((d) => ({
-                    ...d,
-                    simply: e.target.value.trim() ? { account: e.target.value.trim().toUpperCase() } : undefined,
-                  }))
-                }
-              />
-            </label>
+            <div className="space-y-3">
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">simply.account (S123456 or UE12345)</span>
+                <input
+                  className={input}
+                  placeholder="S123456 or UE12345"
+                  value={data.simply?.account ?? ""}
+                  onChange={(e) =>
+                    setData((d) => ({
+                      ...d,
+                      simply: e.target.value.trim() ? { account: e.target.value.trim().toUpperCase() } : undefined,
+                    }))
+                  }
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Simply.com API key (optional; saved to docker/.env on Save)
+                </span>
+                <input
+                  className={input}
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Leave empty to keep existing key on server"
+                  value={simplyApiKey}
+                  onChange={(e) => setSimplyApiKey(e.target.value)}
+                />
+              </label>
+            </div>
           )}
         </div>
       )}
