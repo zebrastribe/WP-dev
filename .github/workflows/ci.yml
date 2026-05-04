@@ -19,3 +19,9 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
+      - run: test -x dist/cli.js
+      - run: php -l docs/admin/public/api.php && php -l docs/admin/public/schema-validate.inc.php
+      - run: npm ci --prefix docs/admin
+      - run: npm run typecheck --prefix docs/admin
+      - run: npm run build --prefix docs/admin
+      - run: npm run build:wp --prefix docs/admin

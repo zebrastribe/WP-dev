@@ -1,0 +1,141 @@
+{
+  "$ref": "#/definitions/WpDevConfig",
+  "definitions": {
+    "WpDevConfig": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "local": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "composeFile": {
+              "type": "string",
+              "default": "docker-compose.yml"
+            },
+            "composeProjectName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "composeService": {
+              "type": "string",
+              "default": "wpcli"
+            },
+            "wpRoot": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "url",
+            "path",
+            "wpRoot"
+          ],
+          "additionalProperties": false
+        },
+        "staging": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "user": {
+              "type": "string",
+              "minLength": 1
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "port": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "identityFile": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "host",
+            "user",
+            "path",
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        "production": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "user": {
+              "type": "string",
+              "minLength": 1
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "port": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "identityFile": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "host",
+            "user",
+            "path",
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        "simply": {
+          "type": "object",
+          "properties": {
+            "account": {
+              "type": "string",
+              "pattern": "^S\\d+$"
+            }
+          },
+          "required": [
+            "account"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "project",
+        "local",
+        "staging",
+        "production"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

@@ -5,5 +5,8 @@ docker/.env
 wp-dev.config.json
 wordpress/*
 !wordpress/.gitkeep
-logs/
+logs/*
+!logs/.gitkeep
 .DS_Store
+docs/admin/node_modules/
+docs/admin/dist/

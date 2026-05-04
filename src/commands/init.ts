@@ -21,6 +21,21 @@ import {
   suggestStaging,
   type RemoteGuess,
 } from "../utils/domain-defaults.js";
+import {
+  applySimplyStagingDnsToDraft,
+  inferApexFromConfig,
+  sanitizeStagingDnsLabel,
+  SimplyStagingDnsConflictError,
+} from "../services/simply-staging.js";
+import { getSimplyApiKey, SIMPLY_API_KEY_ENV } from "../services/simply.js";
+import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
+
+/** RFC 2606-style placeholder when the user has no staging server yet (avoids misleading real subdomains). */
+const STAGING_PLACEHOLDER_GUESS: RemoteGuess = {
+  host: "staging.example.invalid",
+  path: "/var/www/staging-not-used",
+  url: "https://staging.example.invalid",
+};
 
 type PromptRl = ReturnType<typeof readline.createInterface>;
 
@@ -155,12 +170,15 @@ export async function cmdInit(): Promise<void> {
   };
 
   const rl = readline.createInterface({ input, output });
+  let wroteStagingPlaceholders = false;
   try {
     console.error(
       [
         "",
         "wp-dev init — writes wp-dev.config.json (no pull/push).",
         "SSH: optional key file path only; empty = OpenSSH defaults.",
+        "Only local.url is your Docker site in the browser (e.g. http://localhost:8888). Staging / production are remote pull/push targets — not a second local URL.",
+        "Optional: with Simply.com API credentials, init can add a staging DNS A record and fill staging hints — not full hosting setup.",
         "",
       ].join("\n"),
     );
@@ -172,7 +190,7 @@ export async function cmdInit(): Promise<void> {
 
     const domainRaw = await askOptional(
       rl,
-      "Main site domain (e.g. stri.be) — guesses staging./prod hosts and /var/www/<slug> paths [empty = configure staging & production separately]",
+      "Main site domain (e.g. stri.be) — guesses VPS-style staging./prod + /var/www/<slug> [empty = configure staging & production separately; recommended on shared hosting]",
       "",
     );
 
@@ -185,8 +203,23 @@ export async function cmdInit(): Promise<void> {
       console.error(
         `\nFrom domain "${base}" → path slug "${slug}" (used under /var/www/…):\n` +
           `  staging:  ssh ${stSug.host}  path ${stSug.path}  url ${stSug.url}\n` +
-          `  production: ssh ${prSug.host}  path ${prSug.path}  url ${prSug.url}\n`,
+          `  production: ssh ${prSug.host}  path ${prSug.path}  url ${prSug.url}\n` +
+          `\nThese defaults assume a VPS-style layout. Shared hosting (Simply, UnoEuro, …) usually needs a different SSH host and path — see README (Shared hosting).\n` +
+          `\nStaging URL (${stSug.url}) needs DNS + hosting before it works in a browser. With Simply.com (later prompt), wp-dev can create the staging A record only — see README (Simply.com staging DNS).\n`,
       );
+
+      const hasStaging = await askYes(
+        rl,
+        "Do you have a staging server ready (DNS + hosting + SSH) for wp-dev pull/push staging?",
+        true,
+      );
+      const stagingGuess: RemoteGuess = hasStaging ? stSug : STAGING_PLACEHOLDER_GUESS;
+      if (!hasStaging) {
+        wroteStagingPlaceholders = true;
+        console.error(
+          `\nStaging will be saved as placeholders (${STAGING_PLACEHOLDER_GUESS.host} / ${STAGING_PLACEHOLDER_GUESS.url}) until you edit wp-dev.config.json. Production still uses the guesses below (or your manual edits).\n`,
+        );
+      }
 
       const user = await ask(
         rl,
@@ -220,14 +253,21 @@ export async function cmdInit(): Promise<void> {
       if (
         await askYes(
           rl,
-          "Use these guessed hosts/paths/URLs (you can re-run init to change)?",
+          hasStaging
+            ? "Use these guessed hosts/paths/URLs (you can re-run init to change)?"
+            : "Use guessed production + placeholder staging (you can re-run init to change)?",
           true,
         )
       ) {
-        draft.staging = applyRemoteGuess(stSug, user, identityFile, sharedPort);
+        draft.staging = applyRemoteGuess(stagingGuess, user, identityFile, sharedPort);
         draft.production = applyRemoteGuess(prSug, user, identityFile, sharedPort);
       } else {
-        draft.staging = await promptRemote(rl, "Staging", draft.staging, stSug);
+        draft.staging = await promptRemote(
+          rl,
+          hasStaging ? "Staging" : "Staging (optional — defaults are placeholders)",
+          draft.staging,
+          stagingGuess,
+        );
         draft.production = await promptRemote(
           rl,
           "Production",
@@ -260,12 +300,92 @@ export async function cmdInit(): Promise<void> {
       )
         .trim()
         .toUpperCase();
-      if (!/^S\d+$/i.test(acc)) {
+      if (!/^S\d+$/.test(acc)) {
         throw new Error(
           `Invalid Simply account "${acc}". Use your Control Panel account (form S + digits).`,
         );
       }
       draft = { ...draft, simply: { account: acc } };
+    }
+
+    const apexForDns = inferApexFromConfig(draft, domainRaw);
+    if (draft.simply && getSimplyApiKey() && apexForDns) {
+      if (
+        await askYes(
+          rl,
+          `Create Simply DNS (default: A record staging.${apexForDns}) and update staging hints in this config? (uses ${SIMPLY_API_KEY_ENV})`,
+          false,
+        )
+      ) {
+        const reportStagingDns = (lines: string[]): void => {
+          for (const line of lines) console.error(line);
+          if (!isPlaceholderRemoteHost(draft.staging.host)) {
+            wroteStagingPlaceholders = false;
+          }
+        };
+        try {
+          const lines = await applySimplyStagingDnsToDraft(draft, apexForDns);
+          reportStagingDns(lines);
+        } catch (e) {
+          if (e instanceof SimplyStagingDnsConflictError) {
+            console.error(`\n${e.message}\n`);
+            if (
+              await askYes(
+                rl,
+                "Keep the existing Simply DNS at that name and only update staging.url / hints here? (no API change)",
+                true,
+              )
+            ) {
+              try {
+                const lines = await applySimplyStagingDnsToDraft(draft, apexForDns, {
+                  onDifferentExistingA: "config-only",
+                });
+                reportStagingDns(lines);
+              } catch (e2) {
+                console.error(
+                  `Simply staging DNS failed: ${e2 instanceof Error ? e2.message : String(e2)}`,
+                );
+              }
+            } else {
+              const alt = await askOptional(
+                rl,
+                'Alternate DNS label instead of "staging" (e.g. dev → dev.<domain>). Leave empty to skip',
+                "",
+              );
+              if (alt.trim()) {
+                try {
+                  const label = sanitizeStagingDnsLabel(alt);
+                  const lines = await applySimplyStagingDnsToDraft(draft, apexForDns, {
+                    stagingLabel: label,
+                  });
+                  reportStagingDns(lines);
+                } catch (e2) {
+                  if (e2 instanceof SimplyStagingDnsConflictError) {
+                    console.error(`\n${e2.message}\n`);
+                    console.error(
+                      "That name is also in use at Simply. Edit DNS in the panel or pick another label.\n",
+                    );
+                  } else {
+                    console.error(
+                      `Simply staging DNS failed: ${e2 instanceof Error ? e2.message : String(e2)}`,
+                    );
+                  }
+                }
+              } else {
+                console.error("Skipped Simply staging DNS changes.\n");
+              }
+            }
+          } else {
+            console.error(
+              `Simply staging DNS failed: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+        }
+      }
+    } else if (draft.simply && apexForDns && !getSimplyApiKey()) {
+      console.error(
+        `\nSimply account is in config but ${SIMPLY_API_KEY_ENV} is not set — skipping API staging DNS. Set the key and run: wp-dev simply setup-staging-dns\n`,
+      );
     }
 
     try {
@@ -281,6 +401,11 @@ export async function cmdInit(): Promise<void> {
     const path = `${configDir}/wp-dev.config.json`.replace(/\\/g, "/");
     logInfo(`init wrote ${path}`);
     console.error(`\nSaved: ${path}\n`);
+    if (wroteStagingPlaceholders) {
+      console.error(
+        "Staging in config is placeholder-only until you set a real host/path/URL. Do not run pull staging / push staging until then — see README (Staging is optional).\n",
+      );
+    }
   } finally {
     rl.close();
   }

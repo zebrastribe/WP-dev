@@ -46,3 +46,45 @@ export async function simplyGet(
   const body = await res.text();
   return { status: res.status, body };
 }
+
+/** GET and parse JSON; throws on non-2xx or invalid JSON. */
+export async function simplyGetJson(config: WpDevConfig, path: string): Promise<unknown> {
+  const { status, body } = await simplyGet(config, path);
+  if (status < 200 || status >= 300) {
+    throw new Error(`Simply API HTTP ${status}: ${body.slice(0, 400)}`);
+  }
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    throw new Error(`Simply API: expected JSON (${status}): ${body.slice(0, 240)}`);
+  }
+}
+
+/** POST JSON body; throws on non-2xx or invalid JSON. */
+export async function simplyPostJson(
+  config: WpDevConfig,
+  path: string,
+  jsonBody: unknown,
+): Promise<unknown> {
+  const { account, apiKey } = assertSimplyConfigured(config);
+  const url = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+  const auth = Buffer.from(`${account}:${apiKey}`, "utf8").toString("base64");
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(jsonBody),
+  });
+  const body = await res.text();
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`Simply API HTTP ${res.status}: ${body.slice(0, 400)}`);
+  }
+  try {
+    return body === "" ? {} : (JSON.parse(body) as unknown);
+  } catch {
+    throw new Error(`Simply API: expected JSON (${res.status}): ${body.slice(0, 240)}`);
+  }
+}

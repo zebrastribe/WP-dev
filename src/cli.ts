@@ -11,7 +11,9 @@ import { cmdBackup, type BackupTarget } from "./commands/backup.js";
 import { cmdRestore, type RestoreTarget } from "./commands/restore.js";
 import { cmdLogs } from "./commands/logs.js";
 import { cmdInit } from "./commands/init.js";
-import { cmdSimplyTest } from "./commands/simply.js";
+import { cmdSimplySetupStagingDns, cmdSimplyTest } from "./commands/simply.js";
+import { cmdFixPermissions } from "./commands/fix-permissions.js";
+import { cmdDoctor } from "./commands/doctor.js";
 import { ensureWpDevConfigJson } from "./config/load.js";
 import { initLogger, logError, logInfo } from "./utils/logger.js";
 
@@ -29,7 +31,8 @@ function parseRestoreTarget(s: string): RestoreTarget {
   return parseBackupTarget(s);
 }
 
-async function withLoadedConfig(
+/** Load wp-dev.config.json, init file logger, run command, log outcome (use for all non-init commands). */
+async function runWithConfig(
   label: string,
   run: (loaded: LoadedConfig) => Promise<void>,
 ): Promise<void> {
@@ -85,21 +88,86 @@ async function main(): Promise<void> {
     .command("test")
     .description("Verify API credentials (GET /my/products/)")
     .action(async () => {
-      await withLoadedConfig("simply test", cmdSimplyTest);
+      await runWithConfig("simply test", cmdSimplyTest);
     });
+
+  simply
+    .command("setup-staging-dns")
+    .description(
+      "Simply.com: A record <label>.<apex> + update staging URL / SSH hints in wp-dev.config.json",
+    )
+    .argument("[apex]", "e.g. stri.be — default: hostname from production.url")
+    .option(
+      "--keep-existing-dns",
+      "If that hostname already has DNS at Simply, keep it and only update wp-dev config (no overwrite)",
+    )
+    .option(
+      "--staging-label <name>",
+      'DNS label before apex (default: staging). Example: dev → dev.<apex>',
+    )
+    .action(
+      async (
+        apex: string | undefined,
+        opts: { keepExistingDns?: boolean; stagingLabel?: string },
+      ) => {
+        const flags = [
+          opts.keepExistingDns ? " --keep-existing-dns" : "",
+          opts.stagingLabel ? ` --staging-label ${opts.stagingLabel}` : "",
+        ].join("");
+        const label = `simply setup-staging-dns${apex?.trim() ? ` ${apex.trim()}` : ""}${flags}`;
+        await runWithConfig(label, (loaded) =>
+          cmdSimplySetupStagingDns(loaded, apex, {
+            keepExistingDns: Boolean(opts.keepExistingDns),
+            stagingLabel: opts.stagingLabel,
+          }),
+        );
+      },
+    );
 
   program
     .command("up")
     .description("Start local WordPress (docker compose up -d)")
     .action(async () => {
-      await withLoadedConfig("up", cmdUp);
+      await runWithConfig("up", cmdUp);
     });
 
   program
     .command("down")
     .description("Stop local WordPress (docker compose down)")
     .action(async () => {
-      await withLoadedConfig("down", cmdDown);
+      await runWithConfig("down", cmdDown);
+    });
+
+  program
+    .command("fix-permissions")
+    .description(
+      "Chown bind-mounted wordpress/ to your host uid:gid (fixes rsync after Docker created files as www-data)",
+    )
+    .action(async () => {
+      await runWithConfig("fix-permissions", cmdFixPermissions);
+    });
+
+  program
+    .command("doctor")
+    .description(
+      "Check Docker prereq and remote SSH + wp core is-installed (optional rsync pull --dry-run)",
+    )
+    .argument("[env]", "staging | production (default: both)")
+    .option("--rsync", "After WP-CLI check, run rsync pull --dry-run (no DB, no file writes)")
+    .action(async (env: string | undefined, opts: { rsync?: boolean }) => {
+      const rsync = Boolean(opts.rsync);
+      const envTrim = env?.trim();
+      const parsedEnv =
+        envTrim && envTrim.length > 0 ? parseRemoteEnv(envTrim) : undefined;
+      const label = parsedEnv
+        ? `doctor ${parsedEnv}${rsync ? " --rsync" : ""}`
+        : `doctor${rsync ? " --rsync" : ""}`;
+      await runWithConfig(label, (loaded) =>
+        cmdDoctor(loaded, {
+          env: parsedEnv,
+          rsyncDryRun: rsync,
+        }),
+      );
     });
 
   program
@@ -107,11 +175,17 @@ async function main(): Promise<void> {
     .description("Pull database and files from staging or production")
     .argument("<env>", "staging | production")
     .option("--dry-run", "Show rsync dry-run only; skip database steps")
-    .action(async (env: string, opts: { dryRun?: boolean }) => {
+    .option(
+      "--no-backup-local",
+      "Skip exporting local DB to ~/.wp-dev/backups/<project>/local/ before overwriting it",
+    )
+    .action(async (env: string, opts: { dryRun?: boolean; backupLocal?: boolean }) => {
       const e = parseRemoteEnv(env);
       const dry = Boolean(opts.dryRun);
-      await withLoadedConfig(`pull ${e}${dry ? " --dry-run" : ""}`, (loaded) =>
-        cmdPull(loaded, e, { dryRun: dry }),
+      const backupLocal = Boolean(opts.backupLocal);
+      const label = `pull ${e}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}`;
+      await runWithConfig(label, (loaded) =>
+        cmdPull(loaded, e, { dryRun: dry, backupLocal }),
       );
     });
 
@@ -123,7 +197,7 @@ async function main(): Promise<void> {
     .action(async (env: string, opts: { dryRun?: boolean }) => {
       const e = parseRemoteEnv(env);
       const dry = Boolean(opts.dryRun);
-      await withLoadedConfig(`push ${e}${dry ? " --dry-run" : ""}`, (loaded) =>
+      await runWithConfig(`push ${e}${dry ? " --dry-run" : ""}`, (loaded) =>
         cmdPush(loaded, e, { dryRun: dry }),
       );
     });
@@ -134,7 +208,7 @@ async function main(): Promise<void> {
     .argument("<env>", "local | staging | production")
     .action(async (env: string) => {
       const t = parseBackupTarget(env);
-      await withLoadedConfig(`backup ${t}`, (loaded) => cmdBackup(loaded, t));
+      await runWithConfig(`backup ${t}`, (loaded) => cmdBackup(loaded, t));
     });
 
   program
@@ -144,7 +218,7 @@ async function main(): Promise<void> {
     .argument("<file>", "Path to .sql backup file")
     .action(async (env: string, file: string) => {
       const t = parseRestoreTarget(env);
-      await withLoadedConfig(`restore ${t}`, (loaded) =>
+      await runWithConfig(`restore ${t}`, (loaded) =>
         cmdRestore(loaded, t, file),
       );
     });
@@ -154,11 +228,10 @@ async function main(): Promise<void> {
     .description("Print path to wp-dev.log and the last N lines (project logs/)")
     .option("-n, --lines <n>", "number of lines from end of file", "100")
     .action(async (opts: { lines?: string }) => {
-      const loaded = loadConfig();
-      initLogger(loaded.configDir);
       const n = Math.min(5000, Math.max(1, parseInt(String(opts.lines), 10) || 100));
-      logInfo(`logs --lines ${n}`);
-      cmdLogs(loaded, n);
+      await runWithConfig(`logs --lines ${n}`, async (loaded) => {
+        cmdLogs(loaded, n);
+      });
     });
 
   await program.parseAsync(process.argv);

@@ -6,16 +6,22 @@ import { resolveFromConfigDir } from "../config/load.js";
 import { getRemoteEnv, type RemoteEnvName } from "../config/schema.js";
 import { connectSsh } from "../services/ssh.js";
 import { rsyncPull } from "../services/rsync.js";
+import { ensureBackupDir, timestampedDbName } from "../services/backup.js";
 import {
   assertRemoteWpInstalled,
+  isLocalWpInstalled,
+  wpLocalDbExportToFile,
   wpLocalDbImportFromFile,
   wpLocalSearchReplace,
   wpRemoteDbExport,
 } from "../services/wpcli.js";
 import { logInfo } from "../utils/logger.js";
+import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
 
 export type PullOptions = {
   dryRun: boolean;
+  /** When true (default), export local DB before rsync/import if WordPress is installed locally. */
+  backupLocal: boolean;
 };
 
 export async function cmdPull(
@@ -32,6 +38,20 @@ export async function cmdPull(
     console.error("[dry-run] Would: validate SSH, export remote DB, rsync files, import DB, search-replace URLs.");
     await rsyncPull(remote, localWpRoot, { dryRun: true });
     return;
+  }
+
+  let prePullBackup: string | undefined;
+  if (options.backupLocal) {
+    if (await isLocalWpInstalled(configDir, config)) {
+      const backupDir = ensureBackupDir(config.project, "local");
+      prePullBackup = join(backupDir, `pre-pull-${timestampedDbName()}`);
+      logInfo(`pull ${env}: local pre-pull db backup -> ${prePullBackup}`);
+      await wpLocalDbExportToFile(configDir, config, prePullBackup);
+    } else {
+      logInfo(
+        `pull ${env}: skip local pre-pull backup (local WordPress not installed yet — first pull)`,
+      );
+    }
   }
 
   logInfo(`pull ${env}: connect ssh ${remote.user}@${remote.host}`);
@@ -61,6 +81,13 @@ export async function cmdPull(
       await wpLocalDbImportFromFile(configDir, config, localDump);
       logInfo(`pull ${env}: search-replace ${remote.url} -> ${config.local.url}`);
       await wpLocalSearchReplace(configDir, config, remote.url, config.local.url);
+
+      const tablePrefix = detectTablePrefixFromSqlDump(sql);
+      if (tablePrefix && tablePrefix !== "wp_") {
+        console.error(
+          `\nRemote DB uses table prefix "${tablePrefix}". Set WORDPRESS_TABLE_PREFIX=${tablePrefix} in docker/.env (see docker/.env.example), then run wp-dev down && wp-dev up. Pull does not sync wp-config.php.\n`,
+        );
+      }
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -68,5 +95,11 @@ export async function cmdPull(
     ssh.dispose();
   }
 
-  console.error(`Pull from ${env} complete. Database and files synced; URLs replaced ${remote.url} -> ${config.local.url}`);
+  const backupNote =
+    prePullBackup !== undefined
+      ? ` Local pre-pull DB backup: ${prePullBackup}`
+      : "";
+  console.error(
+    `Pull from ${env} complete. Database and files synced; URLs replaced ${remote.url} -> ${config.local.url}.${backupNote}`,
+  );
 }

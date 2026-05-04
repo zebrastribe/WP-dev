@@ -1,6 +1,7 @@
 import { copyFileSync, createReadStream, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 import { execa } from "execa";
 import type { WpDevConfig } from "../config/schema.js";
 import type { SshSession } from "./ssh.js";
@@ -42,12 +43,58 @@ export async function wpLocalRaw(
   };
 }
 
+const MYSQL_READY_MAX_ATTEMPTS = 45;
+const MYSQL_READY_INTERVAL_MS = 2000;
+
+async function tryLocalMysqlPing(
+  configDir: string,
+  config: WpDevConfig,
+): Promise<boolean> {
+  const projectDir = getComposeProjectDir(configDir, config);
+  const r = await execa(
+    "docker",
+    [
+      ...getDockerComposeLeadArgs(config),
+      "exec",
+      "-T",
+      "db",
+      "sh",
+      "-c",
+      'mysqladmin ping -h localhost -uroot -p"$MYSQL_ROOT_PASSWORD"',
+    ],
+    { cwd: projectDir, reject: false },
+  );
+  return r.exitCode === 0;
+}
+
+/** Waits until the Compose `db` container accepts connections (after `up` / volume recreate). */
+export async function waitForLocalMysqlReady(
+  configDir: string,
+  config: WpDevConfig,
+): Promise<void> {
+  for (let i = 0; i < MYSQL_READY_MAX_ATTEMPTS; i++) {
+    if (await tryLocalMysqlPing(configDir, config)) return;
+    await delay(MYSQL_READY_INTERVAL_MS);
+  }
+  throw new Error(
+    "Local MySQL did not become ready in time. Is `wp-dev up` running and the `db` container healthy? Check docker/.env credentials.",
+  );
+}
+
+/** True when local WP-CLI sees an installed site (Docker reachable, DB up, core installed). */
+export async function isLocalWpInstalled(
+  configDir: string,
+  config: WpDevConfig,
+): Promise<boolean> {
+  const r = await wpLocalRaw(configDir, config, ["core", "is-installed"]);
+  return r.exitCode === 0;
+}
+
 export async function assertLocalWpInstalled(
   configDir: string,
   config: WpDevConfig,
 ): Promise<void> {
-  const r = await wpLocalRaw(configDir, config, ["core", "is-installed"]);
-  if (r.exitCode !== 0) {
+  if (!(await isLocalWpInstalled(configDir, config))) {
     throw new Error(
       "Local WordPress is not installed or docker services are not running. Run `wp-dev up` and complete the WordPress install (or pull from remote) first.",
     );
@@ -58,9 +105,7 @@ export async function assertRemoteWpInstalled(
   ssh: SshSession,
   remotePath: string,
 ): Promise<void> {
-  const r = await ssh.exec(
-    `wp core is-installed --path="${shellQuote(remotePath)}"`,
-  );
+  const r = await ssh.exec(`wp core is-installed ${remoteWpPathFlag(remotePath)}`);
   if (r.code !== 0) {
     throw new Error(
       `Remote WordPress not found or WP-CLI failed at path: ${remotePath}. stderr: ${r.stderr}`,
@@ -72,13 +117,21 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/**
+ * Remote `wp --path=…` fragment. Single-quoted POSIX paths only; never wrap in double quotes
+ * or WP-CLI receives quote characters inside the path value.
+ */
+export function remoteWpPathFlag(remotePath: string): string {
+  return `--path=${shellQuote(remotePath)}`;
+}
+
 export async function wpRemoteExec(
   ssh: SshSession,
   remotePath: string,
   wpArgs: string[],
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   const inner = wpArgs.map(shellArg).join(" ");
-  return ssh.exec(`wp ${inner} --path=${shellQuote(remotePath)}`);
+  return ssh.exec(`wp ${inner} ${remoteWpPathFlag(remotePath)}`);
 }
 
 function shellArg(s: string): string {
@@ -138,6 +191,7 @@ export async function wpLocalDbImportFromFile(
   config: WpDevConfig,
   hostSqlPath: string,
 ): Promise<void> {
+  await waitForLocalMysqlReady(configDir, config);
   const stream = createReadStream(hostSqlPath);
   const r = await wpLocalRaw(configDir, config, ["db", "import", "-"], {
     input: stream,
@@ -153,6 +207,7 @@ export async function wpLocalDbExportToFile(
   config: WpDevConfig,
   hostSqlPath: string,
 ): Promise<void> {
+  await waitForLocalMysqlReady(configDir, config);
   const fileName = `.wp-dev-export-${Date.now()}.sql`;
   const containerPath = `${CONTAINER_WP_PATH}/${fileName}`;
   const r = await wpLocalRaw(configDir, config, ["db", "export", containerPath]);

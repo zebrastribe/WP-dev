@@ -1,5 +1,6 @@
 /**
  * Guess SSH host, path, and site URL from a primary domain (e.g. stri.be → slug stri-be, path /var/www/stri-be).
+ * VPS-oriented; shared hosting (Simply, UnoEuro, …) usually needs manual host/path — see README.
  */
 
 /** Hostname only, lowercase, no scheme/port/path; strips leading www. */

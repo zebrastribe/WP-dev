@@ -8,13 +8,19 @@
   },
   "scripts": {
     "check": "node scripts/check-docker.mjs",
-    "setup": "node scripts/check-docker.mjs && npm install && npm run build",
-    "build": "tsc",
+    "setup": "node scripts/check-docker.mjs && npm install && npm run build && npm ci --prefix docs/admin && npm run build --prefix docs/admin && npm run build:wp --prefix docs/admin",
+    "generate:config-artifacts": "tsx scripts/generate-config-artifacts.ts",
+    "build": "npm run generate:config-artifacts && tsc",
+    "postbuild": "node scripts/chmod-cli.mjs",
     "dev": "node --import tsx src/cli.ts",
     "wp-dev": "node dist/cli.js",
+    "pretest": "npm run generate:config-artifacts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "node scripts/ensure-config.mjs"
+    "postinstall": "node scripts/ensure-config.mjs",
+    "admin:dev": "npm run dev --prefix docs/admin",
+    "admin:build": "npm run build --prefix docs/admin",
+    "admin:build:wp": "npm run build:wp --prefix docs/admin"
   },
   "engines": {
     "node": ">=20"
@@ -26,9 +32,12 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "@types/node": "^22.10.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^3.0.5"
+    "vitest": "^3.0.5",
+    "zod-to-json-schema": "^3.24.6"
   }
 }

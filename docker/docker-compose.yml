@@ -1,8 +1,14 @@
 # WordPress files for this clone: repo-root `wordpress/` → /var/www/html.
 # Isolation: `wp-dev` runs `docker compose -p <id>` using `project` (or `local.composeProjectName`) from wp-dev.config.json so volumes/containers do not clash across clones.
+#
+# MySQL 8 defaults to caching_sha2_password; the official wordpress:cli image does not load that
+# plugin cleanly for `wp db import`. Use mysql_native_password for new DB volumes (see docker/.env.example).
 services:
   db:
     image: mysql:8.0
+    command:
+      - mysqld
+      - --default-authentication-plugin=mysql_native_password
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
@@ -11,6 +17,16 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
     volumes:
       - db_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD || exit 1",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 15s
 
   wordpress:
     image: wordpress:php8.2-apache
@@ -22,10 +38,16 @@ services:
       WORDPRESS_DB_USER: ${MYSQL_USER:-wordpress}
       WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD:-wordpress}
       WORDPRESS_DB_NAME: ${MYSQL_DATABASE:-wordpress}
+      WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}
+      WPDEV_ADMIN_SAVE_TOKEN: ${WPDEV_ADMIN_SAVE_TOKEN:-}
     volumes:
       - ../wordpress:/var/www/html
+      # wp-dev admin: only config + logs (not the whole repo).
+      - ../wp-dev.config.json:/wp-dev-repo/wp-dev.config.json:rw
+      - ../logs:/wp-dev-repo/logs:rw
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   # Official `wordpress` image has no `wp` binary; wp-dev uses this service for WP-CLI.
   wpcli:
@@ -38,8 +60,10 @@ services:
       WORDPRESS_DB_USER: ${MYSQL_USER:-wordpress}
       WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD:-wordpress}
       WORDPRESS_DB_NAME: ${MYSQL_DATABASE:-wordpress}
+      WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
 volumes:
   db_data:

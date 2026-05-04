@@ -1,4 +1,6 @@
-{
+/* eslint-disable */
+/** Auto-generated from wp-dev.config.example.json — run `npm run generate:config-artifacts` */
+export const EXAMPLE_WP_DEV_CONFIG = {
   "project": "my-site",
   "local": {
     "url": "http://localhost:8888",
@@ -19,4 +21,4 @@
     "path": "/var/www/live",
     "url": "https://example.com"
   }
-}
+} as const;
