@@ -4,6 +4,7 @@ import {
   loadWpDevConfig,
   saveDockerEnvSecrets,
   saveWpDevConfig,
+  setupSimplyStagingFromUi,
   verifySimplyApi,
 } from "./api";
 import { logAdmin } from "./adminLog";
@@ -115,6 +116,7 @@ export function Wizard() {
   const [simplyApiKey, setSimplyApiKey] = useState("");
   const [simplyKeyPresent, setSimplyKeyPresent] = useState<boolean | null>(null);
   const [simplyTestBusy, setSimplyTestBusy] = useState(false);
+  const [simplySetupBusy, setSimplySetupBusy] = useState(false);
   const [alert, setAlert] = useState<WizardAlert | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -562,6 +564,51 @@ export function Wizard() {
                   onClick={() => void refreshSimplyStatus()}
                 >
                   Refresh key status
+                </button>
+                <button
+                  type="button"
+                  disabled={simplySetupBusy}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                  onClick={async () => {
+                    setSimplySetupBusy(true);
+                    try {
+                      const r = await setupSimplyStagingFromUi({
+                        account: data.simply?.account?.trim() || undefined,
+                        apiKey: simplyApiKey.trim() || undefined,
+                      });
+                      if (!r.ok) {
+                        setAlert({
+                          tone: "error",
+                          text: `Create staging DNS failed: ${r.error}${r.detail ? `\n${r.detail}` : ""}`,
+                        });
+                        return;
+                      }
+                      if (r.staging) {
+                        setData((d) => ({
+                          ...d,
+                          staging: {
+                            ...d.staging,
+                            host: r.staging?.host ?? d.staging.host,
+                            user: r.staging?.user ?? d.staging.user,
+                            path: r.staging?.path ?? d.staging.path,
+                            url: r.staging?.url ?? d.staging.url,
+                          },
+                        }));
+                        setHasStagingServer(true);
+                      }
+                      setAlert({
+                        tone: "success",
+                        text:
+                          "Staging DNS/config setup complete.\n" +
+                          r.lines.join("\n") +
+                          "\n\nNote: this creates DNS/config hints, not full hosting/WordPress provisioning.",
+                      });
+                    } finally {
+                      setSimplySetupBusy(false);
+                    }
+                  }}
+                >
+                  {simplySetupBusy ? "Creating staging..." : "Create staging DNS + config now"}
                 </button>
               </div>
             </div>
