@@ -121,8 +121,22 @@ export async function assertRemoteWpInstalled(
 ): Promise<void> {
   const r = await ssh.exec(`wp core is-installed ${remoteWpPathFlag(remotePath)}`);
   if (r.code !== 0) {
+    const base = remotePath.replace(/\/$/, "");
+    const alt = `${base}/public_html`;
+    const altCheck = await ssh.exec(`wp core is-installed ${remoteWpPathFlag(alt)}`);
+    let hint = "";
+    if (altCheck.code === 0) {
+      hint =
+        `\nHint: WordPress seems installed at ${alt}. ` +
+        `Update staging.path/production.path in wp-dev.config.json to that path.`;
+    } else {
+      hint =
+        `\nHint: ${remotePath} appears to be a folder mapping without a WordPress install yet. ` +
+        `wp-dev push requires remote WP-CLI to work and keeps remote wp-config.php (rsync excludes it). ` +
+        `Install WordPress in that folder first, or point path to an existing install.`;
+    }
     throw new Error(
-      `Remote WordPress not found or WP-CLI failed at path: ${remotePath}. stderr: ${r.stderr}`,
+      `Remote WordPress not found or WP-CLI failed at path: ${remotePath}. stderr: ${r.stderr}${hint}`,
     );
   }
 }
