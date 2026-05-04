@@ -172,6 +172,7 @@ export function Wizard() {
   const [sslCheckBusy, setSslCheckBusy] = useState(false);
   const [readinessBusy, setReadinessBusy] = useState(false);
   const [dbCheckBusy, setDbCheckBusy] = useState(false);
+  const [dbCheckMessage, setDbCheckMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [alert, setAlert] = useState<WizardAlert | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -693,16 +694,31 @@ export function Wizard() {
                     disabled={dbCheckBusy}
                     className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                     onClick={async () => {
+                      const dbHost = data.staging.db?.host?.trim() || "";
+                      const dbName = data.staging.db?.name?.trim() || "";
+                      const dbUser = data.staging.db?.user?.trim() || "";
+                      const dbPass = data.staging.db?.password || "";
+                      if (!dbHost || !dbName || !dbUser || !dbPass) {
+                        const msg = "Fill staging.db.host, name, user, and password before running DB check.";
+                        setDbCheckMessage({ tone: "error", text: msg });
+                        setAlert({ tone: "error", text: msg });
+                        return;
+                      }
+                      setDbCheckMessage(null);
                       setDbCheckBusy(true);
                       try {
                         const r = await checkStagingDbConnection({
-                          host: data.staging.db?.host?.trim() || undefined,
-                          name: data.staging.db?.name?.trim() || undefined,
-                          user: data.staging.db?.user?.trim() || undefined,
-                          password: data.staging.db?.password || undefined,
+                          host: dbHost,
+                          name: dbName,
+                          user: dbUser,
+                          password: dbPass,
                           port: 3306,
                         });
                         if (r.ok) {
+                          const successText =
+                            `Staging DB connection OK (${r.database ?? "database"}).` +
+                            (r.server ? ` Server: ${r.server}` : "");
+                          setDbCheckMessage({ tone: "success", text: successText });
                           setAlert({
                             tone: "success",
                             text:
@@ -710,6 +726,8 @@ export function Wizard() {
                               (r.server ? `\nServer: ${r.server}` : ""),
                           });
                         } else {
+                          const errorText = `Staging DB check failed: ${r.error}${r.detail ? ` — ${r.detail}` : ""}`;
+                          setDbCheckMessage({ tone: "error", text: errorText });
                           setAlert({
                             tone: "error",
                             text: `Staging DB check failed: ${r.error}${r.detail ? `\n${r.detail}` : ""}`,
@@ -723,6 +741,17 @@ export function Wizard() {
                     {dbCheckBusy ? "Checking DB..." : "Check staging DB connection"}
                   </button>
                 </div>
+                {dbCheckMessage && (
+                  <div
+                    className={`mt-2 rounded border px-3 py-2 text-xs ${
+                      dbCheckMessage.tone === "success"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+                        : "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
+                    }`}
+                  >
+                    {dbCheckMessage.text}
+                  </div>
+                )}
               </details>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
