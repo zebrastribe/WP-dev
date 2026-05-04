@@ -14,6 +14,7 @@ import {
   wpLocalGetTablePrefix,
   wpRemoteBootstrapConfigFromRemoteDb,
   wpRemoteDbExport,
+  wpRemoteForceSiteUrls,
   wpRemoteDbImport,
   wpRemoteSearchReplace,
 } from "../services/wpcli.js";
@@ -144,6 +145,8 @@ export async function cmdPush(
         logInfo(`push ${env}: search-replace ${config.production.url} -> ${remote.url}`);
         await wpRemoteSearchReplace(ssh, wpPath, config.production.url, remote.url);
       }
+      logInfo(`push ${env}: force option home/siteurl -> ${remote.url}`);
+      await wpRemoteForceSiteUrls(ssh, wpPath, remote.url);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

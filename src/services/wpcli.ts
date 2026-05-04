@@ -228,6 +228,19 @@ export async function wpRemoteSearchReplace(
   }
 }
 
+export async function wpRemoteForceSiteUrls(
+  ssh: SshSession,
+  remotePath: string,
+  url: string,
+): Promise<void> {
+  for (const key of ["home", "siteurl"] as const) {
+    const r = await wpRemoteExec(ssh, remotePath, ["option", "update", key, url]);
+    if (r.code !== 0) {
+      throw new Error(`Remote wp option update ${key} failed: ${r.stderr || r.stdout}`);
+    }
+  }
+}
+
 export async function wpLocalGetTablePrefix(
   configDir: string,
   config: WpDevConfig,
