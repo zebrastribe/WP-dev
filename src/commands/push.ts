@@ -9,6 +9,7 @@ import { rsyncPush } from "../services/rsync.js";
 import {
   assertLocalWpInstalled,
   assertRemoteWpInstalled,
+  checkRemoteWpInstalled,
   wpLocalDbExportToFile,
   wpRemoteDbExport,
   wpRemoteDbImport,
@@ -58,7 +59,22 @@ export async function cmdPush(
   const ssh = await connectSsh(remote);
   let prePushBackup = "";
   try {
-    await assertRemoteWpInstalled(ssh, remote.path);
+    const remoteWp = await checkRemoteWpInstalled(ssh, remote.path);
+    const shouldBootstrapStaging = env === "staging" && !remoteWp.installed;
+    if (!remoteWp.installed && !shouldBootstrapStaging) {
+      await assertRemoteWpInstalled(ssh, remote.path);
+    }
+    if (shouldBootstrapStaging) {
+      logInfo(`push ${env}: remote WP not installed yet — bootstrap files only`);
+      await rsyncPush(remote, localWpRoot, { dryRun: false });
+      console.error(
+        `Seeded files to ${env}, but remote WordPress is not installed at ${remote.path} yet.\n` +
+          `Next: open ${remote.url}/wp-admin/install.php (or finish host installer), then run:\n` +
+          `  npm run wp-dev -- push ${env}\n` +
+          `to sync database and run URL search-replace.`,
+      );
+      return;
+    }
 
     const backupDir = ensureBackupDir(config.project, env);
     const preName = timestampedDbName();
