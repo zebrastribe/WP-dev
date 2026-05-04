@@ -914,6 +914,59 @@ if ($method === 'POST' && $action === 'staging-https-check') {
     exit;
 }
 
+if ($method === 'POST' && $action === 'staging-db-check') {
+    $body = file_get_contents('php://input');
+    $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
+    $input = is_array($in) ? $in : [];
+
+    $host = isset($input['host']) && is_string($input['host']) ? trim($input['host']) : '';
+    $name = isset($input['name']) && is_string($input['name']) ? trim($input['name']) : '';
+    $user = isset($input['user']) && is_string($input['user']) ? trim($input['user']) : '';
+    $pass = isset($input['password']) && is_string($input['password']) ? $input['password'] : '';
+    $port = isset($input['port']) ? (int) $input['port'] : 3306;
+
+    if ($host === '' || $name === '' || $user === '' || $pass === '') {
+        wpdev_json_error(400, 'missing_db_fields', 'Need host, name, user, password');
+        wpdev_admin_api_log('POST staging-db-check 400 missing_db_fields');
+        exit;
+    }
+    if ($port < 1 || $port > 65535) {
+        wpdev_json_error(400, 'invalid_db_port');
+        wpdev_admin_api_log('POST staging-db-check 400 invalid_db_port');
+        exit;
+    }
+
+    mysqli_report(MYSQLI_REPORT_OFF);
+    $mysqli = mysqli_init();
+    if ($mysqli === false) {
+        wpdev_json_error(500, 'mysqli_init_failed');
+        wpdev_admin_api_log('POST staging-db-check 500 mysqli_init_failed');
+        exit;
+    }
+    mysqli_options($mysqli, MYSQLI_OPT_CONNECT_TIMEOUT, 8);
+    $ok = @mysqli_real_connect($mysqli, $host, $user, $pass, $name, $port);
+    if ($ok !== true) {
+        $msg = mysqli_connect_error();
+        @mysqli_close($mysqli);
+        wpdev_json_error(400, 'db_connect_failed', is_string($msg) ? $msg : 'connect_failed');
+        wpdev_admin_api_log('POST staging-db-check 400 db_connect_failed');
+        exit;
+    }
+    $server = (string) @mysqli_get_server_info($mysqli);
+    @mysqli_close($mysqli);
+    wpdev_admin_api_log('POST staging-db-check 200 ok');
+    echo json_encode(
+        [
+            'ok' => true,
+            'message' => 'Database connection OK',
+            'server' => $server,
+            'database' => $name,
+        ],
+        JSON_UNESCAPED_SLASHES
+    );
+    exit;
+}
+
 http_response_code(404);
 echo json_encode(['ok' => false, 'error' => 'not_found'], JSON_UNESCAPED_SLASHES);
 wpdev_admin_api_log('response 404 unknown route');
