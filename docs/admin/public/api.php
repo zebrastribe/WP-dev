@@ -111,6 +111,27 @@ function wpdev_parse_http_status_from_headers(array $headers): int
     return 0;
 }
 
+function wpdev_header_value(array $headers, string $name): ?string
+{
+    $want = strtolower($name);
+    foreach ($headers as $h) {
+        if (!is_string($h)) {
+            continue;
+        }
+        $p = strpos($h, ':');
+        if ($p === false) {
+            continue;
+        }
+        $k = strtolower(trim(substr($h, 0, $p)));
+        if ($k !== $want) {
+            continue;
+        }
+        $v = trim(substr($h, $p + 1));
+        return $v !== '' ? $v : null;
+    }
+    return null;
+}
+
 function wpdev_json_error(int $status, string $error, ?string $detail = null): void
 {
     http_response_code($status);
@@ -136,11 +157,6 @@ function wpdev_parse_main_domain(string $raw): ?string
         $host = substr($host, 4);
     }
     return preg_match('/^[a-z0-9.-]+$/', $host) === 1 ? $host : null;
-}
-
-function wpdev_domain_slug(string $host): string
-{
-    return str_replace('.', '-', strtolower($host));
 }
 
 function wpdev_is_ipv4(?string $s): bool
@@ -771,9 +787,9 @@ if ($method === 'POST' && $action === 'simply-setup-staging') {
         $lines[] = 'Config: staging.host set to ' . $sshHost;
     }
     if ($stagingPath === '/var/www/staging-not-used') {
-        $guess = '/var/www/' . wpdev_domain_slug($apex) . '/public_html';
+        $guess = '/' . $label;
         $staging['path'] = $guess;
-        $lines[] = 'Config: staging.path guess ' . $guess . ' (verify in hosting panel).';
+        $lines[] = 'Config: staging.path set to ' . $guess . ' (Simply subdomain folder; verify in hosting panel).';
     }
     $staging['url'] = 'https://' . $stagingFqdn;
     $cfg['staging'] = $staging;
@@ -792,6 +808,80 @@ if ($method === 'POST' && $action === 'simply-setup-staging') {
             'ok' => true,
             'lines' => $lines,
             'staging' => $cfg['staging'],
+        ],
+        JSON_UNESCAPED_SLASHES
+    );
+    exit;
+}
+
+if ($method === 'POST' && $action === 'staging-https-check') {
+    $body = file_get_contents('php://input');
+    $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
+    $input = is_array($in) ? $in : [];
+
+    $url = null;
+    $inUrl = $input['url'] ?? null;
+    if (is_string($inUrl) && trim($inUrl) !== '') {
+        $url = trim($inUrl);
+    } elseif (is_file($configPath) && is_readable($configPath)) {
+        $cfgRaw = file_get_contents($configPath);
+        $cfg = is_string($cfgRaw) && $cfgRaw !== '' ? json_decode($cfgRaw, true) : null;
+        if (is_array($cfg) && isset($cfg['staging']) && is_array($cfg['staging'])) {
+            $u = $cfg['staging']['url'] ?? null;
+            if (is_string($u) && trim($u) !== '') {
+                $url = trim($u);
+            }
+        }
+    }
+    if ($url === null) {
+        wpdev_json_error(400, 'missing_staging_url');
+        wpdev_admin_api_log('POST staging-https-check 400 missing_staging_url');
+        exit;
+    }
+    if (!str_starts_with(strtolower($url), 'https://')) {
+        wpdev_json_error(400, 'invalid_staging_url', 'Expected https:// URL');
+        wpdev_admin_api_log('POST staging-https-check 400 invalid_staging_url');
+        exit;
+    }
+
+    $httpsRes = wpdev_http_request('GET', $url, ['Accept' => 'text/html'], null);
+    $httpsHeaders = isset($http_response_header) && is_array($http_response_header)
+        ? $http_response_header
+        : [];
+    $httpsStatus = $httpsRes['status'];
+    $httpsOk = $httpsStatus >= 200 && $httpsStatus < 400;
+    $httpsLocation = wpdev_header_value($httpsHeaders, 'Location');
+
+    $httpUrl = preg_replace('#^https://#i', 'http://', $url) ?? $url;
+    $httpRes = wpdev_http_request('GET', $httpUrl, ['Accept' => 'text/html'], null);
+    $httpHeaders = isset($http_response_header) && is_array($http_response_header)
+        ? $http_response_header
+        : [];
+    $httpStatus = $httpRes['status'];
+    $httpLocation = wpdev_header_value($httpHeaders, 'Location');
+    $httpRedirectsToHttps =
+        $httpLocation !== null && str_starts_with(strtolower($httpLocation), 'https://');
+
+    wpdev_admin_api_log(
+        'POST staging-https-check 200 https=' . $httpsStatus .
+        ' http=' . $httpStatus .
+        ' redirect=' . ($httpRedirectsToHttps ? 'yes' : 'no')
+    );
+    echo json_encode(
+        [
+            'ok' => true,
+            'url' => $url,
+            'https' => [
+                'ok' => $httpsOk,
+                'status' => $httpsStatus,
+                'location' => $httpsLocation,
+                'preview' => substr($httpsRes['body'], 0, 180),
+            ],
+            'http' => [
+                'status' => $httpStatus,
+                'location' => $httpLocation,
+                'redirectsToHttps' => $httpRedirectsToHttps,
+            ],
         ],
         JSON_UNESCAPED_SLASHES
     );

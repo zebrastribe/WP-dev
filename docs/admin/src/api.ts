@@ -9,7 +9,8 @@ export function apiPhpUrl(
     | "save-docker-env"
     | "simply-status"
     | "simply-test"
-    | "simply-setup-staging",
+    | "simply-setup-staging"
+    | "staging-https-check",
 ): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return `${origin}/admin/api.php?action=${action}`;
@@ -248,6 +249,59 @@ export async function setupSimplyStagingFromUi(payload: {
           o.staging && typeof o.staging === "object"
             ? (o.staging as { host?: string; path?: string; url?: string; user?: string })
             : undefined,
+      };
+    }
+    return {
+      ok: false,
+      error: String(o.error ?? `HTTP ${res.status}`),
+      detail: typeof o.detail === "string" ? o.detail : undefined,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export type StagingHttpsCheckResponse =
+  | {
+      ok: true;
+      url: string;
+      https: { ok: boolean; status: number; location?: string | null; preview?: string };
+      http: { status: number; location?: string | null; redirectsToHttps: boolean };
+    }
+  | { ok: false; error: string; detail?: string };
+
+export async function checkStagingHttps(payload?: {
+  url?: string;
+}): Promise<StagingHttpsCheckResponse> {
+  try {
+    const res = await fetch(apiPhpUrl("staging-https-check"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(payload ?? {}),
+    });
+    const data = (await res.json()) as unknown;
+    if (!data || typeof data !== "object") {
+      return { ok: false, error: "invalid_response" };
+    }
+    const o = data as Record<string, unknown>;
+    if (res.ok && o.ok === true) {
+      return {
+        ok: true,
+        url: String(o.url ?? ""),
+        https: {
+          ok: Boolean((o.https as Record<string, unknown> | undefined)?.ok),
+          status: Number((o.https as Record<string, unknown> | undefined)?.status ?? 0),
+          location: ((o.https as Record<string, unknown> | undefined)?.location as string | null) ?? null,
+          preview: ((o.https as Record<string, unknown> | undefined)?.preview as string | undefined) ?? undefined,
+        },
+        http: {
+          status: Number((o.http as Record<string, unknown> | undefined)?.status ?? 0),
+          location: ((o.http as Record<string, unknown> | undefined)?.location as string | null) ?? null,
+          redirectsToHttps: Boolean(
+            (o.http as Record<string, unknown> | undefined)?.redirectsToHttps,
+          ),
+        },
       };
     }
     return {
