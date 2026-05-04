@@ -155,10 +155,14 @@ export function Wizard() {
   const [simplyKeyPresent, setSimplyKeyPresent] = useState<boolean | null>(null);
   const [simplyTestBusy, setSimplyTestBusy] = useState(false);
   const [simplySetupBusy, setSimplySetupBusy] = useState(false);
+  const [simplyKeySaveBusy, setSimplyKeySaveBusy] = useState(false);
+  const [simplyKeySaveMessage, setSimplyKeySaveMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [sslCheckBusy, setSslCheckBusy] = useState(false);
   const [readinessBusy, setReadinessBusy] = useState(false);
   const [dbCheckBusy, setDbCheckBusy] = useState(false);
   const [dbCheckMessage, setDbCheckMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [dbSaveBusy, setDbSaveBusy] = useState(false);
+  const [dbSaveMessage, setDbSaveMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [alert, setAlert] = useState<WizardAlert | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -347,6 +351,42 @@ export function Wizard() {
       },
     }));
   };
+
+  const saveSimplyKeyNow = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const key = simplyApiKey.trim();
+    if (!key) return { ok: false, error: "Enter a Simply API key first." };
+    const r = await saveDockerEnvSecrets(
+      { WPDEV_SIMPLY_API_KEY: key },
+      saveToken.trim() || undefined,
+    );
+    if (!r.ok) return { ok: false, error: "error" in r ? r.error : "unknown_error" };
+    await refreshSimplyStatus();
+    return { ok: true };
+  }, [simplyApiKey, saveToken, refreshSimplyStatus]);
+
+  const saveStagingDbSecretsNow = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const dbHost = data.staging.db?.host?.trim() || "";
+    const dbName = data.staging.db?.name?.trim() || "";
+    const dbUser = data.staging.db?.user?.trim() || "";
+    const dbPass = data.staging.db?.password || "";
+    if (!dbHost || !dbName || !dbUser || !dbPass) {
+      return { ok: false, error: "Fill staging.db host/name/user/password first." };
+    }
+    const r = await saveDockerEnvSecrets(
+      {
+        WPDEV_STAGING_DB_HOST: dbHost,
+        WPDEV_STAGING_DB_NAME: dbName,
+        WPDEV_STAGING_DB_USER: dbUser,
+        WPDEV_STAGING_DB_PASSWORD: dbPass,
+        ...(data.staging.db?.prefix?.trim()
+          ? { WPDEV_STAGING_DB_PREFIX: data.staging.db.prefix.trim() }
+          : {}),
+      },
+      saveToken.trim() || undefined,
+    );
+    if (!r.ok) return { ok: false, error: "error" in r ? r.error : "unknown_error" };
+    return { ok: true };
+  }, [data.staging.db, saveToken]);
 
   const copyCommand = async (cmd: string, kind: "plain" | "pull" | "push" = "plain") => {
     try {
@@ -699,6 +739,30 @@ export function Wizard() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
+                    disabled={dbSaveBusy}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                    onClick={async () => {
+                      setDbSaveBusy(true);
+                      setDbSaveMessage(null);
+                      try {
+                        const saved = await saveStagingDbSecretsNow();
+                        if (!saved.ok) {
+                          setDbSaveMessage({ tone: "error", text: `Could not save staging DB secrets: ${saved.error}` });
+                          return;
+                        }
+                        setDbSaveMessage({
+                          tone: "success",
+                          text: "Saved staging DB secrets to local docker/.env (gitignored).",
+                        });
+                      } finally {
+                        setDbSaveBusy(false);
+                      }
+                    }}
+                  >
+                    {dbSaveBusy ? "Saving DB..." : "Save staging DB locally"}
+                  </button>
+                  <button
+                    type="button"
                     disabled={dbCheckBusy}
                     className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                     onClick={async () => {
@@ -708,6 +772,13 @@ export function Wizard() {
                       const dbPass = data.staging.db?.password || "";
                       if (!dbHost || !dbName || !dbUser || !dbPass) {
                         const msg = "Fill staging.db.host, name, user, and password before running DB check.";
+                        setDbCheckMessage({ tone: "error", text: msg });
+                        setAlert({ tone: "error", text: msg });
+                        return;
+                      }
+                      const saved = await saveStagingDbSecretsNow();
+                      if (!saved.ok) {
+                        const msg = `Could not save staging DB secrets before check: ${saved.error}`;
                         setDbCheckMessage({ tone: "error", text: msg });
                         setAlert({ tone: "error", text: msg });
                         return;
@@ -749,6 +820,17 @@ export function Wizard() {
                     {dbCheckBusy ? "Checking DB..." : "Check staging DB connection"}
                   </button>
                 </div>
+                {dbSaveMessage && (
+                  <div
+                    className={`mt-2 rounded border px-3 py-2 text-xs ${
+                      dbSaveMessage.tone === "success"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+                        : "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
+                    }`}
+                  >
+                    {dbSaveMessage.text}
+                  </div>
+                )}
                 {dbCheckMessage && (
                   <div
                     className={`mt-2 rounded border px-3 py-2 text-xs ${
@@ -889,6 +971,34 @@ export function Wizard() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
+                  disabled={simplyKeySaveBusy}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                  onClick={async () => {
+                    setSimplyKeySaveBusy(true);
+                    setSimplyKeySaveMessage(null);
+                    try {
+                      const saved = await saveSimplyKeyNow();
+                      if (!saved.ok) {
+                        setSimplyKeySaveMessage({
+                          tone: "error",
+                          text: `Could not save Simply API key: ${saved.error}`,
+                        });
+                        return;
+                      }
+                      setSimplyApiKey("");
+                      setSimplyKeySaveMessage({
+                        tone: "success",
+                        text: "Saved Simply API key to local docker/.env (gitignored).",
+                      });
+                    } finally {
+                      setSimplyKeySaveBusy(false);
+                    }
+                  }}
+                >
+                  {simplyKeySaveBusy ? "Saving key..." : "Save Simply API key locally"}
+                </button>
+                <button
+                  type="button"
                   disabled={simplyTestBusy}
                   className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                   onClick={async () => {
@@ -1008,6 +1118,17 @@ export function Wizard() {
                   {sslCheckBusy ? "Checking HTTPS..." : "Verify staging HTTPS"}
                 </button>
               </div>
+              {simplyKeySaveMessage && (
+                <div
+                  className={`rounded border px-3 py-2 text-xs ${
+                    simplyKeySaveMessage.tone === "success"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+                      : "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
+                  }`}
+                >
+                  {simplyKeySaveMessage.text}
+                </div>
+              )}
               <p className="text-xs text-slate-500">
                 SSL checklist: DNS for staging hostname resolves, hosting/vhost serves the hostname, cert is issued,
                 and HTTP redirects to HTTPS.
