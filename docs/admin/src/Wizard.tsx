@@ -251,7 +251,10 @@ export function Wizard() {
         const err = "error" in res ? res.error : "unknown";
         setAlert({
           tone: "error",
-          text: `Save failed: ${err}. Check Activity log and logs/wp-dev-admin-api.log. If forbidden, set the save token in docker/.env to match the wizard field.`,
+          text:
+            err.includes("write_config_failed")
+              ? "Save failed: write_config_failed. The host file may not be writable by the container. Run: chmod u+rw wp-dev.config.json and then save again."
+              : `Save failed: ${err}. Check Activity log and logs/wp-dev-admin-api.log. If forbidden, set the save token in docker/.env to match the wizard field.`,
         });
         return;
       }

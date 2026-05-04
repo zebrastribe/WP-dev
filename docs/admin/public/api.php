@@ -130,9 +130,24 @@ if ($method === 'POST' && $action === 'save') {
     }
     if (!$wrote) {
         if (file_put_contents($configPath, $encoded, LOCK_EX) === false) {
+            $perm = @substr(sprintf('%o', @fileperms($configPath)), -4);
+            $owner = @fileowner($configPath);
+            $group = @filegroup($configPath);
             http_response_code(500);
-            echo json_encode(['ok' => false, 'error' => 'write_config_failed'], JSON_UNESCAPED_SLASHES);
-            wpdev_admin_api_log('POST save 500 write_config_failed');
+            echo json_encode(
+                [
+                    'ok' => false,
+                    'error' => 'write_config_failed',
+                    'detail' => 'Check host file permissions for wp-dev.config.json (chmod u+rw).',
+                ],
+                JSON_UNESCAPED_SLASHES
+            );
+            wpdev_admin_api_log(
+                'POST save 500 write_config_failed' .
+                ' perms=' . ($perm !== false ? (string)$perm : '-') .
+                ' owner=' . ($owner !== false ? (string)$owner : '-') .
+                ' group=' . ($group !== false ? (string)$group : '-')
+            );
             exit;
         }
     }

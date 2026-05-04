@@ -99,6 +99,35 @@ function printPublishedAccessUrls(loaded: LoadedConfig): void {
   );
 }
 
+async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
+  try {
+    // Best-effort: make bind-mounted config file writable for Apache/PHP in the container.
+    await compose(
+      loaded.configDir,
+      loaded.config,
+      [
+        "exec",
+        "-T",
+        "-u",
+        "0",
+        "wordpress",
+        "sh",
+        "-lc",
+        "touch /wp-dev-repo/wp-dev.config.json && chmod 666 /wp-dev-repo/wp-dev.config.json",
+      ],
+      { stdio: "pipe" },
+    );
+    logInfo("admin save: ensured /wp-dev-repo/wp-dev.config.json is writable");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logInfo(`admin save: could not enforce writable config file (${msg})`);
+    console.error(
+      "Warning: could not auto-fix admin save permissions. If save fails with write_config_failed, run:\n" +
+        "  chmod u+rw wp-dev.config.json\n",
+    );
+  }
+}
+
 export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
   try {
@@ -124,5 +153,6 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
     await compose(loaded.configDir, loaded.config, ["up", "-d"], { stdio: "pipe" });
   }
 
+  await ensureAdminSaveWriteAccess(loaded);
   printPublishedAccessUrls(loaded);
 }
