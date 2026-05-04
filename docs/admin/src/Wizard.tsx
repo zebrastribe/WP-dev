@@ -1215,6 +1215,44 @@ export function Wizard() {
               </button>
             </div>
           </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+            <p className="mb-2 font-medium text-slate-800 dark:text-slate-200">Recommended promotion flow</p>
+            <ol className="list-inside list-decimal space-y-1 text-xs text-slate-600 dark:text-slate-400">
+              <li>Pull production data to localhost.</li>
+              <li>Push localhost data to staging.</li>
+              <li>Promote staging data to production (via localhost mirror).</li>
+            </ol>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void copyCommand("npm run wp-dev -- pull production", "pull")}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Copy step 1
+              </button>
+              <button
+                type="button"
+                disabled={!hasStagingServer}
+                onClick={() => void copyCommand("npm run wp-dev -- push staging", "push")}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Copy step 2
+              </button>
+              <button
+                type="button"
+                disabled={!hasStagingServer}
+                onClick={() =>
+                  void copyCommand(
+                    "npm run wp-dev -- pull staging && npm run wp-dev -- push production",
+                    "plain",
+                  )
+                }
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Copy step 3
+              </button>
+            </div>
+          </div>
           <p className="text-xs text-slate-500">
             If save returns permission denied, the container user may not own <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev.config.json</code> on the host — for local dev try{" "}
             <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">chmod u+w wp-dev.config.json</code> or run{" "}
