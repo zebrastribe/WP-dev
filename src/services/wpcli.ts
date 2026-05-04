@@ -362,7 +362,10 @@ export async function wpLocalDbExportToFile(
   await waitForLocalMysqlReady(configDir, config);
   const fileName = `.wp-dev-export-${Date.now()}.sql`;
   const containerPath = `${CONTAINER_WP_PATH}/${fileName}`;
-  const r = await wpLocalRaw(configDir, config, ["db", "export", containerPath]);
+  // Export as root so temporary dump file can always be created on bind-mounted wp root.
+  const r = await wpLocalRaw(configDir, config, ["db", "export", containerPath], {
+    runUserRoot: true,
+  });
   if (r.exitCode !== 0) {
     throw new Error(`Local wp db export failed: ${r.stderr || r.stdout}`);
   }
