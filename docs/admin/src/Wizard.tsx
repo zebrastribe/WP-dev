@@ -23,6 +23,14 @@ const PULL_TERMINAL_HINT = [
   "Failed: the terminal prints an error — copy it; try wp-dev doctor production first if SSH or path is wrong.",
 ].join("\n");
 
+const PUSH_TERMINAL_HINT = [
+  "Push runs in your terminal, not in the browser.",
+  "Run the copied command in the repo root (folder with package.json).",
+  "wp-dev will sync local files/db to remote staging; this is destructive on staging data.",
+  "Done: command exits and wp-dev logs command … finished ok.",
+  "Failed: terminal prints the error; run wp-dev doctor staging first for SSH/path checks.",
+].join("\n");
+
 /** Staging placeholder when user has no real staging server (from repo example config). */
 const STAGING_PLACEHOLDER = {
   host: EXAMPLE_WP_DEV_CONFIG.staging.host,
@@ -266,7 +274,7 @@ export function Wizard() {
     setData((d) => ({ ...d, [env]: { ...d[env], [key]: val } }));
   };
 
-  const copyCommand = async (cmd: string, kind: "plain" | "pull" = "plain") => {
+  const copyCommand = async (cmd: string, kind: "plain" | "pull" | "push" = "plain") => {
     try {
       await navigator.clipboard.writeText(cmd);
       logAdmin("info", "Wizard: copied command", cmd);
@@ -278,6 +286,15 @@ export function Wizard() {
         setAlert({
           tone: "info",
           text: `Copied:\n${cmd}\n\n${PULL_TERMINAL_HINT}`,
+        });
+      } else if (kind === "push") {
+        logAdmin(
+          "info",
+          "Wizard: run copied push in a terminal — browser has no live progress; watch terminal exit code",
+        );
+        setAlert({
+          tone: "info",
+          text: `Copied:\n${cmd}\n\n${PUSH_TERMINAL_HINT}`,
         });
       } else {
         setAlert({ tone: "info", text: `Copied command: ${cmd}` });
@@ -733,6 +750,14 @@ export function Wizard() {
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Copy: pull staging
+              </button>
+              <button
+                type="button"
+                disabled={!hasStagingServer}
+                onClick={() => void copyCommand("npm run wp-dev -- push staging", "push")}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Copy: push staging
               </button>
             </div>
           </div>
