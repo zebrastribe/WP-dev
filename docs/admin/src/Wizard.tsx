@@ -29,6 +29,11 @@ type DomainCheckResult = {
   hints: string[];
   checkedAtIso: string;
 } | null;
+type TerminalPrepState = {
+  command: string;
+  copied: boolean;
+  message: string;
+} | null;
 
 const PULL_TERMINAL_HINT = [
   "Run commands in a terminal (not in the browser).",
@@ -161,6 +166,10 @@ export function Wizard() {
   const [hasStagingServer, setHasStagingServer] = useState(false);
   const [useProviderIntegration, setUseProviderIntegration] = useState(false);
   const [saveToken, setSaveToken] = useState("");
+  const [terminalAuth, setTerminalAuth] = useState("");
+  const [terminalWorkdir, setTerminalWorkdir] = useState("/workspace");
+  const [terminalSettingsBusy, setTerminalSettingsBusy] = useState(false);
+  const [terminalSettingsMessage, setTerminalSettingsMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   /** Never stored in localStorage draft; optional write to host docker/.env after config save. */
   const [providerApiKey, setProviderApiKey] = useState("");
   const [providerKeyPresent, setProviderKeyPresent] = useState<boolean | null>(null);
@@ -178,6 +187,7 @@ export function Wizard() {
   const [alert, setAlert] = useState<WizardAlert | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [terminalPrep, setTerminalPrep] = useState<TerminalPrepState>(null);
 
   const goStep = useCallback((n: number) => {
     const i = Math.max(0, Math.min(3, n));
@@ -400,10 +410,28 @@ export function Wizard() {
     return { ok: true };
   }, [data.staging.db, saveToken]);
 
-  const copyCommand = async (cmd: string, kind: "plain" | "pull" | "push" = "plain") => {
+  const saveTerminalSettingsNow = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const auth = terminalAuth.trim();
+    const workdir = terminalWorkdir.trim();
+    const payload: Record<string, string> = {};
+    if (auth) payload.WPDEV_TERMINAL_AUTH = auth;
+    if (workdir) payload.WPDEV_TERMINAL_WORKDIR = workdir;
+    if (!Object.keys(payload).length) {
+      return { ok: false, error: "Set terminal auth and/or working directory first." };
+    }
+    const r = await saveDockerEnvSecrets(payload, saveToken.trim() || undefined);
+    if (!r.ok) return { ok: false, error: "error" in r ? r.error : "unknown_error" };
+    return { ok: true };
+  }, [terminalAuth, terminalWorkdir, saveToken]);
+
+  const runTerminalCommand = async (cmd: string, kind: "plain" | "pull" | "push" = "plain") => {
+    let copied = false;
     try {
       await navigator.clipboard.writeText(cmd);
-      logAdmin("info", "Wizard: copied command", cmd);
+      copied = true;
+      logAdmin("info", "Wizard: prepared terminal command", cmd);
+      const openHint =
+        "Command copied. Use the embedded Browser terminal panel below, paste (Ctrl+Shift+V), and press Enter.";
       if (kind === "pull") {
         logAdmin(
           "info",
@@ -411,7 +439,7 @@ export function Wizard() {
         );
         setAlert({
           tone: "info",
-          text: `Copied:\n${cmd}\n\n${PULL_TERMINAL_HINT}`,
+          text: `${openHint}\n\nPrepared command:\n${cmd}\n\n${PULL_TERMINAL_HINT}`,
         });
       } else if (kind === "push") {
         logAdmin(
@@ -420,15 +448,28 @@ export function Wizard() {
         );
         setAlert({
           tone: "info",
-          text: `Copied:\n${cmd}\n\n${PUSH_TERMINAL_HINT}`,
+          text: `${openHint}\n\nPrepared command:\n${cmd}\n\n${PUSH_TERMINAL_HINT}`,
         });
       } else {
-        setAlert({ tone: "info", text: `Copied command: ${cmd}` });
+        setAlert({ tone: "info", text: `${openHint}\n\nPrepared command:\n${cmd}` });
       }
+      setTerminalPrep({
+        command: cmd,
+        copied: true,
+        message: "Prepared and copied. Paste into Browser terminal and press Enter.",
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      logAdmin("error", "Wizard: copy command failed", msg);
-      setAlert({ tone: "error", text: `Could not copy command: ${msg}` });
+      logAdmin("error", "Wizard: prepare terminal command failed", msg);
+      setAlert({
+        tone: "error",
+        text: `Clipboard permission failed: ${msg}\n\nCommand is shown below. Copy it manually and run in Browser terminal.`,
+      });
+      setTerminalPrep({
+        command: cmd,
+        copied,
+        message: "Clipboard failed. Copy command manually from the box below.",
+      });
     }
   };
 
@@ -438,6 +479,9 @@ export function Wizard() {
     const user = remote.user.trim() || "<ssh-user>";
     return `ssh -o BatchMode=yes -o ConnectTimeout=10 ${user}@${host} "pwd && ls -la && wp --info"`;
   };
+
+  const buildKeypairCommand = (): string =>
+    'test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "$USER@$(hostname)"; ls -la ~/.ssh/id_ed25519*; echo ""; echo "Public key:"; cat ~/.ssh/id_ed25519.pub';
 
   const onSave = async () => {
     setSaving(true);
@@ -691,12 +735,30 @@ export function Wizard() {
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => void copyCommand(buildSshTestCommand("production"))}
+                onClick={() => void runTerminalCommand(buildKeypairCommand())}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Copy SSH test command (production)
+                Generate SSH keypair
+              </button>
+              <button
+                type="button"
+                onClick={() => void runTerminalCommand(buildSshTestCommand("production"))}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Run SSH test (production)
               </button>
             </div>
+            {terminalPrep && (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
+                <p className="font-semibold text-slate-800 dark:text-slate-100">
+                  Terminal command ready {terminalPrep.copied ? "(copied)" : "(copy manually)"}
+                </p>
+                <p className="mt-1 text-slate-600 dark:text-slate-300">{terminalPrep.message}</p>
+                <pre className="mt-2 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 text-[11px] dark:border-slate-700 dark:bg-slate-950">
+                  {terminalPrep.command}
+                </pre>
+              </div>
+            )}
           </div>
           <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
             <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
@@ -760,12 +822,23 @@ export function Wizard() {
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => void copyCommand(buildSshTestCommand("staging"))}
+                    onClick={() => void runTerminalCommand(buildSshTestCommand("staging"))}
                     className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                   >
-                    Copy SSH test command (staging)
+                    Run SSH test (staging)
                   </button>
                 </div>
+                {terminalPrep && (
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
+                    <p className="font-semibold text-slate-800 dark:text-slate-100">
+                      Terminal command ready {terminalPrep.copied ? "(copied)" : "(copy manually)"}
+                    </p>
+                    <p className="mt-1 text-slate-600 dark:text-slate-300">{terminalPrep.message}</p>
+                    <pre className="mt-2 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 text-[11px] dark:border-slate-700 dark:bg-slate-950">
+                      {terminalPrep.command}
+                    </pre>
+                  </div>
+                )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -1272,6 +1345,70 @@ export function Wizard() {
               placeholder="Leave empty if not configured"
             />
           </label>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/40">
+            <p className="mb-2 font-semibold text-slate-800 dark:text-slate-200">Browser terminal settings</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Terminal login (user:password)</span>
+                <input
+                  className={input}
+                  type="text"
+                  autoComplete="off"
+                  value={terminalAuth}
+                  onChange={(e) => setTerminalAuth(e.target.value)}
+                  placeholder="wpdev:wpdev"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Terminal working directory</span>
+                <input
+                  className={input}
+                  type="text"
+                  autoComplete="off"
+                  value={terminalWorkdir}
+                  onChange={(e) => setTerminalWorkdir(e.target.value)}
+                  placeholder="/workspace"
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={terminalSettingsBusy}
+                onClick={async () => {
+                  setTerminalSettingsBusy(true);
+                  setTerminalSettingsMessage(null);
+                  try {
+                    const saved = await saveTerminalSettingsNow();
+                    if (!saved.ok) {
+                      setTerminalSettingsMessage({ tone: "error", text: `Could not save terminal settings: ${saved.error}` });
+                      return;
+                    }
+                    setTerminalSettingsMessage({
+                      tone: "success",
+                      text: "Saved terminal settings to docker/.env. Restart stack: wp-dev down && wp-dev up",
+                    });
+                  } finally {
+                    setTerminalSettingsBusy(false);
+                  }
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                {terminalSettingsBusy ? "Saving terminal..." : "Save terminal settings"}
+              </button>
+            </div>
+            {terminalSettingsMessage && (
+              <div
+                className={`mt-2 rounded border px-3 py-2 text-xs ${
+                  terminalSettingsMessage.tone === "success"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+                    : "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
+                }`}
+              >
+                {terminalSettingsMessage.text}
+              </div>
+            )}
+          </div>
           <pre className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
             {JSON.stringify(
               toJson({
@@ -1308,33 +1445,33 @@ export function Wizard() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => void copyCommand("npm run wp-dev -- pull production", "pull")}
+                onClick={() => void runTerminalCommand("npm run wp-dev -- pull production", "pull")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Copy Terminal Command: pull production to localhost
+                Run: pull production to localhost
               </button>
               <button
                 type="button"
                 disabled={!hasStagingServer}
-                onClick={() => void copyCommand("npm run wp-dev -- pull staging", "pull")}
+                onClick={() => void runTerminalCommand("npm run wp-dev -- pull staging", "pull")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Copy Terminal Command: pull staging to localhost
+                Run: pull staging to localhost
               </button>
               <button
                 type="button"
                 disabled={!hasStagingServer}
-                onClick={() => void copyCommand("npm run wp-dev -- push staging", "push")}
+                onClick={() => void runTerminalCommand("npm run wp-dev -- push staging", "push")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Copy Terminal Command: push staging from localhost
+                Run: push staging from localhost
               </button>
               <button
                 type="button"
-                onClick={() => void copyCommand("npm run wp-dev -- push production", "push")}
+                onClick={() => void runTerminalCommand("npm run wp-dev -- push production", "push")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Copy Terminal Command: push production from localhost
+                Run: push production from localhost
               </button>
             </div>
           </div>
