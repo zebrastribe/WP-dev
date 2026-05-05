@@ -416,3 +416,80 @@ export async function checkStagingDomain(payload?: {
     return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }
 }
+
+function terminalRunnerBaseUrl(): string {
+  const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
+  return `${protocol}//127.0.0.1:7682`;
+}
+
+function basicAuthHeader(auth: string): string {
+  return `Basic ${btoa(auth)}`;
+}
+
+export type TerminalAction =
+  | "generate_keypair"
+  | "ssh_test"
+  | "pull_production"
+  | "pull_staging"
+  | "push_staging"
+  | "push_production";
+
+export type TerminalRunResponse =
+  | { ok: true; jobId: string; command: string }
+  | { ok: false; error: string };
+
+export type TerminalJobStatus =
+  | { ok: true; status: "running" | "done"; output: string; exitCode: number | null; command: string }
+  | { ok: false; error: string };
+
+export async function runTerminalAction(
+  auth: string,
+  action: TerminalAction,
+  args?: Record<string, string>,
+): Promise<TerminalRunResponse> {
+  try {
+    const res = await fetch(`${terminalRunnerBaseUrl()}/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: basicAuthHeader(auth),
+      },
+      body: JSON.stringify({ action, args: args ?? {} }),
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || data.ok !== true) {
+      return { ok: false, error: String(data.error ?? `HTTP ${res.status}`) };
+    }
+    return {
+      ok: true,
+      jobId: String(data.jobId ?? ""),
+      command: String(data.command ?? ""),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export async function getTerminalJobStatus(auth: string, jobId: string): Promise<TerminalJobStatus> {
+  try {
+    const res = await fetch(`${terminalRunnerBaseUrl()}/status/${encodeURIComponent(jobId)}`, {
+      method: "GET",
+      headers: {
+        Authorization: basicAuthHeader(auth),
+      },
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || data.ok !== true) {
+      return { ok: false, error: String(data.error ?? `HTTP ${res.status}`) };
+    }
+    return {
+      ok: true,
+      status: (data.status as "running" | "done") ?? "running",
+      output: String(data.output ?? ""),
+      exitCode: typeof data.exitCode === "number" ? data.exitCode : null,
+      command: String(data.command ?? ""),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}

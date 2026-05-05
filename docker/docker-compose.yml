@@ -73,9 +73,11 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${WPDEV_TERMINAL_PORT:-7681}:7681"
+      - "127.0.0.1:${WPDEV_TERMINAL_RUNNER_PORT:-7682}:7682"
     environment:
       WPDEV_TERMINAL_AUTH: ${WPDEV_TERMINAL_AUTH:-wpdev:wpdev}
       WPDEV_TERMINAL_WORKDIR: ${WPDEV_TERMINAL_WORKDIR:-/workspace}
+      WPDEV_TERMINAL_RUNNER_PORT: ${WPDEV_TERMINAL_RUNNER_PORT:-7682}
     volumes:
       - ../:/workspace
       - /var/run/docker.sock:/var/run/docker.sock

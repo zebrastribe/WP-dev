@@ -32,7 +32,7 @@ npm run setup          # Docker check, npm install, build CLI + admin UI into wo
 
 1. **`wp-dev up`** — starts MySQL + WordPress + WP-CLI service.  
 2. **Configure** — either:
-   - **Browser:** open **`http://localhost:<WP_PORT>/admin/`** (default port **`8888`** — set **`WP_PORT`** in **`docker/.env`**, copy from **`docker/.env.example`**). Use the host-agnostic **Setup wizard** (Production Host / Staging Host / Save) → **Save** writes **`wp-dev.config.json`**.  
+   - **Browser:** open **`http://localhost:<WP_PORT>/admin/`** (default port **`8888`** — set **`WP_PORT`** in **`docker/.env`**, copy from **`docker/.env.example`**). Use the host-agnostic **wp-dev** wizard (Welcome / Production Host / Staging Host / Save) → **Save** writes **`wp-dev.config.json`**.  
    - **Terminal:** **`wp-dev init`** (interactive).  
 3. **Open the site** — URL is **`local.url`** in **`wp-dev.config.json`** (example: **`http://localhost:8888`**). Finish the WordPress installer if this is a new DB.
 
@@ -71,9 +71,9 @@ npm run setup          # Docker check, npm install, build CLI + admin UI into wo
 | **Wizard + docs + config assistant** | **`http://localhost:<WP_PORT>/admin/`** — same host/port as WordPress; **`WP_PORT`** in **`docker/.env`** (default **8888**) |
 
 Wizard highlights:
-- **Production Host** / **Staging Host** steps include SSH key setup guidance and a button to copy an SSH test command.
+- **Production Host** / **Staging Host** steps include SSH key setup guidance and one-click SSH test actions.
 - **Staging Host** includes **Test staging domain setup** (DNS + HTTPS + HTTP→HTTPS + final host match).
-- Browser terminal at **`http://localhost:7681/`** (default auth: **`wpdev:wpdev`**). Override with **`WPDEV_TERMINAL_PORT`**, **`WPDEV_TERMINAL_AUTH`**, and **`WPDEV_TERMINAL_WORKDIR`** in **`docker/.env`**.
+- Browser terminal is embedded in steps with SSH/sync actions and also available at **`http://localhost:7681/`** (default auth: **`wpdev:wpdev`**). Override with **`WPDEV_TERMINAL_PORT`**, **`WPDEV_TERMINAL_AUTH`**, and **`WPDEV_TERMINAL_WORKDIR`** in **`docker/.env`**.
 
 **Security:** the WordPress container only bind-mounts **`wp-dev.config.json`** and **`logs/`** (not the whole repo). If others can reach your **`WP_PORT`**, set **`WPDEV_ADMIN_SAVE_TOKEN`** in **`docker/.env`** and the same value in the wizard when saving. If **Save** fails with permission denied, **`chmod u+rw wp-dev.config.json`** on the host or use **`wp-dev init`** instead.
 
@@ -202,6 +202,8 @@ Then `push staging` can seed files, create remote `wp-config.php`, import DB, an
 3. **Shared hosting:** upload the public key in the **control panel** (SSH / SFTP section).  
 4. Test: **`ssh -i ~/.ssh/id_ed25519 user@host`** with the same **host** and **user** as in config.  
 5. In **`wp-dev init`**, set **`identityFile`** if not using the default key.
+
+**Key reuse:** SSH keys are normally machine/user-level identity and can be reused across multiple projects and hosts. Upload the same public key to each host account that should trust this machine. Only upload **`.pub`** (never the private key).
 
 **Limit:** **`wp-dev`** uses **public-key auth only** (no stored password). If the provider needs a **second** interactive password step after the key, **`ssh`** in a normal terminal may work while **`wp-dev pull`** does not — see [SSH: key-only](#ssh-key-only-no-password-in-config).
 

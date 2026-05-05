@@ -10,8 +10,10 @@ type MainTab = "wizard" | "docs";
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
-    if (typeof localStorage === "undefined") return false;
-    return localStorage.getItem("wp-dev-admin-theme") === "dark";
+    if (typeof localStorage === "undefined") return true;
+    const saved = localStorage.getItem("wp-dev-admin-theme");
+    if (saved === null) return true;
+    return saved !== "light";
   });
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -25,7 +27,6 @@ export default function App() {
   const [activeId, setActiveId] = useState<NavId>("overview");
   const [dark, setDark] = useDarkMode();
   const [notes, setNotes] = useState("");
-  const [showTerminal, setShowTerminal] = useState(true);
 
   useEffect(() => {
     logAdmin("info", "App: loaded", window.location.href);
@@ -53,7 +54,6 @@ export default function App() {
   }, [notes, activeId]);
 
   const { Component } = active;
-  const terminalUrl = `${window.location.protocol}//${window.location.hostname}:7681/`;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -71,7 +71,7 @@ export default function App() {
                   : "text-slate-600 dark:text-slate-400"
               }`}
             >
-              Setup wizard
+              wp-dev
             </button>
             <button
               type="button"
@@ -98,7 +98,7 @@ export default function App() {
           <div className="w-full max-w-4xl rounded-xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
-                <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Environment wizard</h1>
+                <h1 className="text-2xl font-bold text-slate-900 dark:text-white">wp-dev</h1>
                 <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                   Configure host SSH + URLs, save to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev.config.json</code>, then use the CLI (<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev pull</code> / <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">up</code>).
                 </p>
@@ -114,40 +114,6 @@ export default function App() {
             <Wizard />
             <div className="mt-8">
               <ActivityLog />
-            </div>
-            <div className="mt-8 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Browser terminal</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Use this for SSH tests and wp-dev commands directly from the wizard.
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowTerminal((v) => !v)}
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs dark:border-slate-700"
-                  >
-                    {showTerminal ? "Hide terminal" : "Show terminal"}
-                  </button>
-                  <a
-                    href={terminalUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs dark:border-slate-700"
-                  >
-                    Open in new tab
-                  </a>
-                </div>
-              </div>
-              {showTerminal ? (
-                <iframe
-                  title="wp-dev terminal"
-                  src={terminalUrl}
-                  className="h-[460px] w-full rounded-lg border border-slate-200 dark:border-slate-700"
-                />
-              ) : null}
             </div>
           </div>
         </div>

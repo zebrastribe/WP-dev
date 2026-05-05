@@ -3,11 +3,14 @@ import {
   checkStagingDomain,
   checkStagingDbConnection,
   checkStagingHttps,
+  getTerminalJobStatus,
   loadStagingDbSecrets,
   loadSimplyStatus,
   loadWpDevConfig,
+  runTerminalAction,
   saveDockerEnvSecrets,
   saveWpDevConfig,
+  type TerminalAction,
   verifySimplyApi,
 } from "./api";
 import { logAdmin } from "./adminLog";
@@ -33,6 +36,10 @@ type TerminalPrepState = {
   command: string;
   copied: boolean;
   message: string;
+} | null;
+type TerminalRunState = {
+  running: boolean;
+  output: string;
 } | null;
 
 const PULL_TERMINAL_HINT = [
@@ -188,6 +195,9 @@ export function Wizard() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [terminalPrep, setTerminalPrep] = useState<TerminalPrepState>(null);
+  const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
+  const [showTerminal, setShowTerminal] = useState(true);
+  const terminalUrl = `${window.location.protocol}//127.0.0.1:7681/`;
 
   const goStep = useCallback((n: number) => {
     const i = Math.max(0, Math.min(3, n));
@@ -253,12 +263,14 @@ export function Wizard() {
           });
           setHasStagingServer(!String((loaded.staging as Remote)?.host ?? "").includes("example.invalid"));
           setUseProviderIntegration(Boolean(loaded.simply));
-          setAlert({
-            tone: "info",
-            text: aligned.changed
-              ? `Loaded wp-dev.config.json and adjusted local.url in the form to this browser (${aligned.value}). Click Save to persist this port change.`
-              : `Loaded existing wp-dev.config.json (project “${String(loaded.project)}”). Edit any step and save to update.`,
-          });
+          if (aligned.changed) {
+            setAlert({
+              tone: "info",
+              text: `Adjusted local.url in the form to match this browser (${aligned.value}). Click Save to persist this port change.`,
+            });
+          } else {
+            setAlert(null);
+          }
           const secrets = await loadStagingDbSecrets();
           if (secrets.ok) {
             setData((d) => ({
@@ -424,8 +436,52 @@ export function Wizard() {
     return { ok: true };
   }, [terminalAuth, terminalWorkdir, saveToken]);
 
-  const runTerminalCommand = async (cmd: string, kind: "plain" | "pull" | "push" = "plain") => {
+  const terminalAuthValue = terminalAuth.trim() || "wpdev:wpdev";
+
+  const runTerminalCommand = async (
+    cmd: string,
+    kind: "plain" | "pull" | "push" = "plain",
+    action?: TerminalAction,
+    args?: Record<string, string>,
+  ) => {
     let copied = false;
+    if (action) {
+      setTerminalRun({ running: true, output: "Starting command...\n" });
+      const started = await runTerminalAction(terminalAuthValue, action, args);
+      if (started.ok) {
+        for (let i = 0; i < 240; i += 1) {
+          const status = await getTerminalJobStatus(terminalAuthValue, started.jobId);
+          if (!status.ok) {
+            setTerminalRun({
+              running: false,
+              output: `Runner status error: ${status.error}\n\nFalling back to manual command:\n${cmd}`,
+            });
+            break;
+          }
+          setTerminalRun({
+            running: status.status === "running",
+            output: status.output || "Running...",
+          });
+          if (status.status === "done") {
+            setAlert({
+              tone: status.exitCode === 0 ? "success" : "error",
+              text:
+                (status.exitCode === 0 ? "Command completed successfully." : `Command failed (exit ${status.exitCode ?? 1}).`) +
+                "\n\nSee output in the command output panel below.",
+            });
+            return;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        }
+      }
+      // Runner unavailable/auth failed -> fallback to clipboard flow.
+      if (!started.ok) {
+        setTerminalRun({
+          running: false,
+          output: `Runner unavailable: ${started.error}\n\nFalling back to manual copy/run.`,
+        });
+      }
+    }
     try {
       await navigator.clipboard.writeText(cmd);
       copied = true;
@@ -477,11 +533,11 @@ export function Wizard() {
     const remote = data[env];
     const host = remote.host.trim() || "<ssh-host>";
     const user = remote.user.trim() || "<ssh-user>";
-    return `ssh -o BatchMode=yes -o ConnectTimeout=10 ${user}@${host} "pwd && ls -la && wp --info"`;
+    return `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} "pwd && ls -la && wp --info"`;
   };
 
   const buildKeypairCommand = (): string =>
-    'test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "$USER@$(hostname)"; ls -la ~/.ssh/id_ed25519*; echo ""; echo "Public key:"; cat ~/.ssh/id_ed25519.pub';
+    'test -f ~/.ssh/id_ed25519 || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C "$USER@$(hostname)"; ls -la ~/.ssh/id_ed25519*; echo ""; echo "Public key:"; cat ~/.ssh/id_ed25519.pub';
 
   const onSave = async () => {
     setSaving(true);
@@ -633,6 +689,29 @@ export function Wizard() {
     },
   ];
   const readinessBlocking = checklist.filter((x) => x.status !== "done");
+  const stepOneReady = Boolean(data.project.trim() && data.local.url.trim());
+  const localUrlLooksValid = (() => {
+    try {
+      const u = new URL(data.local.url.trim());
+      return u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      return false;
+    }
+  })();
+  const productionReady = Boolean(
+    data.production.host.trim() &&
+      data.production.user.trim() &&
+      data.production.path.trim() &&
+      data.production.url.trim(),
+  );
+  const stagingReady = !hasStagingServer
+    ? true
+    : Boolean(
+        data.staging.host.trim() &&
+          data.staging.user.trim() &&
+          data.staging.path.trim() &&
+          data.staging.url.trim(),
+      );
 
   if (loading) {
     return (
@@ -657,6 +736,42 @@ export function Wizard() {
         </div>
       );
     })();
+  const terminalPanel = (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Browser terminal</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Use this for SSH tests and wp-dev commands in this step.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setShowTerminal((v) => !v)}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs dark:border-slate-700"
+          >
+            {showTerminal ? "Hide terminal" : "Show terminal"}
+          </button>
+          <a
+            href={terminalUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs dark:border-slate-700"
+          >
+            Open in new tab
+          </a>
+        </div>
+      </div>
+      {showTerminal ? (
+        <iframe
+          title="wp-dev terminal"
+          src={terminalUrl}
+          className="h-[360px] w-full rounded-lg border border-slate-200 dark:border-slate-700"
+        />
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -672,60 +787,163 @@ export function Wizard() {
                 : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
             }`}
           >
-            {i + 1}. {label}
+            {label}
           </button>
         ))}
       </div>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/50">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={stepOneReady ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
+            1) Local {stepOneReady ? "OK" : "TODO"}
+          </span>
+          <span className={productionReady ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
+            2) Production {productionReady ? "OK" : "TODO"}
+          </span>
+          <span className={stagingReady ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
+            3) Staging {stagingReady ? "OK" : "TODO"}
+          </span>
+          <span className="text-slate-500 dark:text-slate-400">4) Save + Run checks</span>
+        </div>
+      </div>
 
       {alertBox}
+      {terminalRun && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
+          <p className="font-semibold text-slate-800 dark:text-slate-100">
+            Command output {terminalRun.running ? "(running...)" : "(finished)"}
+          </p>
+          <pre className="mt-2 max-h-64 overflow-auto rounded border border-slate-200 bg-white p-2 text-[11px] dark:border-slate-700 dark:bg-slate-950">
+            {terminalRun.output || "No output yet."}
+          </pre>
+        </div>
+      )}
 
       {step === 0 && (
         <div className="space-y-4">
+          <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+            <p className="font-semibold">What to do on this step</p>
+            <ol className="mt-1 list-inside list-decimal space-y-1">
+              <li>Confirm <code>Project id</code> (used for compose project naming).</li>
+              <li>Confirm <code>Local site URL</code> matches your current localhost port.</li>
+              <li>Click <strong>Next</strong> to configure Production Host SSH details.</li>
+            </ol>
+            <p className="mt-2">
+              Status: {stepOneReady ? "Ready to continue" : "Fill required fields before continuing"}.
+            </p>
+          </div>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Create or update your environment. This writes <strong>wp-dev.config.json</strong> in the project
-            root (same folder as <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">package.json</code>
-            ). Use port from <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> (
-            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WP_PORT</code>) in your local URL.
+            This step defines local project identity and localhost URL used after sync/install.
           </p>
           <label className="block">
-            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Project id</span>
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Project id *</span>
             <input className={input} value={data.project} onChange={(e) => patch("project", e.target.value)} />
+            {!data.project.trim() && (
+              <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">Required: used for docker compose project naming.</p>
+            )}
           </label>
           <label className="block">
-            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Local site URL</span>
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Local site URL *</span>
             <input className={input} value={data.local.url} onChange={(e) => patchLocal("url", e.target.value)} />
+            {!localUrlLooksValid && (
+              <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">Use full URL, e.g. http://localhost:8891</p>
+            )}
           </label>
           <p className="text-xs text-slate-500">
             After save, open this URL in another tab to run the WordPress installer (or continue after a pull).
           </p>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
-            <p className="font-semibold text-slate-800 dark:text-slate-100">Host-agnostic workflow</p>
-            <p className="mt-1">
-              wp-dev works with any host that supports SSH + rsync + WP-CLI. Configure host/user/path/url for
-              production and staging, test SSH from terminal, then run pull/push commands.
-            </p>
-          </div>
+          <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+            <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
+              Terminal settings (recommended before SSH tests)
+            </summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Terminal login (user:password)</span>
+                <input
+                  className={input}
+                  type="text"
+                  autoComplete="off"
+                  value={terminalAuth}
+                  onChange={(e) => setTerminalAuth(e.target.value)}
+                  placeholder="wpdev:wpdev"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Terminal working directory</span>
+                <input
+                  className={input}
+                  type="text"
+                  autoComplete="off"
+                  value={terminalWorkdir}
+                  onChange={(e) => setTerminalWorkdir(e.target.value)}
+                  placeholder="/workspace"
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={terminalSettingsBusy}
+                onClick={async () => {
+                  setTerminalSettingsBusy(true);
+                  setTerminalSettingsMessage(null);
+                  try {
+                    const saved = await saveTerminalSettingsNow();
+                    if (!saved.ok) {
+                      setTerminalSettingsMessage({ tone: "error", text: `Could not save terminal settings: ${saved.error}` });
+                      return;
+                    }
+                    setTerminalSettingsMessage({
+                      tone: "success",
+                      text: "Saved terminal settings to docker/.env. Restart stack: wp-dev down && wp-dev up",
+                    });
+                  } finally {
+                    setTerminalSettingsBusy(false);
+                  }
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                {terminalSettingsBusy ? "Saving terminal..." : "Save terminal settings"}
+              </button>
+            </div>
+            {terminalSettingsMessage && (
+              <div
+                className={`mt-2 rounded border px-3 py-2 text-xs ${
+                  terminalSettingsMessage.tone === "success"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+                    : "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
+                }`}
+              >
+                {terminalSettingsMessage.text}
+              </div>
+            )}
+          </details>
         </div>
       )}
 
       {step === 1 && (
         <div className="space-y-4">
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Production host is your live (or primary remote) WordPress. SSH details are often different from the
-            public domain on shared hosting.
+            Fill production SSH + URL, then run key setup and SSH test below.
           </p>
           {(["host", "user", "path", "url"] as const).map((key) => (
             <label key={key} className="block capitalize">
-              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">production.{key}</span>
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">production.{key} *</span>
               <input
                 className={input}
                 value={data.production[key]}
                 onChange={(e) => patchRemote("production", key, e.target.value)}
               />
+              {!data.production[key].trim() && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">Required field.</p>
+              )}
             </label>
           ))}
+          {terminalPanel}
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
             <p className="font-semibold text-slate-800 dark:text-slate-100">SSH key setup (required)</p>
+            <p className="mt-1 font-semibold text-amber-700 dark:text-amber-300">
+              Required: upload the generated public key (<code>~/.ssh/id_ed25519.pub</code>) to your hosting SSH keys before pull/push.
+            </p>
             <ol className="mt-2 list-inside list-decimal space-y-1">
               <li>Create keypair: <code>ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "you@host"</code></li>
               <li>Add <code>~/.ssh/id_ed25519.pub</code> to your hosting SSH keys in the control panel.</li>
@@ -735,14 +953,19 @@ export function Wizard() {
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => void runTerminalCommand(buildKeypairCommand())}
+                onClick={() => void runTerminalCommand(buildKeypairCommand(), "plain", "generate_keypair")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Generate SSH keypair
               </button>
               <button
                 type="button"
-                onClick={() => void runTerminalCommand(buildSshTestCommand("production"))}
+                onClick={() =>
+                  void runTerminalCommand(buildSshTestCommand("production"), "plain", "ssh_test", {
+                    user: data.production.user.trim(),
+                    host: data.production.host.trim(),
+                  })
+                }
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Run SSH test (production)
@@ -754,9 +977,6 @@ export function Wizard() {
                   Terminal command ready {terminalPrep.copied ? "(copied)" : "(copy manually)"}
                 </p>
                 <p className="mt-1 text-slate-600 dark:text-slate-300">{terminalPrep.message}</p>
-                <pre className="mt-2 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 text-[11px] dark:border-slate-700 dark:bg-slate-950">
-                  {terminalPrep.command}
-                </pre>
               </div>
             )}
           </div>
@@ -814,15 +1034,24 @@ export function Wizard() {
                   />
                 </label>
               ))}
+              {terminalPanel}
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
                 <p className="font-semibold text-slate-800 dark:text-slate-100">Test staging SSH access</p>
+                <p className="mt-1 font-semibold text-amber-700 dark:text-amber-300">
+                  Required: ensure this key is uploaded on the staging host too (or shared host account) before pull/push.
+                </p>
                 <p className="mt-1">
-                  Run this from terminal before pull/push. It should return path/listing and WP-CLI info.
+                  Run this check first. Expected output: remote path listing + WP-CLI info.
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => void runTerminalCommand(buildSshTestCommand("staging"))}
+                    onClick={() =>
+                      void runTerminalCommand(buildSshTestCommand("staging"), "plain", "ssh_test", {
+                        user: data.staging.user.trim(),
+                        host: data.staging.host.trim(),
+                      })
+                    }
                     className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                   >
                     Run SSH test (staging)
@@ -834,9 +1063,6 @@ export function Wizard() {
                       Terminal command ready {terminalPrep.copied ? "(copied)" : "(copy manually)"}
                     </p>
                     <p className="mt-1 text-slate-600 dark:text-slate-300">{terminalPrep.message}</p>
-                    <pre className="mt-2 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 text-[11px] dark:border-slate-700 dark:bg-slate-950">
-                      {terminalPrep.command}
-                    </pre>
                   </div>
                 )}
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -1329,6 +1555,43 @@ export function Wizard() {
 
       {step === 3 && (
         <div className="space-y-4">
+          {terminalPanel}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
+            <p className="mb-2 font-medium text-slate-800 dark:text-slate-200">Run these in terminal</p>
+            <p className="mb-3 whitespace-pre-line text-xs text-slate-600 dark:text-slate-400">{PULL_TERMINAL_HINT}</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void runTerminalCommand("npm run wp-dev -- pull production", "pull", "pull_production")}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Run: pull production to localhost
+              </button>
+              <button
+                type="button"
+                disabled={!hasStagingServer}
+                onClick={() => void runTerminalCommand("npm run wp-dev -- pull staging", "pull", "pull_staging")}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Run: pull staging to localhost
+              </button>
+              <button
+                type="button"
+                disabled={!hasStagingServer}
+                onClick={() => void runTerminalCommand("npm run wp-dev -- push staging", "push", "push_staging")}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Run: push staging from localhost
+              </button>
+              <button
+                type="button"
+                onClick={() => void runTerminalCommand("npm run wp-dev -- push production", "push", "push_production")}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Run: push production from localhost
+              </button>
+            </div>
+          </div>
           <p className="text-sm text-slate-600 dark:text-slate-400">
             If you set <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code> in{" "}
             <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>, paste the same value
@@ -1345,70 +1608,6 @@ export function Wizard() {
               placeholder="Leave empty if not configured"
             />
           </label>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/40">
-            <p className="mb-2 font-semibold text-slate-800 dark:text-slate-200">Browser terminal settings</p>
-            <div className="grid gap-3 md:grid-cols-2">
-              <label className="block">
-                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Terminal login (user:password)</span>
-                <input
-                  className={input}
-                  type="text"
-                  autoComplete="off"
-                  value={terminalAuth}
-                  onChange={(e) => setTerminalAuth(e.target.value)}
-                  placeholder="wpdev:wpdev"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Terminal working directory</span>
-                <input
-                  className={input}
-                  type="text"
-                  autoComplete="off"
-                  value={terminalWorkdir}
-                  onChange={(e) => setTerminalWorkdir(e.target.value)}
-                  placeholder="/workspace"
-                />
-              </label>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={terminalSettingsBusy}
-                onClick={async () => {
-                  setTerminalSettingsBusy(true);
-                  setTerminalSettingsMessage(null);
-                  try {
-                    const saved = await saveTerminalSettingsNow();
-                    if (!saved.ok) {
-                      setTerminalSettingsMessage({ tone: "error", text: `Could not save terminal settings: ${saved.error}` });
-                      return;
-                    }
-                    setTerminalSettingsMessage({
-                      tone: "success",
-                      text: "Saved terminal settings to docker/.env. Restart stack: wp-dev down && wp-dev up",
-                    });
-                  } finally {
-                    setTerminalSettingsBusy(false);
-                  }
-                }}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                {terminalSettingsBusy ? "Saving terminal..." : "Save terminal settings"}
-              </button>
-            </div>
-            {terminalSettingsMessage && (
-              <div
-                className={`mt-2 rounded border px-3 py-2 text-xs ${
-                  terminalSettingsMessage.tone === "success"
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
-                    : "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
-                }`}
-              >
-                {terminalSettingsMessage.text}
-              </div>
-            )}
-          </div>
           <pre className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
             {JSON.stringify(
               toJson({
@@ -1438,42 +1637,6 @@ export function Wizard() {
             >
               Back to start
             </button>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
-            <p className="mb-2 font-medium text-slate-800 dark:text-slate-200">Run these in terminal</p>
-            <p className="mb-3 whitespace-pre-line text-xs text-slate-600 dark:text-slate-400">{PULL_TERMINAL_HINT}</p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void runTerminalCommand("npm run wp-dev -- pull production", "pull")}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Run: pull production to localhost
-              </button>
-              <button
-                type="button"
-                disabled={!hasStagingServer}
-                onClick={() => void runTerminalCommand("npm run wp-dev -- pull staging", "pull")}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Run: pull staging to localhost
-              </button>
-              <button
-                type="button"
-                disabled={!hasStagingServer}
-                onClick={() => void runTerminalCommand("npm run wp-dev -- push staging", "push")}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Run: push staging from localhost
-              </button>
-              <button
-                type="button"
-                onClick={() => void runTerminalCommand("npm run wp-dev -- push production", "push")}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Run: push production from localhost
-              </button>
-            </div>
           </div>
           <p className="text-xs text-slate-500">
             If save returns permission denied, the container user may not own <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev.config.json</code> on the host — for local dev try{" "}
