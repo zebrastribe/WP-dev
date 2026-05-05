@@ -52,6 +52,7 @@ export default function App() {
   }, [notes, activeId]);
 
   const { Component } = active;
+  const terminalUrl = `${window.location.protocol}//${window.location.hostname}:7681`;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -108,6 +109,14 @@ export default function App() {
               >
                 {dark ? "Light" : "Dark"}
               </button>
+              <a
+                href={terminalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-sm dark:border-slate-600"
+              >
+                Terminal
+              </a>
             </div>
             <Wizard />
             <div className="mt-8">

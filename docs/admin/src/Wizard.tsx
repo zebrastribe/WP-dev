@@ -13,7 +13,7 @@ import {
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
-const STEP_LABELS = ["Welcome", "Production Host", "Staging Host", "Optional Provider", "Save"] as const;
+const STEP_LABELS = ["Welcome", "Production Host", "Staging Host", "Save"] as const;
 
 type WizardAlert = { tone: "info" | "success" | "error"; text: string };
 type ChecklistStatus = "done" | "warn" | "todo";
@@ -180,7 +180,7 @@ export function Wizard() {
   const [saving, setSaving] = useState(false);
 
   const goStep = useCallback((n: number) => {
-    const i = Math.max(0, Math.min(4, n));
+    const i = Math.max(0, Math.min(3, n));
     logAdmin("info", `Wizard: step → ${i + 1} ${STEP_LABELS[i]}`);
     setStep(i);
   }, []);
@@ -453,7 +453,6 @@ export function Wizard() {
         ? data.staging
         : { ...STAGING_PLACEHOLDER, user: data.production.user || data.staging.user || "deploy" };
       const payload = toJson({ ...data, staging });
-      if (!useProviderIntegration) delete payload.simply;
       const res = await saveWpDevConfig(payload, saveToken.trim() || undefined);
       if (!res.ok) {
         const err = "error" in res ? res.error : "unknown";
@@ -697,14 +696,6 @@ export function Wizard() {
               >
                 Copy SSH test command (production)
               </button>
-              <a
-                href="https://www.simply.com/en/controlpanel"
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Open Simply control panel
-              </a>
             </div>
           </div>
           <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
@@ -1107,7 +1098,7 @@ export function Wizard() {
         </div>
       )}
 
-      {step === 3 && (
+      {step === 99 && (
         <div className="space-y-4">
           <p className="text-sm text-slate-600 dark:text-slate-400">
             This step is optional. Skip it unless you need provider API integration.
@@ -1263,7 +1254,7 @@ export function Wizard() {
         </div>
       )}
 
-      {step === 4 && (
+      {step === 3 && (
         <div className="space-y-4">
           <p className="text-sm text-slate-600 dark:text-slate-400">
             If you set <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code> in{" "}
@@ -1288,7 +1279,7 @@ export function Wizard() {
                 staging: hasStagingServer
                   ? data.staging
                   : { ...STAGING_PLACEHOLDER, user: data.production.user || "deploy" },
-                simply: useProviderIntegration ? data.simply : undefined,
+                simply: data.simply,
               }),
               null,
               2,
@@ -1366,11 +1357,11 @@ export function Wizard() {
         </button>
         <button
           type="button"
-          disabled={step === 4}
+          disabled={step === 3}
           onClick={() => goStep(step + 1)}
           className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
         >
-          {step === 4 ? "Finish" : "Next →"}
+          {step === 3 ? "Finish" : "Next →"}
         </button>
       </div>
     </div>
