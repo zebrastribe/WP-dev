@@ -76,10 +76,14 @@ export function BackupRestore() {
             setOutput(
               "Cannot create local backup yet: local WordPress is not installed for this project.\n" +
                 "Run wp-dev up and complete /wp-admin/install.php (or pull from remote), then try backup again.\n\n" +
-                txt,
+                "Tip: you can use pull production/staging first, then retry backup.",
             );
             return;
           }
+        }
+        if (st.status === "done" && action === "backup_list" && (!st.output || !st.output.trim())) {
+          setOutput("No backups found for this environment yet.");
+          return;
         }
         setOutput(txt);
         if (st.status === "done") return;
