@@ -18,6 +18,7 @@ export async function cmdRestore(
   loaded: LoadedConfig,
   env: RestoreTarget,
   file: string,
+  opts?: { yes?: boolean },
 ): Promise<void> {
   const { config, configDir } = loaded;
   assertBackupFileExists(file);
@@ -32,9 +33,11 @@ export async function cmdRestore(
   }
 
   if (env === "production") {
-    const ok = await confirmProduction(
-      "You are about to REPLACE the PRODUCTION database from a backup file.",
-    );
+    const ok = opts?.yes
+      ? true
+      : await confirmProduction(
+          "You are about to REPLACE the PRODUCTION database from a backup file.",
+        );
     if (!ok) {
       logInfo("restore production: user aborted at confirmation");
       console.error("Aborted.");

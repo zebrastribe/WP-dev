@@ -70,6 +70,8 @@ type Remote = {
   user: string;
   path: string;
   url: string;
+  port?: number;
+  identityFile?: string;
   db?: {
     host: string;
     name: string;
@@ -85,6 +87,7 @@ export type WizardData = {
     url: string;
     path: string;
     composeFile: string;
+    composeProjectName?: string;
     composeService: string;
     wpRoot: string;
   };
@@ -197,7 +200,17 @@ export function Wizard() {
   const [terminalPrep, setTerminalPrep] = useState<TerminalPrepState>(null);
   const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
   const [showTerminal, setShowTerminal] = useState(true);
-  const terminalUrl = `${window.location.protocol}//127.0.0.1:7681/`;
+  const terminalAuthValue = terminalAuth.trim() || "wpdev:wpdev";
+  const terminalUrl = (() => {
+    const base = new URL(`${window.location.protocol}//127.0.0.1:7681/`);
+    const [user, pass] = terminalAuthValue.split(":", 2);
+    if (user && pass) {
+      // Best-effort: many browsers use these credentials without a login prompt.
+      base.username = user;
+      base.password = pass;
+    }
+    return base.toString();
+  })();
 
   const goStep = useCallback((n: number) => {
     const i = Math.max(0, Math.min(STEP_LABELS.length - 1, n));
@@ -235,6 +248,9 @@ export function Wizard() {
               composeFile: String(
                 (loaded.local as WizardData["local"])?.composeFile ?? "docker-compose.yml",
               ),
+              composeProjectName: String(
+                (loaded.local as WizardData["local"])?.composeProjectName ?? "",
+              ),
               composeService: String(
                 (loaded.local as WizardData["local"])?.composeService ?? "wpcli",
               ),
@@ -245,6 +261,11 @@ export function Wizard() {
               user: String((loaded.staging as Remote)?.user ?? "deploy"),
               path: String((loaded.staging as Remote)?.path ?? STAGING_PLACEHOLDER.path),
               url: String((loaded.staging as Remote)?.url ?? STAGING_PLACEHOLDER.url),
+              port:
+                typeof (loaded.staging as Remote)?.port === "number"
+                  ? Number((loaded.staging as Remote)?.port)
+                  : undefined,
+              identityFile: String((loaded.staging as Remote)?.identityFile ?? ""),
               db: undefined,
             },
             production: {
@@ -252,6 +273,11 @@ export function Wizard() {
               user: String((loaded.production as Remote)?.user ?? ""),
               path: String((loaded.production as Remote)?.path ?? ""),
               url: String((loaded.production as Remote)?.url ?? ""),
+              port:
+                typeof (loaded.production as Remote)?.port === "number"
+                  ? Number((loaded.production as Remote)?.port)
+                  : undefined,
+              identityFile: String((loaded.production as Remote)?.identityFile ?? ""),
               db: undefined,
             },
             simply:
@@ -360,10 +386,20 @@ export function Wizard() {
 
   const patchRemote = (
     env: "staging" | "production",
-    key: "host" | "user" | "path" | "url",
+    key: "host" | "user" | "path" | "url" | "identityFile",
     val: string,
   ) => {
     setData((d) => ({ ...d, [env]: { ...d[env], [key]: val } }));
+  };
+  const patchRemotePort = (env: "staging" | "production", val: string) => {
+    const n = Number.parseInt(val, 10);
+    setData((d) => ({
+      ...d,
+      [env]: {
+        ...d[env],
+        port: Number.isFinite(n) && n > 0 ? n : undefined,
+      },
+    }));
   };
   const patchRemoteDb = (
     env: "staging" | "production",
@@ -435,8 +471,6 @@ export function Wizard() {
     if (!r.ok) return { ok: false, error: "error" in r ? r.error : "unknown_error" };
     return { ok: true };
   }, [terminalAuth, terminalWorkdir, saveToken]);
-
-  const terminalAuthValue = terminalAuth.trim() || "wpdev:wpdev";
 
   const runTerminalCommand = async (
     cmd: string,
@@ -943,6 +977,37 @@ export function Wizard() {
               </div>
             )}
           </details>
+          <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+            <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
+              Advanced local settings
+            </summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">local.path</span>
+                <input className={input} value={data.local.path} onChange={(e) => patchLocal("path", e.target.value)} />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">local.composeFile</span>
+                <input className={input} value={data.local.composeFile} onChange={(e) => patchLocal("composeFile", e.target.value)} />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">local.composeService</span>
+                <input className={input} value={data.local.composeService} onChange={(e) => patchLocal("composeService", e.target.value)} />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">local.wpRoot</span>
+                <input className={input} value={data.local.wpRoot} onChange={(e) => patchLocal("wpRoot", e.target.value)} />
+              </label>
+              <label className="block md:col-span-2">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">local.composeProjectName (optional)</span>
+                <input
+                  className={input}
+                  value={data.local.composeProjectName ?? ""}
+                  onChange={(e) => patchLocal("composeProjectName", e.target.value)}
+                />
+              </label>
+            </div>
+          </details>
         </div>
       )}
 
@@ -1028,6 +1093,33 @@ export function Wizard() {
                   />
                 </label>
               ))}
+            </div>
+          </details>
+          <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+            <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
+              Advanced production SSH settings
+            </summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">production.port (optional)</span>
+                <input
+                  className={input}
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={data.production.port ?? ""}
+                  onChange={(e) => patchRemotePort("production", e.target.value)}
+                />
+              </label>
+              <label className="block md:col-span-2">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">production.identityFile (optional)</span>
+                <input
+                  className={input}
+                  value={data.production.identityFile ?? ""}
+                  onChange={(e) => patchRemote("production", "identityFile", e.target.value)}
+                  placeholder="~/.ssh/id_ed25519"
+                />
+              </label>
             </div>
           </details>
         </div>
@@ -1356,6 +1448,33 @@ export function Wizard() {
                     {dbCheckMessage.text}
                   </div>
                 )}
+              </details>
+              <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
+                  Advanced staging SSH settings
+                </summary>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-400">staging.port (optional)</span>
+                    <input
+                      className={input}
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={data.staging.port ?? ""}
+                      onChange={(e) => patchRemotePort("staging", e.target.value)}
+                    />
+                  </label>
+                  <label className="block md:col-span-2">
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-400">staging.identityFile (optional)</span>
+                    <input
+                      className={input}
+                      value={data.staging.identityFile ?? ""}
+                      onChange={(e) => patchRemote("staging", "identityFile", e.target.value)}
+                      placeholder="~/.ssh/id_ed25519"
+                    />
+                  </label>
+                </div>
               </details>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/40">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">

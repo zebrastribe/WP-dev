@@ -31,6 +31,11 @@ npm run setup          # Docker check, npm install, build CLI + admin UI into wo
 ```
 
 1. **`wp-dev up`** — starts MySQL + WordPress + WP-CLI service.  
+   - On first run, ensure `docker/.env` has these required values:
+     - `WPDEV_ADMIN_SAVE_TOKEN` (required for browser save actions)
+     - `WPDEV_TERMINAL_AUTH` (terminal username/password in `user:password` format)
+     - `WPDEV_TERMINAL_RUNNER_TOKEN` (required for one-click terminal actions)
+     - `WPDEV_TERMINAL_RUNNER_ORIGIN` (usually `http://localhost:<WP_PORT>`)
 2. **Configure** — either:
    - **Browser:** open **`http://localhost:<WP_PORT>/admin/`** (default port **`8888`** — set **`WP_PORT`** in **`docker/.env`**, copy from **`docker/.env.example`**). Use the host-agnostic **wp-dev** wizard (Welcome / Production Host / Staging Host / Save / Links) → **Save** writes **`wp-dev.config.json`** and then shows quick links.  
    - **Terminal:** **`wp-dev init`** (interactive).  
@@ -75,6 +80,7 @@ Wizard highlights:
 - **Staging Host** includes **Test staging domain setup** (DNS + HTTPS + HTTP→HTTPS + final host match).
 - **Links** step provides direct links to localhost, staging, and production after save.
 - Browser terminal is embedded in steps with SSH actions and also available at **`http://localhost:7681/`**. Configure with **`WPDEV_TERMINAL_PORT`**, **`WPDEV_TERMINAL_AUTH`**, **`WPDEV_TERMINAL_WORKDIR`**, **`WPDEV_TERMINAL_RUNNER_TOKEN`**, and **`WPDEV_TERMINAL_RUNNER_ORIGIN`** in **`docker/.env`**.
+  - `WPDEV_TERMINAL_AUTH` is the terminal login in `username:password` format.
 
 **Security:** WordPress/admin binds to localhost by default. **`WPDEV_ADMIN_SAVE_TOKEN`** is required for save actions (set in **`docker/.env`**, then enter same value in wizard). Terminal runner also requires **`WPDEV_TERMINAL_RUNNER_TOKEN`** and enforces **`WPDEV_TERMINAL_RUNNER_ORIGIN`**. If **Save** fails with permission denied, **`chmod u+rw wp-dev.config.json`** on the host or use **`wp-dev init`** instead.
 

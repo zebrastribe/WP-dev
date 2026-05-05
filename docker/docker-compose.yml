@@ -83,6 +83,7 @@ services:
     volumes:
       - ../:/workspace
       - ${HOME}/.ssh:/root/.ssh:ro
+      - ${HOME}/.wp-dev:/root/.wp-dev
 
 volumes:
   db_data:

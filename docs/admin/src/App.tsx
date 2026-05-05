@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActivityLog } from "./ActivityLog";
 import { logAdmin } from "./adminLog";
+import { BackupRestore } from "./BackupRestore";
+import { HistoryRollback } from "./HistoryRollback";
 import { Wizard } from "./Wizard";
 import { NAV_ITEMS, type NavId } from "./guideSections";
 
 const NOTES_PREFIX = "wpdev-admin-notes-";
 
-type MainTab = "wizard" | "docs";
+type MainTab = "wizard" | "backup" | "history" | "docs";
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
@@ -76,6 +78,32 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
+                setMainTab("backup");
+              }}
+              className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                mainTab === "backup"
+                  ? "bg-white text-brand-700 shadow dark:bg-slate-900 dark:text-brand-400"
+                  : "text-slate-600 dark:text-slate-400"
+              }`}
+            >
+              Backup/Restore
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMainTab("history");
+              }}
+              className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                mainTab === "history"
+                  ? "bg-white text-brand-700 shadow dark:bg-slate-900 dark:text-brand-400"
+                  : "text-slate-600 dark:text-slate-400"
+              }`}
+            >
+              History/Rollback
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setMainTab("docs");
               }}
               className={`rounded-md px-4 py-2 text-sm font-semibold ${
@@ -87,9 +115,6 @@ export default function App() {
               Documentation
             </button>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            First-time? Use the wizard, then open your local WordPress URL (not this /admin path for WP itself).
-          </p>
         </div>
       </div>
 
@@ -112,6 +137,24 @@ export default function App() {
               </button>
             </div>
             <Wizard />
+            <div className="mt-8">
+              <ActivityLog />
+            </div>
+          </div>
+        </div>
+      ) : mainTab === "backup" ? (
+        <div className="flex flex-1 justify-center bg-slate-50 p-6 dark:bg-slate-950">
+          <div className="w-full max-w-4xl rounded-xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+            <BackupRestore />
+            <div className="mt-8">
+              <ActivityLog />
+            </div>
+          </div>
+        </div>
+      ) : mainTab === "history" ? (
+        <div className="flex flex-1 justify-center bg-slate-50 p-6 dark:bg-slate-950">
+          <div className="w-full max-w-4xl rounded-xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+            <HistoryRollback />
             <div className="mt-8">
               <ActivityLog />
             </div>

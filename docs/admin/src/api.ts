@@ -438,10 +438,14 @@ function runnerSecurityHeaders(auth: string, token: string): Record<string, stri
 export type TerminalAction =
   | "generate_keypair"
   | "ssh_test"
-  | "pull_production"
-  | "pull_staging"
-  | "push_staging"
-  | "push_production";
+  | "backup_create"
+  | "backup_list"
+  | "restore_env"
+  | "git_status"
+  | "git_log"
+  | "git_show"
+  | "git_rollback_branch"
+  | "git_reset_hard";
 
 export type TerminalRunResponse =
   | { ok: true; jobId: string; command: string }
