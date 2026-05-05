@@ -21,6 +21,7 @@ import {
 import { ensureBackupDir, timestampedDbName } from "../services/backup.js";
 import { confirmProduction } from "../utils/confirm.js";
 import { logInfo } from "../utils/logger.js";
+import { getUrlVariants } from "../utils/url-variants.js";
 
 export type PushOptions = {
   dryRun: boolean;
@@ -139,11 +140,21 @@ export async function cmdPush(
       await ssh.putFile(localDump, remoteImport);
       await wpRemoteDbImport(ssh, wpPath, remoteImport);
       await ssh.exec(`rm -f ${remoteImport}`);
-      logInfo(`push ${env}: search-replace ${config.local.url} -> ${remote.url}`);
-      await wpRemoteSearchReplace(ssh, wpPath, config.local.url, remote.url);
+      const localCandidates = getUrlVariants(config.local.url).filter(
+        (candidate) => candidate !== remote.url,
+      );
+      for (const fromUrl of localCandidates) {
+        logInfo(`push ${env}: search-replace ${fromUrl} -> ${remote.url}`);
+        await wpRemoteSearchReplace(ssh, wpPath, fromUrl, remote.url);
+      }
       if (env === "staging" && config.production.url !== remote.url) {
-        logInfo(`push ${env}: search-replace ${config.production.url} -> ${remote.url}`);
-        await wpRemoteSearchReplace(ssh, wpPath, config.production.url, remote.url);
+        const productionCandidates = getUrlVariants(config.production.url).filter(
+          (candidate) => candidate !== remote.url,
+        );
+        for (const fromUrl of productionCandidates) {
+          logInfo(`push ${env}: search-replace ${fromUrl} -> ${remote.url}`);
+          await wpRemoteSearchReplace(ssh, wpPath, fromUrl, remote.url);
+        }
       }
       logInfo(`push ${env}: force option home/siteurl -> ${remote.url}`);
       await wpRemoteForceSiteUrls(ssh, wpPath, remote.url);
