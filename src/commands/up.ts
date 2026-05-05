@@ -5,6 +5,7 @@ import { assertDockerReady } from "../utils/docker-prereq.js";
 import { logInfo } from "../utils/logger.js";
 import { getPublishedLocalAccess } from "../utils/published-local-urls.js";
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import net from "node:net";
 import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
@@ -48,11 +49,93 @@ function setWpPortInEnvFile(path: string, port: number): void {
   writeFileSync(path, `${prefix}${line}\n`, "utf8");
 }
 
+function setPortInEnvFile(path: string, key: "WP_PORT" | "WPDEV_TERMINAL_PORT" | "WPDEV_TERMINAL_RUNNER_PORT", port: number): void {
+  const line = `${key}=${port}`;
+  const current = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`^${escaped}=.*$`, "m").test(current)) {
+    const next = current.replace(new RegExp(`^${escaped}=.*$`, "m"), line);
+    writeFileSync(path, next.endsWith("\n") ? next : `${next}\n`, "utf8");
+    return;
+  }
+  const prefix = current.trim().length > 0 ? `${current.replace(/\s*$/, "")}\n` : "";
+  writeFileSync(path, `${prefix}${line}\n`, "utf8");
+}
+
+function setEnvValueInContent(content: string, key: string, value: string): string {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const line = `${key}=${value}`;
+  if (new RegExp(`^${escaped}=.*$`, "m").test(content)) {
+    return content.replace(new RegExp(`^${escaped}=.*$`, "m"), line);
+  }
+  const prefix = content.trim().length > 0 ? `${content.replace(/\s*$/, "")}\n` : "";
+  return `${prefix}${line}\n`;
+}
+
 function readEnvValue(content: string, key: string): string {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const m = content.match(new RegExp(`^${escaped}=(.*)$`, "m"));
   if (!m) return "";
   return (m[1] || "").trim();
+}
+
+function makeToken(bytes = 24): string {
+  return randomBytes(bytes).toString("base64url");
+}
+
+function ensureSecurityEnvDefaults(envPath: string): void {
+  const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+  const currentWpPort = readEnvValue(current, "WP_PORT") || "8888";
+
+  const adminToken = readEnvValue(current, "WPDEV_ADMIN_SAVE_TOKEN");
+  const runnerToken = readEnvValue(current, "WPDEV_TERMINAL_RUNNER_TOKEN");
+  const terminalAuth = readEnvValue(current, "WPDEV_TERMINAL_AUTH");
+  const runnerOrigin = readEnvValue(current, "WPDEV_TERMINAL_RUNNER_ORIGIN");
+
+  const needsAdminToken = !adminToken || adminToken.includes("change-me");
+  const needsRunnerToken = !runnerToken || runnerToken.includes("change-me");
+  const sharedToken = needsAdminToken || needsRunnerToken ? makeToken() : "";
+
+  let next = current;
+  let changed = false;
+  const changedKeys: string[] = [];
+
+  if (needsAdminToken) {
+    next = setEnvValueInContent(next, "WPDEV_ADMIN_SAVE_TOKEN", sharedToken);
+    changed = true;
+    changedKeys.push("WPDEV_ADMIN_SAVE_TOKEN");
+  }
+  if (needsRunnerToken) {
+    next = setEnvValueInContent(next, "WPDEV_TERMINAL_RUNNER_TOKEN", sharedToken || makeToken());
+    changed = true;
+    changedKeys.push("WPDEV_TERMINAL_RUNNER_TOKEN");
+  }
+  if (!terminalAuth || terminalAuth.includes("change-me") || terminalAuth === "wpdev:wpdev") {
+    next = setEnvValueInContent(next, "WPDEV_TERMINAL_AUTH", `wpdev:${makeToken(12)}`);
+    changed = true;
+    changedKeys.push("WPDEV_TERMINAL_AUTH");
+  }
+  const shouldResetOrigin =
+    !runnerOrigin ||
+    runnerOrigin.includes("change-me") ||
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(runnerOrigin);
+  if (shouldResetOrigin) {
+    next = setEnvValueInContent(
+      next,
+      "WPDEV_TERMINAL_RUNNER_ORIGIN",
+      `http://localhost:${currentWpPort}`,
+    );
+    changed = true;
+    changedKeys.push("WPDEV_TERMINAL_RUNNER_ORIGIN");
+  }
+
+  if (changed) {
+    writeFileSync(envPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
+    console.error(
+      `Auto-updated docker/.env security values: ${changedKeys.join(", ")}\n` +
+        "Run this stack restart to apply if already running: npm run wp-dev -- down && npm run wp-dev -- up\n",
+    );
+  }
 }
 
 function warnIfSecurityEnvPlaceholders(envPath: string): void {
@@ -172,6 +255,7 @@ async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
 export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
   const envPath = ensureComposeEnvExists(loaded);
+  ensureSecurityEnvDefaults(envPath);
   warnIfSecurityEnvPlaceholders(envPath);
   try {
     logInfo("docker compose up -d");
@@ -181,9 +265,26 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
     const conflictPort = extractBoundPort(msg);
     if (!conflictPort) throw e;
 
+    const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+    const wpPort = Number.parseInt(readEnvValue(envContent, "WP_PORT") || "8888", 10);
+    const terminalPort = Number.parseInt(readEnvValue(envContent, "WPDEV_TERMINAL_PORT") || "7681", 10);
+    const runnerPort = Number.parseInt(
+      readEnvValue(envContent, "WPDEV_TERMINAL_RUNNER_PORT") || "7682",
+      10,
+    );
+    if (conflictPort === terminalPort || conflictPort === runnerPort) {
+      throw new Error(
+        `Terminal port ${conflictPort} is already in use by another stack. ` +
+          "Stop the other WP-dev clone first (npm run wp-dev -- down there), " +
+          "or set fixed non-conflicting terminal ports in docker/.env " +
+          "(WPDEV_TERMINAL_PORT / WPDEV_TERMINAL_RUNNER_PORT).",
+      );
+    }
+
     const nextPort = await findFreePort(conflictPort + 1);
-    setWpPortInEnvFile(envPath, nextPort);
-    maybeUpdateLocalUrlPort(loaded, conflictPort, nextPort);
+    setPortInEnvFile(envPath, "WP_PORT", nextPort);
+    maybeUpdateLocalUrlPort(loaded, wpPort, nextPort);
+    ensureSecurityEnvDefaults(envPath);
 
     logInfo(
       `Port ${conflictPort} is in use. Updated ${envPath} to WP_PORT=${nextPort} and retrying docker compose up -d`,

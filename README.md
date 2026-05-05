@@ -144,18 +144,18 @@ Each **`wp-dev up`** / **`down`** uses **`docker compose -p <id>`** where **`<id
 
 ```bash
 cd /path/to/WP-dev
-git pull
+git pull --rebase --autostash
 npm install              # if package.json / lockfile changed
 npm run build            # CLI
 npm ci --prefix docs/admin && npm run build:wp --prefix docs/admin   # admin, if you use /admin/
 ```
 
-**`npm run setup`** is a safe full refresh after **`git pull`**. Ignored data (**`wp-dev.config.json`**, **`docker/.env`**, **`wordpress/`**, log files) stays on disk.
+**`npm run setup`** is a safe full refresh after **`git pull --rebase --autostash`**. Ignored data (**`wp-dev.config.json`**, **`docker/.env`**, **`wordpress/`**, log files) stays on disk.
 
 Quick full refresh (recommended when you use the browser admin and local stack):
 
 ```bash
-git pull
+git pull --rebase --autostash
 npm run build
 npm run admin:build:wp
 npm run wp-dev -- down

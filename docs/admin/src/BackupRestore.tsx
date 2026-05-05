@@ -1,23 +1,45 @@
-import { useMemo, useState } from "react";
-import { generateRunnerToken, getTerminalJobStatus, runTerminalAction, saveDockerEnvSecrets } from "./api";
+import { useEffect, useMemo, useState } from "react";
+import { getTerminalJobStatus, loadTerminalRunnerSecrets, runTerminalAction } from "./api";
 
 type EnvName = "local" | "staging" | "production";
 
 export function BackupRestore() {
-  const [terminalAuth, setTerminalAuth] = useState("wpdev:wpdev");
+  const [terminalAuth, setTerminalAuth] = useState("");
   const [runnerToken, setRunnerToken] = useState("");
   const [env, setEnv] = useState<EnvName>("local");
   const [restoreFile, setRestoreFile] = useState("");
   const [productionConfirm, setProductionConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
-  const [tokenBusy, setTokenBusy] = useState(false);
-  const [tokenMessage, setTokenMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [runnerReady, setRunnerReady] = useState(false);
+  const [runnerMessage, setRunnerMessage] = useState<string>("");
 
   const canRun = useMemo(
     () => Boolean(terminalAuth.trim() && runnerToken.trim()),
     [terminalAuth, runnerToken],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await loadTerminalRunnerSecrets();
+      if (cancelled) return;
+      if (!res.ok) {
+        setRunnerReady(false);
+        setRunnerMessage(
+          `Runner credentials are not initialized yet (${res.error}${res.detail ? `: ${res.detail}` : ""}). Run: npm run wp-dev -- up`,
+        );
+        return;
+      }
+      setTerminalAuth(res.terminalAuth);
+      setRunnerToken(res.runnerToken);
+      setRunnerReady(true);
+      setRunnerMessage("Runner security is loaded automatically from backend.");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const runAction = async (action: "backup_create" | "backup_list" | "restore_env", args: Record<string, string>) => {
     if (!canRun) {
@@ -29,7 +51,11 @@ export function BackupRestore() {
     try {
       const started = await runTerminalAction(terminalAuth.trim(), runnerToken.trim(), action, args);
       if (!started.ok) {
-        setOutput(`Runner error: ${started.error}`);
+        setOutput(
+          started.error === "missing_runner_token"
+            ? "Runner credentials are missing on backend. Run: npm run wp-dev -- up"
+            : `Runner error: ${started.error}`,
+        );
         return;
       }
       for (let i = 0; i < 300; i += 1) {
@@ -38,7 +64,20 @@ export function BackupRestore() {
           setOutput(`Status error: ${st.error}`);
           return;
         }
-        setOutput(st.output || "Running...");
+        const txt = st.output || "Running...";
+        if (st.status === "done" && st.exitCode !== null && st.exitCode !== 0) {
+          if (
+            txt.includes("Local WordPress is not installed or docker services are not running")
+          ) {
+            setOutput(
+              "Cannot create local backup yet: local WordPress is not installed for this project.\n" +
+                "Run wp-dev up and complete /wp-admin/install.php (or pull from remote), then try backup again.\n\n" +
+                txt,
+            );
+            return;
+          }
+        }
+        setOutput(txt);
         if (st.status === "done") return;
         await new Promise((resolve) => window.setTimeout(resolve, 1000));
       }
@@ -54,72 +93,15 @@ export function BackupRestore() {
         Create/list/restore database backups for local, staging, and production.
       </p>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <label className="block">
-          <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Terminal auth (user:password)</span>
-          <input
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-            value={terminalAuth}
-            onChange={(e) => setTerminalAuth(e.target.value)}
-          />
-        </label>
-        <label className="block">
-          <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Runner token</span>
-          <input
-            type="password"
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-            value={runnerToken}
-            onChange={(e) => setRunnerToken(e.target.value)}
-          />
-        </label>
+      <div
+        className={`rounded border px-3 py-2 text-xs ${
+          runnerReady
+            ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+            : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+        }`}
+      >
+        {runnerMessage || "Loading runner security settings..."}
       </div>
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            setRunnerToken(generateRunnerToken());
-            setTokenMessage({ tone: "success", text: "Generated a new runner token in the input field." });
-          }}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
-        >
-          Generate token
-        </button>
-        <button
-          type="button"
-          disabled={tokenBusy || !runnerToken.trim()}
-          onClick={async () => {
-            setTokenBusy(true);
-            setTokenMessage(null);
-            try {
-              const saved = await saveDockerEnvSecrets(
-                { WPDEV_TERMINAL_RUNNER_TOKEN: runnerToken.trim() },
-                runnerToken.trim() || undefined,
-              );
-              if (!saved.ok) {
-                setTokenMessage({ tone: "error", text: `Could not save runner token: ${saved.error}` });
-                return;
-              }
-              setTokenMessage({ tone: "success", text: "Saved WPDEV_TERMINAL_RUNNER_TOKEN to docker/.env." });
-            } finally {
-              setTokenBusy(false);
-            }
-          }}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800"
-        >
-          {tokenBusy ? "Saving token..." : "Save to docker/.env"}
-        </button>
-      </div>
-      {tokenMessage && (
-        <div
-          className={`rounded border px-3 py-2 text-xs ${
-            tokenMessage.tone === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
-              : "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
-          }`}
-        >
-          {tokenMessage.text}
-        </div>
-      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {(["local", "staging", "production"] as const).map((x) => (
@@ -137,7 +119,7 @@ export function BackupRestore() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !canRun}
           onClick={() => void runAction("backup_create", { env })}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
         >
@@ -145,7 +127,7 @@ export function BackupRestore() {
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !canRun}
           onClick={() => void runAction("backup_list", { env })}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
         >
@@ -178,7 +160,12 @@ export function BackupRestore() {
         )}
         <button
           type="button"
-          disabled={busy || !restoreFile.trim() || (env === "production" && productionConfirm !== "RESTORE_PRODUCTION")}
+          disabled={
+            busy ||
+            !canRun ||
+            !restoreFile.trim() ||
+            (env === "production" && productionConfirm !== "RESTORE_PRODUCTION")
+          }
           onClick={() =>
             void runAction("restore_env", {
               env,

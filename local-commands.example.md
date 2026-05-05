@@ -3,7 +3,7 @@
 ## Full refresh
 
 ```bash
-git pull &&
+git pull --rebase --autostash &&
 npm run build &&
 npm run admin:build:wp &&
 npm run build --prefix docs/admin &&
@@ -20,7 +20,7 @@ npm run wp-dev -- doctor staging --http
 ## Production pull flow
 
 ```bash
-git pull &&
+git pull --rebase --autostash &&
 npm run build &&
 npm run wp-dev -- doctor production &&
 npm run wp-dev -- pull production

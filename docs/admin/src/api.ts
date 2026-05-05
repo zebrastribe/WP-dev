@@ -8,6 +8,7 @@ export function apiPhpUrl(
     | "save"
     | "save-docker-env"
     | "simply-status"
+    | "terminal-runner-secrets"
     | "staging-db-secrets"
     | "simply-test"
     | "staging-https-check"
@@ -22,6 +23,10 @@ export type SaveResponse = { ok: true } | { ok: false; error: string };
 export type SimplyStatusResponse =
   | { ok: true; simplyAccount: string | null; apiKeyPresent: boolean }
   | { ok: false; error: string };
+
+export type TerminalRunnerSecretsResponse =
+  | { ok: true; terminalAuth: string; runnerToken: string; runnerOrigin: string | null }
+  | { ok: false; error: string; detail?: string };
 
 export async function loadWpDevConfig(): Promise<Record<string, unknown> | null> {
   const url = apiPhpUrl("load");
@@ -179,6 +184,35 @@ export async function loadSimplyStatus(): Promise<SimplyStatusResponse> {
   } catch (e) {
     logAdmin("warn", "loadSimplyStatus: fetch failed", e instanceof Error ? e.message : String(e));
     return { ok: false, error: "network_error" };
+  }
+}
+
+export async function loadTerminalRunnerSecrets(): Promise<TerminalRunnerSecretsResponse> {
+  try {
+    const res = await fetch(apiPhpUrl("terminal-runner-secrets"), {
+      method: "GET",
+      credentials: "same-origin",
+    });
+    const data = (await res.json()) as unknown;
+    if (!data || typeof data !== "object") {
+      return { ok: false, error: "invalid_response" };
+    }
+    const o = data as Record<string, unknown>;
+    if (res.ok && o.ok === true) {
+      return {
+        ok: true,
+        terminalAuth: String(o.terminalAuth ?? ""),
+        runnerToken: String(o.runnerToken ?? ""),
+        runnerOrigin: typeof o.runnerOrigin === "string" ? o.runnerOrigin : null,
+      };
+    }
+    return {
+      ok: false,
+      error: String(o.error ?? `HTTP ${res.status}`),
+      detail: typeof o.detail === "string" ? o.detail : undefined,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }
 }
 

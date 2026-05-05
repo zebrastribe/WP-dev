@@ -109,26 +109,26 @@ function commandForAction(action, args) {
     return `test -f ${file} || { echo "Backup file not found: ${file}"; exit 1; }; npm run wp-dev -- restore ${env} ${file}${yesFlag}`;
   }
   if (action === "git_status") {
-    return "git status --short";
+    return "git -c safe.directory=/workspace status --short";
   }
   if (action === "git_log") {
-    return "git log -n 30 --pretty=format:'%h|%ad|%an|%s' --date=short";
+    return "git -c safe.directory=/workspace log -n 30 --pretty=format:'%h|%ad|%an|%s' --date=short";
   }
   if (action === "git_show") {
     const commit = safeArg(args?.commit);
     if (!commit) return null;
-    return `git show --stat --patch --no-color ${commit}`;
+    return `git -c safe.directory=/workspace show --stat --patch --no-color ${commit}`;
   }
   if (action === "git_rollback_branch") {
     const commit = safeArg(args?.commit);
     if (!commit) return null;
-    return `git checkout -b rollback/${Date.now()} ${commit} && git status --short`;
+    return `git -c safe.directory=/workspace checkout -b rollback/${Date.now()} ${commit} && git -c safe.directory=/workspace status --short`;
   }
   if (action === "git_reset_hard") {
     const commit = safeArg(args?.commit);
     const confirm = safeArg(args?.confirm);
     if (!commit || confirm !== "HARD_RESET_CONFIRM") return null;
-    return `git reset --hard ${commit} && git status --short`;
+    return `git -c safe.directory=/workspace reset --hard ${commit} && git -c safe.directory=/workspace status --short`;
   }
   return null;
 }
