@@ -13,7 +13,7 @@ import {
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
-const STEP_LABELS = ["Welcome", "Production Host", "Staging Host", "Provider", "Save"] as const;
+const STEP_LABELS = ["Welcome", "Production Host", "Staging Host", "Optional Provider", "Save"] as const;
 
 type WizardAlert = { tone: "info" | "success" | "error"; text: string };
 type ChecklistStatus = "done" | "warn" | "todo";
@@ -778,6 +778,44 @@ export function Wizard() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
+                    disabled={sslCheckBusy}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                    onClick={async () => {
+                      setSslCheckBusy(true);
+                      try {
+                        const r = await checkStagingHttps({ url: data.staging.url.trim() || undefined });
+                        if (!r.ok) {
+                          setAlert({
+                            tone: "error",
+                            text: `Staging HTTPS check failed: ${r.error}${r.detail ? `\n${r.detail}` : ""}`,
+                          });
+                          return;
+                        }
+                        const lines = [
+                          `HTTPS ${r.url}: ${r.https.ok ? "OK" : "NOT OK"} (HTTP ${r.https.status})`,
+                          `HTTP -> HTTPS redirect: ${r.http.redirectsToHttps ? "YES" : "NO"} (HTTP ${r.http.status})`,
+                        ];
+                        if (!r.http.redirectsToHttps) {
+                          lines.push("Tip: configure redirect from http to https in hosting settings.");
+                        }
+                        if (!r.https.ok) {
+                          lines.push(
+                            "Tip: ensure SSL cert is issued for staging hostname and DNS has propagated.",
+                          );
+                        }
+                        setAlert({
+                          tone: r.https.ok ? "success" : "info",
+                          text: lines.join("\n"),
+                        });
+                      } finally {
+                        setSslCheckBusy(false);
+                      }
+                    }}
+                  >
+                    {sslCheckBusy ? "Checking HTTPS..." : "Verify staging HTTPS"}
+                  </button>
+                  <button
+                    type="button"
                     disabled={domainCheckBusy}
                     className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                     onClick={async () => {
@@ -864,6 +902,10 @@ export function Wizard() {
                     </ul>
                   </div>
                 )}
+                <p className="mt-2 text-xs text-slate-500">
+                  SSL checklist: DNS for staging hostname resolves, hosting/vhost serves the hostname, cert is issued,
+                  and HTTP redirects to HTTPS.
+                </p>
               </div>
               <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
                 <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
@@ -1067,6 +1109,9 @@ export function Wizard() {
 
       {step === 3 && (
         <div className="space-y-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            This step is optional. Skip it unless you need provider API integration.
+          </p>
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -1201,44 +1246,6 @@ export function Wizard() {
                 >
                   Open hosting control panel
                 </a>
-                <button
-                  type="button"
-                  disabled={sslCheckBusy}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                  onClick={async () => {
-                    setSslCheckBusy(true);
-                    try {
-                      const r = await checkStagingHttps({ url: data.staging.url.trim() || undefined });
-                      if (!r.ok) {
-                        setAlert({
-                          tone: "error",
-                          text: `Staging HTTPS check failed: ${r.error}${r.detail ? `\n${r.detail}` : ""}`,
-                        });
-                        return;
-                      }
-                      const lines = [
-                        `HTTPS ${r.url}: ${r.https.ok ? "OK" : "NOT OK"} (HTTP ${r.https.status})`,
-                        `HTTP -> HTTPS redirect: ${r.http.redirectsToHttps ? "YES" : "NO"} (HTTP ${r.http.status})`,
-                      ];
-                      if (!r.http.redirectsToHttps) {
-                        lines.push("Tip: configure redirect from http to https in hosting settings.");
-                      }
-                      if (!r.https.ok) {
-                        lines.push(
-                          "Tip: ensure SSL cert is issued for staging hostname and DNS has propagated.",
-                        );
-                      }
-                      setAlert({
-                        tone: r.https.ok ? "success" : "info",
-                        text: lines.join("\n"),
-                      });
-                    } finally {
-                      setSslCheckBusy(false);
-                    }
-                  }}
-                >
-                  {sslCheckBusy ? "Checking HTTPS..." : "Verify staging HTTPS"}
-                </button>
               </div>
               {providerKeySaveMessage && (
                 <div
@@ -1251,10 +1258,6 @@ export function Wizard() {
                   {providerKeySaveMessage.text}
                 </div>
               )}
-              <p className="text-xs text-slate-500">
-                SSL checklist: DNS for staging hostname resolves, hosting/vhost serves the hostname, cert is issued,
-                and HTTP redirects to HTTPS.
-              </p>
             </div>
           )}
         </div>
