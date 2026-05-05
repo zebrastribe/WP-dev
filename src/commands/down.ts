@@ -6,6 +6,7 @@ import {
   readWpPortFromDockerEnvFile,
 } from "../utils/published-local-urls.js";
 import { logInfo } from "../utils/logger.js";
+import { stopHostRunner } from "../services/host-runner.js";
 
 export type DownOptions = {
   removeOrphans?: boolean;
@@ -13,6 +14,7 @@ export type DownOptions = {
 
 export async function cmdDown(loaded: LoadedConfig, options: DownOptions = {}): Promise<void> {
   assertDockerReady();
+  stopHostRunner(loaded.configDir);
   const envPath = dockerComposeEnvPath(loaded);
   const wpPort = readWpPortFromDockerEnvFile(envPath);
   const args = ["down", ...(options.removeOrphans ? ["--remove-orphans"] : [])];

@@ -138,6 +138,13 @@ export async function assertLocalWpInstalled(
   config: WpDevConfig,
 ): Promise<void> {
   if (!(await isLocalWpInstalled(configDir, config))) {
+    const inContainerNoDockerSocket =
+      existsSync("/.dockerenv") && !existsSync("/var/run/docker.sock");
+    if (inContainerNoDockerSocket) {
+      throw new Error(
+        "This command must run on your host terminal, not inside the browser terminal container. Open a host shell and run: `npm run wp-dev -- push staging` from the project directory.",
+      );
+    }
     throw new Error(
       "Local WordPress is not installed or docker services are not running. Run `wp-dev up` and complete the WordPress install (or pull from remote) first.",
     );
