@@ -48,15 +48,9 @@ export function TerminalTab() {
   }, []);
 
   const terminalUrl = useMemo(() => {
-    const auth = terminalAuth.trim() || "wpdev:wpdev";
     const base = new URL(`${window.location.protocol}//127.0.0.1:${terminalPort}/`);
-    const [user, pass] = auth.split(":", 2);
-    if (user && pass) {
-      base.username = user;
-      base.password = pass;
-    }
     return base.toString();
-  }, [terminalAuth, terminalPort]);
+  }, [terminalPort]);
 
   const run = async (
     action:

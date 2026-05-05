@@ -202,15 +202,8 @@ export function Wizard() {
   const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
   const [showTerminal, setShowTerminal] = useState(true);
   const [terminalPort, setTerminalPort] = useState(7681);
-  const terminalAuthValue = terminalAuth.trim() || "wpdev:wpdev";
   const terminalUrl = (() => {
     const base = new URL(`${window.location.protocol}//127.0.0.1:${terminalPort}/`);
-    const [user, pass] = terminalAuthValue.split(":", 2);
-    if (user && pass) {
-      // Best-effort: many browsers use these credentials without a login prompt.
-      base.username = user;
-      base.password = pass;
-    }
     return base.toString();
   })();
 
