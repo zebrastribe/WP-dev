@@ -7,6 +7,7 @@ import { getPublishedLocalAccess } from "../utils/published-local-urls.js";
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import net from "node:net";
+import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
 
 function extractBoundPort(message: string): number | null {
   const m = message.match(/:(\d+)\s+failed:\s+port is already allocated/i);
@@ -162,5 +163,14 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   }
 
   await ensureAdminSaveWriteAccess(loaded);
+  try {
+    await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logInfo(`up: could not apply runtime wp-content write permissions (${msg})`);
+    console.error(
+      "Warning: could not apply runtime write permissions for wp-content. Plugins may fail to write files.",
+    );
+  }
   printPublishedAccessUrls(loaded);
 }

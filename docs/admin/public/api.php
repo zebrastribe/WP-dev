@@ -935,6 +935,143 @@ if ($method === 'POST' && $action === 'staging-https-check') {
     exit;
 }
 
+if ($method === 'POST' && $action === 'staging-domain-check') {
+    $body = file_get_contents('php://input');
+    $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
+    $input = is_array($in) ? $in : [];
+
+    $url = null;
+    $inUrl = $input['url'] ?? null;
+    if (is_string($inUrl) && trim($inUrl) !== '') {
+        $url = trim($inUrl);
+    } elseif (is_file($configPath) && is_readable($configPath)) {
+        $cfgRaw = file_get_contents($configPath);
+        $cfg = is_string($cfgRaw) && $cfgRaw !== '' ? json_decode($cfgRaw, true) : null;
+        if (is_array($cfg) && isset($cfg['staging']) && is_array($cfg['staging'])) {
+            $u = $cfg['staging']['url'] ?? null;
+            if (is_string($u) && trim($u) !== '') {
+                $url = trim($u);
+            }
+        }
+    }
+    if ($url === null) {
+        wpdev_json_error(400, 'missing_staging_url');
+        wpdev_admin_api_log('POST staging-domain-check 400 missing_staging_url');
+        exit;
+    }
+
+    $parts = @parse_url($url);
+    $host = is_array($parts) && isset($parts['host']) && is_string($parts['host'])
+        ? strtolower(trim($parts['host']))
+        : '';
+    if ($host === '') {
+        wpdev_json_error(400, 'invalid_staging_url', 'Could not parse host from URL');
+        wpdev_admin_api_log('POST staging-domain-check 400 invalid_staging_url');
+        exit;
+    }
+
+    $records = [];
+    $a = @dns_get_record($host, DNS_A);
+    if (is_array($a)) {
+        foreach ($a as $r) {
+            if (is_array($r) && isset($r['ip']) && is_string($r['ip'])) {
+                $records[] = 'A ' . $r['ip'];
+            }
+        }
+    }
+    $aaaa = @dns_get_record($host, DNS_AAAA);
+    if (is_array($aaaa)) {
+        foreach ($aaaa as $r) {
+            if (is_array($r) && isset($r['ipv6']) && is_string($r['ipv6'])) {
+                $records[] = 'AAAA ' . $r['ipv6'];
+            }
+        }
+    }
+    $cname = @dns_get_record($host, DNS_CNAME);
+    if (is_array($cname)) {
+        foreach ($cname as $r) {
+            if (is_array($r) && isset($r['target']) && is_string($r['target'])) {
+                $records[] = 'CNAME ' . rtrim($r['target'], '.');
+            }
+        }
+    }
+    $dnsOk = count($records) > 0;
+
+    $httpsRes = wpdev_http_request('GET', $url, ['Accept' => 'text/html'], null);
+    $httpsHeaders = isset($http_response_header) && is_array($http_response_header)
+        ? $http_response_header
+        : [];
+    $httpsStatus = $httpsRes['status'];
+    $httpsLocation = wpdev_header_value($httpsHeaders, 'Location');
+    $httpsOk = $httpsStatus >= 200 && $httpsStatus < 400;
+
+    $httpUrl = preg_replace('#^https://#i', 'http://', $url) ?? $url;
+    $httpRes = wpdev_http_request('GET', $httpUrl, ['Accept' => 'text/html'], null);
+    $httpHeaders = isset($http_response_header) && is_array($http_response_header)
+        ? $http_response_header
+        : [];
+    $httpStatus = $httpRes['status'];
+    $httpLocation = wpdev_header_value($httpHeaders, 'Location');
+    $httpRedirectsToHttps =
+        $httpLocation !== null && str_starts_with(strtolower($httpLocation), 'https://');
+
+    $finalHost = $host;
+    if (is_string($httpsLocation) && $httpsLocation !== '') {
+        $locParts = @parse_url($httpsLocation);
+        if (is_array($locParts) && isset($locParts['host']) && is_string($locParts['host'])) {
+            $finalHost = strtolower(trim($locParts['host']));
+        }
+    }
+    $finalHostMatches = $finalHost === $host;
+
+    $hints = [];
+    if (!$dnsOk) {
+        $hints[] = 'No DNS records found for staging host. Add A/AAAA/CNAME in your hosting DNS panel.';
+    }
+    if (!$httpsOk) {
+        $hints[] = 'HTTPS is not healthy yet. Issue/renew SSL certificate for this hostname.';
+    }
+    if (!$httpRedirectsToHttps) {
+        $hints[] = 'HTTP does not redirect to HTTPS. Enable forced HTTPS redirect in hosting settings.';
+    }
+    if (!$finalHostMatches) {
+        $hints[] = 'HTTPS redirects to a different host. Check site URL settings and vhost/domain mapping.';
+    }
+    if (count($hints) === 0) {
+        $hints[] = 'Staging domain check looks good.';
+    }
+
+    wpdev_admin_api_log(
+        'POST staging-domain-check 200 host=' . $host .
+        ' dns=' . ($dnsOk ? 'ok' : 'bad') .
+        ' https=' . $httpsStatus .
+        ' redirect=' . ($httpRedirectsToHttps ? 'yes' : 'no') .
+        ' finalHost=' . $finalHost
+    );
+    echo json_encode(
+        [
+            'ok' => true,
+            'url' => $url,
+            'host' => $host,
+            'dns' => ['ok' => $dnsOk, 'records' => $records],
+            'https' => [
+                'ok' => $httpsOk,
+                'status' => $httpsStatus,
+                'location' => $httpsLocation,
+            ],
+            'http' => [
+                'status' => $httpStatus,
+                'location' => $httpLocation,
+                'redirectsToHttps' => $httpRedirectsToHttps,
+            ],
+            'finalHostMatches' => $finalHostMatches,
+            'hints' => $hints,
+        ],
+        JSON_UNESCAPED_SLASHES
+    );
+    exit;
+}
+
 if ($method === 'POST' && $action === 'staging-db-check') {
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;

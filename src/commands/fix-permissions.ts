@@ -11,6 +11,10 @@ export type FixPermissionsOptions = {
   quiet?: boolean;
 };
 
+export type FixRuntimeWritePermissionsOptions = {
+  quiet?: boolean;
+};
+
 /**
  * chown bind-mounted wordpress/ to the host user so host rsync can write after Docker
  * created files as www-data.
@@ -46,6 +50,46 @@ export async function cmdFixPermissions(
   if (!options.quiet) {
     console.error(
       "Updated ownership of wordpress/ for your host user. If Apache cannot write uploads, chown back to www-data inside the container — see README.",
+    );
+  }
+}
+
+/**
+ * Make runtime-writable WordPress paths owned by www-data for plugin/theme updates and uploads.
+ * Kept separate from `cmdFixPermissions` (host ownership) so pull can do:
+ * host-writeable before rsync, runtime-writeable after sync.
+ */
+export async function cmdFixRuntimeWritePermissions(
+  loaded: LoadedConfig,
+  options: FixRuntimeWritePermissionsOptions = {},
+): Promise<void> {
+  assertDockerReady();
+  logInfo("fix-runtime-write-permissions: chown/chmod wp-content for www-data");
+  await compose(
+    loaded.configDir,
+    loaded.config,
+    [
+      "run",
+      "--rm",
+      "--no-deps",
+      "--user",
+      "0",
+      "--entrypoint",
+      "sh",
+      "wordpress",
+      "-lc",
+      [
+        "mkdir -p /var/www/html/wp-content/uploads /var/www/html/wp-content/upgrade",
+        "chown -R 33:33 /var/www/html/wp-content",
+        "find /var/www/html/wp-content -type d -exec chmod 775 {} +",
+        "find /var/www/html/wp-content -type f -exec chmod 664 {} +",
+      ].join(" && "),
+    ],
+    { stdio: "pipe" },
+  );
+  if (!options.quiet) {
+    console.error(
+      "Updated wp-content ownership/permissions for WordPress runtime writes (uploads/plugins/cache).",
     );
   }
 }
