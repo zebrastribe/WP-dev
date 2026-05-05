@@ -103,33 +103,38 @@ export const Environments: FC = () => (
 export const Commands: FC = () => (
   <Prose>
     <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
-      <table className="w-full min-w-[32rem] border-collapse text-left text-xs">
+      <table className="w-full min-w-[44rem] border-collapse text-left text-xs">
         <thead className="bg-slate-100 dark:bg-slate-800/80">
           <tr>
             <th className="border-b border-slate-200 p-2 dark:border-slate-700">Command</th>
             <th className="border-b border-slate-200 p-2 dark:border-slate-700">Purpose</th>
+            <th className="border-b border-slate-200 p-2 dark:border-slate-700">Example</th>
           </tr>
         </thead>
         <tbody className="font-mono text-[11px]">
           {[
-            ["init", "Interactive config"],
-            ["up / down", "Docker stack"],
-            ["doctor [--rsync]", "Checks + optional rsync dry-run"],
-            ["pull <env> [--dry-run] [--no-backup-local]", "Remote → local"],
-            ["push <env> [--dry-run]", "Local → remote"],
-            ["backup <env>", "DB dump to ~/.wp-dev/backups/…"],
-            ["restore <env> <file.sql>", "Import DB (destructive)"],
-            ["fix-permissions", "chown wordpress/ for rsync"],
-            ["logs", "Tail project log file"],
-            ["simply test", "Simply API GET /my/products/"],
+            ["init", "Interactive config", "npm run wp-dev -- init"],
+            ["up / down", "Docker stack", "npm run wp-dev -- up"],
+            ["doctor [--rsync]", "Checks + optional rsync dry-run", "npm run wp-dev -- doctor staging --rsync"],
             [
-              "simply setup-staging-dns [apex]",
-              "Simply DNS + staging hints; --keep-existing-dns, --staging-label",
+              "pull <env> [--dry-run] [--no-backup-local]",
+              "Remote → local",
+              "npm run wp-dev -- pull production",
             ],
-          ].map(([cmd, desc], i) => (
+            ["push <env> [--dry-run]", "Local → remote", "npm run wp-dev -- push staging --dry-run"],
+            ["backup <env>", "DB dump to ~/.wp-dev/backups/…", "npm run wp-dev -- backup local"],
+            [
+              "restore <env> <file.sql>",
+              "Import DB (destructive)",
+              "npm run wp-dev -- restore staging ~/.wp-dev/backups/my-site/staging/db-2026-05-05-14-00-00.sql",
+            ],
+            ["fix-permissions", "chown wordpress/ for rsync", "npm run wp-dev -- fix-permissions"],
+            ["logs", "Tail project log file", "npm run wp-dev -- logs --lines 200"],
+          ].map(([cmd, desc, example], i) => (
             <tr key={`${i}-${cmd}`} className="border-b border-slate-100 dark:border-slate-800/80">
               <td className="p-2 align-top text-brand-700 dark:text-brand-400">{cmd}</td>
               <td className="p-2 text-slate-600 dark:text-slate-400">{desc}</td>
+              <td className="p-2 text-slate-600 dark:text-slate-400">{example}</td>
             </tr>
           ))}
         </tbody>
