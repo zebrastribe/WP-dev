@@ -23,6 +23,30 @@ export type PublishedLocalAccess = {
   warnings: string[];
 };
 
+export function getLocalUrlPortMismatch(
+  loaded: LoadedConfig,
+): { localUrlPort: number; wpPort: number } | undefined {
+  const envPath = dockerComposeEnvPath(loaded);
+  const wpPort = readWpPortFromDockerEnvFile(envPath);
+  if (wpPort == null) return undefined;
+  try {
+    const u = new URL(loaded.config.local.url);
+    const host = u.hostname.toLowerCase();
+    const isLoopback =
+      host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+    if (!isLoopback) return undefined;
+    const localUrlPort = u.port
+      ? Number.parseInt(u.port, 10)
+      : u.protocol === "https:"
+        ? 443
+        : 80;
+    if (localUrlPort === wpPort) return undefined;
+    return { localUrlPort, wpPort };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * URLs to open in the browser for this clone. Prefer `docker/.env` `WP_PORT` over a stale
  * `local.url` port when both refer to loopback — Docker publishes `WP_PORT` on the host.

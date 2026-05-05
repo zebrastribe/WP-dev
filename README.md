@@ -272,7 +272,7 @@ Docker often creates files as **`www-data` (uid 33)** while host **`rsync`** run
 | **`Authenticated with partial success`** | Server wants another auth step — [SSH: key-only](#ssh-key-only-no-password-in-config). |
 | **rsync path errors** | Wrong **`path`** or unreadable tree — verify on server. |
 | **Empty SQL dump after `pull`** | WP-CLI / **`path`** / permissions — check **`logs/wp-dev.log`**. |
-| **Wrong links after `pull`** | Fix **`production.url`** / **`staging.url`**; extra **`wp search-replace`** — [Remote `url`](#remote-url-and-search-replace). |
+| **Wrong links after `pull`** | Ensure **`local.url`** (including port) is correct. `pull` now rewrites common remote URL variants (`http/https`, `www/non-www`) and forces local `home/siteurl`; if needed run an extra **`wp search-replace`** — [Remote `url`](#remote-url-and-search-replace). |
 | **`mkstemp` under `wordpress/`** | **`wp-dev fix-permissions`**. |
 | **`caching_sha2_password` on import** | Use shipped Compose **`mysql_native_password`**; fix old DB user or volume. |
 | **Can't connect to `db` right after `up`** | Wait for healthy **`db`** or retry **`pull`**. |
