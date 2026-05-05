@@ -24,4 +24,4 @@ RUN apt-get update \
 
 WORKDIR /workspace
 
-CMD ["sh", "-lc", "WD=\"${WPDEV_TERMINAL_WORKDIR:-/workspace}\"; if [ ! -d \"$WD\" ]; then WD=/workspace; fi; ttyd -W -p 7681 -c \"${WPDEV_TERMINAL_AUTH:-wpdev:wpdev}\" -w \"$WD\" bash -lc \"cd \\\"$WD\\\" && exec bash\""]
+CMD ["sh", "-lc", "WD=\"${WPDEV_TERMINAL_WORKDIR:-/workspace}\"; if [ ! -d \"$WD\" ]; then WD=/workspace; fi; (while true; do node /workspace/docker/terminal-runner.mjs >>/tmp/terminal-runner.log 2>&1; sleep 1; done) & ttyd -W -p 7681 -c \"${WPDEV_TERMINAL_AUTH:-wpdev:wpdev}\" -w \"$WD\" bash -lc \"cd \\\"$WD\\\" && exec bash\""]

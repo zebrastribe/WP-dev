@@ -20,7 +20,7 @@ export const Overview: FC = () => (
       </strong>{" "}
       after <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev up</code> and{" "}
       <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run admin:build:wp</code> — use the{" "}
-      <strong>Setup wizard</strong> tab first, then read the rest here.
+      <strong>wp-dev</strong> tab first, then read the rest here.
     </p>
     <p className="text-base text-slate-600 dark:text-slate-400">
       <strong className="text-slate-900 dark:text-white">wp-dev</strong> is a CLI: local WordPress in Docker,
