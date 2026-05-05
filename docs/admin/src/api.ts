@@ -517,3 +517,22 @@ export async function getTerminalJobStatus(
     return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }
 }
+
+/** Generate a URL-safe token for local secrets. */
+export function generateRunnerToken(bytes = 24): string {
+  const size = Number.isFinite(bytes) && bytes >= 12 ? Math.floor(bytes) : 24;
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+  const out: string[] = [];
+  const cryptoApi =
+    typeof window !== "undefined" ? window.crypto : (globalThis as { crypto?: Crypto }).crypto;
+  if (cryptoApi?.getRandomValues) {
+    const data = new Uint8Array(size);
+    cryptoApi.getRandomValues(data);
+    for (let i = 0; i < data.length; i += 1) out.push(chars[data[i] % chars.length]);
+    return out.join("");
+  }
+  for (let i = 0; i < size; i += 1) {
+    out.push(chars[Math.floor(Math.random() * chars.length)]);
+  }
+  return out.join("");
+}

@@ -3,6 +3,7 @@ import {
   checkStagingDomain,
   checkStagingDbConnection,
   checkStagingHttps,
+  generateRunnerToken,
   getTerminalJobStatus,
   loadStagingDbSecrets,
   loadSimplyStatus,
@@ -180,6 +181,8 @@ export function Wizard() {
   const [terminalWorkdir, setTerminalWorkdir] = useState("/workspace");
   const [terminalSettingsBusy, setTerminalSettingsBusy] = useState(false);
   const [terminalSettingsMessage, setTerminalSettingsMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [runnerTokenBusy, setRunnerTokenBusy] = useState(false);
+  const [runnerTokenMessage, setRunnerTokenMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   /** Never stored in localStorage draft; optional write to host docker/.env after config save. */
   const [providerApiKey, setProviderApiKey] = useState("");
   const [providerKeyPresent, setProviderKeyPresent] = useState<boolean | null>(null);
@@ -939,6 +942,56 @@ export function Wizard() {
                 />
               </label>
             </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSaveToken(generateRunnerToken());
+                  setRunnerTokenMessage({ tone: "success", text: "Generated a new runner token in the input field." });
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Generate token
+              </button>
+              <button
+                type="button"
+                disabled={runnerTokenBusy || !saveToken.trim()}
+                onClick={async () => {
+                  setRunnerTokenBusy(true);
+                  setRunnerTokenMessage(null);
+                  try {
+                    const saved = await saveDockerEnvSecrets(
+                      { WPDEV_TERMINAL_RUNNER_TOKEN: saveToken.trim() },
+                      saveToken.trim() || undefined,
+                    );
+                    if (!saved.ok) {
+                      setRunnerTokenMessage({ tone: "error", text: `Could not save runner token: ${saved.error}` });
+                      return;
+                    }
+                    setRunnerTokenMessage({
+                      tone: "success",
+                      text: "Saved WPDEV_TERMINAL_RUNNER_TOKEN to docker/.env.",
+                    });
+                  } finally {
+                    setRunnerTokenBusy(false);
+                  }
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                {runnerTokenBusy ? "Saving token..." : "Save to docker/.env"}
+              </button>
+            </div>
+            {runnerTokenMessage && (
+              <div
+                className={`mt-2 rounded border px-3 py-2 text-xs ${
+                  runnerTokenMessage.tone === "success"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+                    : "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
+                }`}
+              >
+                {runnerTokenMessage.text}
+              </div>
+            )}
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"

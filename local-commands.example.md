@@ -1,14 +1,4 @@
-<<<<<<< HEAD
-# Local Command Shortcuts (Example)
-
-Copy this file to `local-commands.md` and customize locally:
-
-```bash
-cp local-commands.example.md local-commands.md
-```
-=======
 # Common Commands
->>>>>>> 43cecd0 (Improve admin wizard UX and add common command shortcuts.)
 
 ## Full refresh
 
@@ -36,15 +26,27 @@ npm run wp-dev -- doctor production &&
 npm run wp-dev -- pull production
 ```
 
-<<<<<<< HEAD
-## Path-specific workflow (example path)
-=======
 ## Path-specific workflow (edit path)
->>>>>>> 43cecd0 (Improve admin wizard UX and add common command shortcuts.)
 
 ```bash
 cd /path/to/your/WP-dev
 npm install &&
 npm run build &&
 npm run wp-dev -- pull production
+```
+
+## Commit + push
+```bash
+git status &&
+git commit -am "your message" &&
+git push
+```
+
+## Commit + push (safer)
+```bash
+git status &&
+git diff &&
+git add <file1> <file2> &&
+git commit -m "your message" &&
+git push
 ```
