@@ -99,7 +99,7 @@ export default function App() {
                   : "text-slate-600 dark:text-slate-400"
               }`}
             >
-              History/Rollback
+              Restore Points
             </button>
             <button
               type="button"
