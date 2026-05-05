@@ -488,6 +488,9 @@ function runnerSecurityHeaders(auth: string, token: string): Record<string, stri
 export type TerminalAction =
   | "generate_keypair"
   | "ssh_test"
+  | "wpdev_doctor"
+  | "wpdev_pull"
+  | "wpdev_push"
   | "backup_create"
   | "backup_list"
   | "restore_env"

@@ -13,7 +13,7 @@ export function TerminalTab() {
   const [showTerminal, setShowTerminal] = useState(true);
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
-  const [customCmd, setCustomCmd] = useState("npm run wp-dev -- doctor staging --http");
+  const [preparedCommand, setPreparedCommand] = useState("");
 
   const canRun = useMemo(
     () => Boolean(runnerReady && terminalAuth.trim() && runnerToken.trim()),
@@ -61,6 +61,7 @@ export function TerminalTab() {
   const run = async (
     action:
       | "generate_keypair"
+      | "wpdev_doctor"
       | "backup_create"
       | "backup_list"
       | "git_status"
@@ -95,6 +96,16 @@ export function TerminalTab() {
     }
   };
 
+  const prepareCommand = async (cmd: string) => {
+    setPreparedCommand(cmd);
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setOutput(`Prepared command (copied):\n${cmd}\n\nPaste in terminal and press Enter.`);
+    } catch {
+      setOutput(`Prepared command:\n${cmd}\n\nCopy manually, paste in terminal, then press Enter.`);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Terminal</h2>
@@ -112,91 +123,13 @@ export function TerminalTab() {
         {runnerMessage || "Loading terminal settings..."}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={busy || !canRun}
-          onClick={() => void run("generate_keypair")}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
-        >
-          Generate SSH keypair
-        </button>
-        <button
-          type="button"
-          disabled={busy || !canRun}
-          onClick={() => void run("backup_create", { env, kind: "full" })}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
-        >
-          Create {env} full backup
-        </button>
-        <button
-          type="button"
-          disabled={busy || !canRun}
-          onClick={() => void run("backup_list", { env, kind: "full" })}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
-        >
-          List {env} full backups
-        </button>
-        <button
-          type="button"
-          disabled={busy || !canRun}
-          onClick={() => void run("git_status")}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
-        >
-          Git status (wp-dev repo)
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {(["local", "staging", "production"] as const).map((x) => (
-          <button
-            key={x}
-            type="button"
-            onClick={() => setEnv(x)}
-            className={`rounded-lg px-3 py-1.5 text-xs ${
-              env === x ? "bg-brand-600 text-white" : "border border-slate-300"
-            }`}
-          >
-            {x}
-          </button>
-        ))}
-      </div>
-
-      <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
-        <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">Custom command</p>
-        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          For security, custom commands run manually in the terminal panel. Click copy, then paste and run.
-        </p>
-        <input
-          className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-          value={customCmd}
-          onChange={(e) => setCustomCmd(e.target.value)}
-        />
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(customCmd);
-                setOutput(`Copied command:\n${customCmd}`);
-              } catch (e) {
-                setOutput(
-                  `Clipboard failed. Copy manually:\n${customCmd}\n\n${e instanceof Error ? e.message : String(e)}`,
-                );
-              }
-            }}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
-          >
-            Copy command
-          </button>
-        </div>
-      </div>
-
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Browser terminal</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Paste commands here and press Enter.</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Type directly here. If this panel is blank, click "Open in new tab" and use the same quick-run buttons below.
+            </p>
           </div>
           <div className="flex gap-2">
             <button
@@ -223,6 +156,90 @@ export function TerminalTab() {
             className="h-[420px] w-full rounded-lg border border-slate-200 dark:border-slate-700"
           />
         ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {(["local", "staging", "production"] as const).map((x) => (
+          <button
+            key={x}
+            type="button"
+            onClick={() => setEnv(x)}
+            className={`rounded-lg px-3 py-1.5 text-xs ${
+              env === x ? "bg-brand-600 text-white" : "border border-slate-300"
+            }`}
+          >
+            {x}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => void prepareCommand("npm run wp-dev -- push staging")}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+        >
+          Push localhost to staging
+        </button>
+        <button
+          type="button"
+          onClick={() => void prepareCommand("npm run wp-dev -- push production")}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+        >
+          Push localhost to production
+        </button>
+        <button
+          type="button"
+          onClick={() => void prepareCommand("npm run wp-dev -- pull production")}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+        >
+          Pull production to localhost
+        </button>
+        <button
+          type="button"
+          disabled={busy || !canRun}
+          onClick={() => void run("generate_keypair")}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+        >
+          Generate SSH keypair
+        </button>
+        <button
+          type="button"
+          disabled={busy || !canRun || env === "local"}
+          onClick={() => void run("wpdev_doctor", { env })}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800"
+        >
+          Run doctor {env === "local" ? "(pick staging/prod)" : env}
+        </button>
+        <button
+          type="button"
+          disabled={busy || !canRun}
+          onClick={() => void run("backup_create", { env, kind: "full" })}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+        >
+          Create {env} full backup
+        </button>
+        <button
+          type="button"
+          disabled={busy || !canRun}
+          onClick={() => void run("backup_list", { env, kind: "full" })}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+        >
+          List {env} full backups
+        </button>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 p-3 text-xs dark:border-slate-700">
+        <p className="font-semibold text-slate-800 dark:text-slate-100">Prepared command</p>
+        <input
+          readOnly
+          value={preparedCommand}
+          placeholder="Click a sync button above to prepare a command..."
+          className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+        />
+        <p className="mt-2 text-slate-500 dark:text-slate-400">
+          Security mode: sync commands are prepared only. You run them manually in terminal.
+        </p>
       </div>
 
       <pre className="max-h-80 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] dark:border-slate-700 dark:bg-slate-950">

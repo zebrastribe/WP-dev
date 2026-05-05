@@ -89,6 +89,21 @@ function commandForAction(action, args) {
     if (!user || !host) return null;
     return `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} "pwd && ls -la && wp --info"`;
   }
+  if (action === "wpdev_doctor") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- doctor ${env} --http`;
+  }
+  if (action === "wpdev_pull") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- pull ${env}`;
+  }
+  if (action === "wpdev_push") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- push ${env}`;
+  }
   if (action === "backup_create") {
     const env = safeArg(args?.env);
     const kindRaw = safeArg(args?.kind);
