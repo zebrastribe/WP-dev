@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { getTerminalJobStatus, runTerminalAction } from "./api";
+import { generateRunnerToken, getTerminalJobStatus, runTerminalAction, saveDockerEnvSecrets } from "./api";
 
 type EnvName = "local" | "staging" | "production";
 
@@ -11,6 +11,8 @@ export function BackupRestore() {
   const [productionConfirm, setProductionConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [tokenMessage, setTokenMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   const canRun = useMemo(
     () => Boolean(terminalAuth.trim() && runnerToken.trim()),
@@ -71,6 +73,53 @@ export function BackupRestore() {
           />
         </label>
       </div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setRunnerToken(generateRunnerToken());
+            setTokenMessage({ tone: "success", text: "Generated a new runner token in the input field." });
+          }}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+        >
+          Generate token
+        </button>
+        <button
+          type="button"
+          disabled={tokenBusy || !runnerToken.trim()}
+          onClick={async () => {
+            setTokenBusy(true);
+            setTokenMessage(null);
+            try {
+              const saved = await saveDockerEnvSecrets(
+                { WPDEV_TERMINAL_RUNNER_TOKEN: runnerToken.trim() },
+                runnerToken.trim() || undefined,
+              );
+              if (!saved.ok) {
+                setTokenMessage({ tone: "error", text: `Could not save runner token: ${saved.error}` });
+                return;
+              }
+              setTokenMessage({ tone: "success", text: "Saved WPDEV_TERMINAL_RUNNER_TOKEN to docker/.env." });
+            } finally {
+              setTokenBusy(false);
+            }
+          }}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800"
+        >
+          {tokenBusy ? "Saving token..." : "Save to docker/.env"}
+        </button>
+      </div>
+      {tokenMessage && (
+        <div
+          className={`rounded border px-3 py-2 text-xs ${
+            tokenMessage.tone === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+              : "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
+          }`}
+        >
+          {tokenMessage.text}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {(["local", "staging", "production"] as const).map((x) => (

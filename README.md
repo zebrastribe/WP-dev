@@ -37,7 +37,7 @@ npm run setup          # Docker check, npm install, build CLI + admin UI into wo
      - `WPDEV_TERMINAL_RUNNER_TOKEN` (required for one-click terminal actions)
      - `WPDEV_TERMINAL_RUNNER_ORIGIN` (usually `http://localhost:<WP_PORT>`)
 2. **Configure** — either:
-   - **Browser:** open **`http://localhost:<WP_PORT>/admin/`** (default port **`8888`** — set **`WP_PORT`** in **`docker/.env`**, copy from **`docker/.env.example`**). Use the host-agnostic **wp-dev** wizard (Welcome / Production Host / Staging Host / Save / Links) → **Save** writes **`wp-dev.config.json`** and then shows quick links.  
+   - **Browser:** open **`http://localhost:<WP_PORT>/admin/`** (default port **`8888`** — set **`WP_PORT`** in **`docker/.env`**, copy from **`docker/.env.example`**). Use the host-agnostic **wp-dev** wizard (Welcome / Production Host / Staging Host / Save / Links) → **Save** writes **`wp-dev.config.json`** and then shows quick links. The UI also has **Generate token** + **Save to docker/.env** for the runner token field.  
    - **Terminal:** **`wp-dev init`** (interactive).  
 3. **Open the site** — URL is **`local.url`** in **`wp-dev.config.json`** (example: **`http://localhost:8888`**). Finish the WordPress installer if this is a new DB.
 
@@ -81,6 +81,7 @@ Wizard highlights:
 - **Links** step provides direct links to localhost, staging, and production after save.
 - Browser terminal is embedded in steps with SSH actions and also available at **`http://localhost:7681/`**. Configure with **`WPDEV_TERMINAL_PORT`**, **`WPDEV_TERMINAL_AUTH`**, **`WPDEV_TERMINAL_WORKDIR`**, **`WPDEV_TERMINAL_RUNNER_TOKEN`**, and **`WPDEV_TERMINAL_RUNNER_ORIGIN`** in **`docker/.env`**.
   - `WPDEV_TERMINAL_AUTH` is the terminal login in `username:password` format.
+  - Runner token fields include **Generate token** and **Save to docker/.env** buttons in wizard, backup/restore, and history/rollback tabs.
 
 **Security:** WordPress/admin binds to localhost by default. **`WPDEV_ADMIN_SAVE_TOKEN`** is required for save actions (set in **`docker/.env`**, then enter same value in wizard). Terminal runner also requires **`WPDEV_TERMINAL_RUNNER_TOKEN`** and enforces **`WPDEV_TERMINAL_RUNNER_ORIGIN`**. If **Save** fails with permission denied, **`chmod u+rw wp-dev.config.json`** on the host or use **`wp-dev init`** instead.
 
