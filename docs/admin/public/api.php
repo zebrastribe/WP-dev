@@ -348,6 +348,32 @@ if ($method === 'GET' && $action === 'staging-db-secrets') {
     exit;
 }
 
+if ($method === 'GET' && $action === 'terminal-runner-secrets') {
+    $auth = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_AUTH');
+    $runnerToken = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_TOKEN');
+    $runnerOrigin = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_ORIGIN');
+    if (!is_string($auth) || trim($auth) === '' || !is_string($runnerToken) || trim($runnerToken) === '') {
+        http_response_code(503);
+        echo json_encode(
+            ['ok' => false, 'error' => 'runner_secrets_unavailable', 'detail' => 'Run wp-dev up to initialize runner secrets.'],
+            JSON_UNESCAPED_SLASHES
+        );
+        wpdev_admin_api_log('GET terminal-runner-secrets 503 unavailable');
+        exit;
+    }
+    wpdev_admin_api_log('GET terminal-runner-secrets 200');
+    echo json_encode(
+        [
+            'ok' => true,
+            'terminalAuth' => $auth,
+            'runnerToken' => $runnerToken,
+            'runnerOrigin' => is_string($runnerOrigin) ? $runnerOrigin : null,
+        ],
+        JSON_UNESCAPED_SLASHES
+    );
+    exit;
+}
+
 if ($method === 'POST' && $action === 'simply-test') {
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
