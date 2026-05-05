@@ -32,10 +32,12 @@ export type TerminalRunnerSecretsResponse =
       runnerOrigin: string | null;
       terminalPort: number;
       runnerPort: number;
+      syncRunnerPort: number;
     }
   | { ok: false; error: string; detail?: string };
 
 let terminalRunnerPort = 7682;
+let syncRunnerPort = 7683;
 
 export async function loadWpDevConfig(): Promise<Record<string, unknown> | null> {
   const url = apiPhpUrl("load");
@@ -210,8 +212,13 @@ export async function loadTerminalRunnerSecrets(): Promise<TerminalRunnerSecrets
     if (res.ok && o.ok === true) {
       const parsedTerminalPort = Number(o.terminalPort ?? 7681);
       const parsedRunnerPort = Number(o.runnerPort ?? 7682);
+      const parsedSyncRunnerPort = Number(o.syncRunnerPort ?? 7683);
       terminalRunnerPort =
         Number.isFinite(parsedRunnerPort) && parsedRunnerPort > 0 ? parsedRunnerPort : 7682;
+      syncRunnerPort =
+        Number.isFinite(parsedSyncRunnerPort) && parsedSyncRunnerPort > 0
+          ? parsedSyncRunnerPort
+          : 7683;
       return {
         ok: true,
         terminalAuth: String(o.terminalAuth ?? ""),
@@ -220,6 +227,7 @@ export async function loadTerminalRunnerSecrets(): Promise<TerminalRunnerSecrets
         terminalPort:
           Number.isFinite(parsedTerminalPort) && parsedTerminalPort > 0 ? parsedTerminalPort : 7681,
         runnerPort: terminalRunnerPort,
+        syncRunnerPort,
       };
     }
     return {
@@ -467,9 +475,10 @@ export async function checkStagingDomain(payload?: {
   }
 }
 
-function terminalRunnerBaseUrl(): string {
+function terminalRunnerBaseUrl(kind: "terminal" | "sync" = "terminal"): string {
   const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
-  return `${protocol}//127.0.0.1:${terminalRunnerPort}`;
+  const port = kind === "sync" ? syncRunnerPort : terminalRunnerPort;
+  return `${protocol}//127.0.0.1:${port}`;
 }
 
 function basicAuthHeader(auth: string): string {
@@ -513,13 +522,14 @@ export async function runTerminalAction(
   token: string,
   action: TerminalAction,
   args?: Record<string, string>,
+  runnerKind: "terminal" | "sync" = "terminal",
 ): Promise<TerminalRunResponse> {
   const secureHeaders = runnerSecurityHeaders(auth, token);
   if (!secureHeaders.Authorization || !secureHeaders["X-WP-DEV-Terminal-Token"]) {
     return { ok: false, error: "missing_runner_token" };
   }
   try {
-    const res = await fetch(`${terminalRunnerBaseUrl()}/run`, {
+    const res = await fetch(`${terminalRunnerBaseUrl(runnerKind)}/run`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -545,13 +555,14 @@ export async function getTerminalJobStatus(
   auth: string,
   token: string,
   jobId: string,
+  runnerKind: "terminal" | "sync" = "terminal",
 ): Promise<TerminalJobStatus> {
   const secureHeaders = runnerSecurityHeaders(auth, token);
   if (!secureHeaders.Authorization || !secureHeaders["X-WP-DEV-Terminal-Token"]) {
     return { ok: false, error: "missing_runner_token" };
   }
   try {
-    const res = await fetch(`${terminalRunnerBaseUrl()}/status/${encodeURIComponent(jobId)}`, {
+    const res = await fetch(`${terminalRunnerBaseUrl(runnerKind)}/status/${encodeURIComponent(jobId)}`, {
       method: "GET",
       headers: secureHeaders,
     });

@@ -13,8 +13,6 @@ export function TerminalTab() {
   const [showTerminal, setShowTerminal] = useState(true);
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
-  const [lastCopiedCommand, setLastCopiedCommand] = useState("");
-  const [copiedHint, setCopiedHint] = useState(false);
 
   const canRun = useMemo(
     () => Boolean(runnerReady && terminalAuth.trim() && runnerToken.trim()),
@@ -57,12 +55,15 @@ export function TerminalTab() {
     action:
       | "generate_keypair"
       | "wpdev_doctor"
+      | "wpdev_push"
+      | "wpdev_pull"
       | "backup_create"
       | "backup_list"
       | "git_status"
       | "git_log"
       | "ssh_test",
     args?: Record<string, string>,
+    runnerKind: "terminal" | "sync" = "terminal",
   ) => {
     if (!canRun) {
       setOutput("Runner is not ready yet.");
@@ -71,13 +72,24 @@ export function TerminalTab() {
     setBusy(true);
     setOutput("Starting command...\n");
     try {
-      const started = await runTerminalAction(terminalAuth.trim(), runnerToken.trim(), action, args);
+      const started = await runTerminalAction(
+        terminalAuth.trim(),
+        runnerToken.trim(),
+        action,
+        args,
+        runnerKind,
+      );
       if (!started.ok) {
         setOutput(`Runner error: ${started.error}`);
         return;
       }
       for (let i = 0; i < 300; i += 1) {
-        const st = await getTerminalJobStatus(terminalAuth.trim(), runnerToken.trim(), started.jobId);
+        const st = await getTerminalJobStatus(
+          terminalAuth.trim(),
+          runnerToken.trim(),
+          started.jobId,
+          runnerKind,
+        );
         if (!st.ok) {
           setOutput(`Status error: ${st.error}`);
           return;
@@ -91,23 +103,11 @@ export function TerminalTab() {
     }
   };
 
-  const copySyncCommand = async (cmd: string) => {
-    setLastCopiedCommand(cmd);
-    try {
-      await navigator.clipboard.writeText(cmd);
-      setCopiedHint(true);
-      window.setTimeout(() => setCopiedHint(false), 1400);
-      setOutput(`Copied command:\n${cmd}\n\nPaste and run this in your host terminal.`);
-    } catch {
-      setOutput(`Copy failed. Command:\n${cmd}\n\nCopy manually and run it in your host terminal.`);
-    }
-  };
-
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Terminal</h2>
       <p className="text-sm text-slate-600 dark:text-slate-400">
-        Use browser terminal for SSH and read-only checks. Run wp-dev sync commands (push/pull) in host terminal only.
+        Use browser terminal for SSH and checks, and run push/pull directly from the buttons below.
       </p>
 
       <div
@@ -173,21 +173,24 @@ export function TerminalTab() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => void copySyncCommand("npm run wp-dev -- push staging")}
+          disabled={busy || !canRun}
+          onClick={() => void run("wpdev_push", { env: "staging" }, "sync")}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
         >
           Push localhost to staging
         </button>
         <button
           type="button"
-          onClick={() => void copySyncCommand("npm run wp-dev -- push production")}
+          disabled={busy || !canRun}
+          onClick={() => void run("wpdev_push", { env: "production" }, "sync")}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
         >
           Push localhost to production
         </button>
         <button
           type="button"
-          onClick={() => void copySyncCommand("npm run wp-dev -- pull production")}
+          disabled={busy || !canRun}
+          onClick={() => void run("wpdev_pull", { env: "production" }, "sync")}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
         >
           Pull production to localhost
@@ -225,30 +228,6 @@ export function TerminalTab() {
           List {env} full backups
         </button>
       </div>
-
-      {lastCopiedCommand ? (
-        <button
-          type="button"
-          onClick={() => void copySyncCommand(lastCopiedCommand)}
-          className="w-full rounded-lg border border-slate-200 p-3 text-left text-xs dark:border-slate-700"
-          title="Click to copy this command again"
-        >
-          <div className="flex items-center gap-2">
-            <p className="font-semibold text-slate-800 dark:text-slate-100">Last copied command</p>
-            {copiedHint ? (
-              <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
-                Copied!
-              </span>
-            ) : null}
-          </div>
-          <code className="mt-2 block rounded bg-slate-50 px-2 py-1 text-[12px] dark:bg-slate-900">
-            {lastCopiedCommand}
-          </code>
-          <p className="mt-2 text-slate-500 dark:text-slate-400">
-            Paste this in your host terminal shell (outside browser terminal).
-          </p>
-        </button>
-      ) : null}
 
       <pre className="max-h-80 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] dark:border-slate-700 dark:bg-slate-950">
         {output || "No command output yet."}

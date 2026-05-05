@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import net from "node:net";
 import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
+import { startHostRunner, stopHostRunner } from "../services/host-runner.js";
 
 function extractBoundPort(message: string): number | null {
   const m = message.match(/:(\d+)\s+failed:\s+port is already allocated/i);
@@ -49,7 +50,15 @@ function setWpPortInEnvFile(path: string, port: number): void {
   writeFileSync(path, `${prefix}${line}\n`, "utf8");
 }
 
-function setPortInEnvFile(path: string, key: "WP_PORT" | "WPDEV_TERMINAL_PORT" | "WPDEV_TERMINAL_RUNNER_PORT", port: number): void {
+function setPortInEnvFile(
+  path: string,
+  key:
+    | "WP_PORT"
+    | "WPDEV_TERMINAL_PORT"
+    | "WPDEV_TERMINAL_RUNNER_PORT"
+    | "WPDEV_HOST_RUNNER_PORT",
+  port: number,
+): void {
   const line = `${key}=${port}`;
   const current = existsSync(path) ? readFileSync(path, "utf8") : "";
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -127,6 +136,12 @@ function ensureSecurityEnvDefaults(envPath: string): void {
     );
     changed = true;
     changedKeys.push("WPDEV_TERMINAL_RUNNER_ORIGIN");
+  }
+  const hostRunnerPort = readEnvValue(next, "WPDEV_HOST_RUNNER_PORT");
+  if (!hostRunnerPort || !/^\d+$/.test(hostRunnerPort)) {
+    next = setEnvValueInContent(next, "WPDEV_HOST_RUNNER_PORT", "7683");
+    changed = true;
+    changedKeys.push("WPDEV_HOST_RUNNER_PORT");
   }
 
   if (changed) {
@@ -240,12 +255,18 @@ async function ensureNonConflictingPublishedPorts(
     readEnvValue(envContent, "WPDEV_TERMINAL_RUNNER_PORT") || "7682",
     10,
   );
+  const currentHostRunnerPort = Number.parseInt(
+    readEnvValue(envContent, "WPDEV_HOST_RUNNER_PORT") || "7683",
+    10,
+  );
   const current = {
     WP_PORT: Number.isFinite(currentWpPort) && currentWpPort > 0 ? currentWpPort : 8888,
     WPDEV_TERMINAL_PORT:
       Number.isFinite(currentTerminalPort) && currentTerminalPort > 0 ? currentTerminalPort : 7681,
     WPDEV_TERMINAL_RUNNER_PORT:
       Number.isFinite(currentRunnerPort) && currentRunnerPort > 0 ? currentRunnerPort : 7682,
+    WPDEV_HOST_RUNNER_PORT:
+      Number.isFinite(currentHostRunnerPort) && currentHostRunnerPort > 0 ? currentHostRunnerPort : 7683,
   };
 
   const used = new Set<number>();
@@ -285,17 +306,26 @@ async function ensureNonConflictingPublishedPorts(
     setPortInEnvFile(envPath, "WPDEV_TERMINAL_RUNNER_PORT", nextRunnerPort);
     changed = true;
   }
+  const nextHostRunnerPort = await allocate(
+    "WPDEV_HOST_RUNNER_PORT",
+    current.WPDEV_HOST_RUNNER_PORT,
+  );
+  if (nextHostRunnerPort !== current.WPDEV_HOST_RUNNER_PORT) {
+    setPortInEnvFile(envPath, "WPDEV_HOST_RUNNER_PORT", nextHostRunnerPort);
+    changed = true;
+  }
 
   if (changed) {
     logInfo(
       `Auto-adjusted published ports in ${envPath}: ` +
         `WP_PORT=${nextWpPort}, ` +
         `WPDEV_TERMINAL_PORT=${nextTerminalPort}, ` +
-        `WPDEV_TERMINAL_RUNNER_PORT=${nextRunnerPort}`,
+        `WPDEV_TERMINAL_RUNNER_PORT=${nextRunnerPort}, ` +
+        `WPDEV_HOST_RUNNER_PORT=${nextHostRunnerPort}`,
     );
     console.error(
       `Auto-adjusted published ports to avoid conflicts: ` +
-        `WP_PORT=${nextWpPort}, terminal=${nextTerminalPort}, runner=${nextRunnerPort}`,
+        `WP_PORT=${nextWpPort}, terminal=${nextTerminalPort}, runner=${nextRunnerPort}, host-runner=${nextHostRunnerPort}`,
     );
   }
 }
@@ -395,6 +425,8 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   }
 
   await ensureAdminSaveWriteAccess(loaded);
+  stopHostRunner(loaded.configDir);
+  startHostRunner(loaded.configDir, envPath);
   try {
     await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
   } catch (e) {
