@@ -241,6 +241,19 @@ export async function wpRemoteForceSiteUrls(
   }
 }
 
+export async function wpLocalForceSiteUrls(
+  configDir: string,
+  config: WpDevConfig,
+  url: string,
+): Promise<void> {
+  for (const key of ["home", "siteurl"] as const) {
+    const r = await wpLocalRaw(configDir, config, ["option", "update", key, url]);
+    if (r.exitCode !== 0) {
+      throw new Error(`Local wp option update ${key} failed: ${r.stderr || r.stdout}`);
+    }
+  }
+}
+
 export async function wpLocalGetTablePrefix(
   configDir: string,
   config: WpDevConfig,

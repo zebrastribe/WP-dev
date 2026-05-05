@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { LoadedConfig } from "../src/config/load.js";
 import {
   dockerComposeEnvPath,
+  getLocalUrlPortMismatch,
   getPublishedLocalAccess,
   readWpPortFromDockerEnvFile,
 } from "../src/utils/published-local-urls.js";
@@ -60,5 +61,12 @@ describe("published-local-urls", () => {
     const dir = mkdtempSync(join(tmpdir(), "wpdev-plu-"));
     const loaded = loadedFixture(dir, "http://localhost:8888");
     expect(dockerComposeEnvPath(loaded)).toBe(join(dir, ".", ".env"));
+  });
+
+  it("reports localhost port mismatch between local.url and WP_PORT", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wpdev-plu-"));
+    writeFileSync(join(dir, ".env"), "WP_PORT=8891\n", "utf8");
+    const loaded = loadedFixture(dir, "http://localhost:8888");
+    expect(getLocalUrlPortMismatch(loaded)).toEqual({ localUrlPort: 8888, wpPort: 8891 });
   });
 });

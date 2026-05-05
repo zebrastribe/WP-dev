@@ -13,6 +13,7 @@ import {
   wpLocalAlignTablePrefixAfterImport,
   wpLocalDbExportToFile,
   wpLocalDbImportFromFile,
+  wpLocalForceSiteUrls,
   wpLocalSearchReplace,
   wpRemoteDbExport,
 } from "../services/wpcli.js";
@@ -22,6 +23,8 @@ import { cmdFixPermissions } from "./fix-permissions.js";
 import { cmdSimplySetupStagingDns } from "./simply.js";
 import { getSimplyApiKey } from "../services/simply.js";
 import { isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
+import { getUrlVariants } from "../utils/url-variants.js";
+import { getLocalUrlPortMismatch } from "../utils/published-local-urls.js";
 
 export type PullOptions = {
   dryRun: boolean;
@@ -39,6 +42,14 @@ export async function cmdPull(
   const { config, configDir } = loaded;
   const remote = getRemoteEnv(config, env);
   const localWpRoot = resolveFromConfigDir(configDir, config.local.wpRoot);
+  const portMismatch = getLocalUrlPortMismatch(loaded);
+
+  if (portMismatch && !options.dryRun) {
+    throw new Error(
+      `Refusing to pull: local.url uses port ${portMismatch.localUrlPort}, but docker/.env has WP_PORT=${portMismatch.wpPort}. ` +
+        `Update local.url in wp-dev.config.json to http://localhost:${portMismatch.wpPort} (or match your host), then run pull again.`,
+    );
+  }
 
   if (options.dryRun) {
     logInfo(`pull ${env} dry-run: rsync only`);
@@ -101,8 +112,15 @@ export async function cmdPull(
         );
         await wpLocalAlignTablePrefixAfterImport(configDir, config, tablePrefix);
       }
-      logInfo(`pull ${env}: search-replace ${remote.url} -> ${config.local.url}`);
-      await wpLocalSearchReplace(configDir, config, remote.url, config.local.url);
+      const fromCandidates = getUrlVariants(remote.url).filter(
+        (candidate) => candidate !== config.local.url,
+      );
+      for (const fromUrl of fromCandidates) {
+        logInfo(`pull ${env}: search-replace ${fromUrl} -> ${config.local.url}`);
+        await wpLocalSearchReplace(configDir, config, fromUrl, config.local.url);
+      }
+      logInfo(`pull ${env}: force option home/siteurl -> ${config.local.url}`);
+      await wpLocalForceSiteUrls(configDir, config, config.local.url);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
