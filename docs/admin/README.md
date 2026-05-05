@@ -6,13 +6,14 @@ Vite + React + Tailwind app served from your **local WordPress URL** at **`/admi
 
 | Area | Description |
 |------|--------------|
-| **Setup wizard** | Multi-step host-agnostic form: project, local URL, Production Host, Staging Host, optional Provider integration — **saves `wp-dev.config.json`** in the repo root via **`api.php`** (same port as WordPress). |
+| **Setup wizard** | Multi-step host-agnostic form: Welcome, Production Host, Staging Host, Save, Links — **saves `wp-dev.config.json`** in the repo root via **`api.php`** (same port as WordPress). |
 | **Documentation** | In-app copy of the main workflows; per-section **notes** in `localStorage`. |
 | **Config assistant** | Tab under Documentation: form + raw JSON for power users. |
 
 Wizard utilities:
-- SSH key setup guide + copyable SSH test command buttons in Production/Staging steps.
+- SSH key setup guide + one-click SSH test command buttons in Production/Staging steps.
 - Staging domain check button (DNS + HTTPS + HTTP redirect + final host match).
+- Post-save quick links step for localhost, staging, and production URLs.
 
 ## Build & open
 
@@ -35,7 +36,11 @@ npm run admin:dev
 
 `docker-compose.yml` bind-mounts **`wp-dev.config.json`** and **`logs/`** at **`/wp-dev-repo/`** in the **`wordpress`** service. `wordpress/admin/api.php` (from this package’s `public/api.php`) writes **`/wp-dev-repo/wp-dev.config.json`** and appends API lines to **`/wp-dev-repo/logs/`**. Config shape is validated against **`wp-dev.config.schema.json`** (generated from the same Zod schema as the CLI via **`npm run generate:config-artifacts`** at the repo root).
 
-Optional **`WPDEV_ADMIN_SAVE_TOKEN`** in **`docker/.env`** — if set, POST must send header **`X-WP-DEV-Admin-Token`** with the same value (wizard last step).
+Required **`WPDEV_ADMIN_SAVE_TOKEN`** in **`docker/.env`** — POST mutations must send header **`X-WP-DEV-Admin-Token`** with the same value (wizard Save step).
+
+Terminal runner hardening:
+- Requires **`WPDEV_TERMINAL_AUTH`** (non-default), **`WPDEV_TERMINAL_RUNNER_TOKEN`**, and **`WPDEV_TERMINAL_RUNNER_ORIGIN`**.
+- Browser requests send **`X-WP-DEV-Terminal-Token`** and must match configured origin.
 
 ## Layout note
 

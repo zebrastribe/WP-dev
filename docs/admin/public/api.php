@@ -142,6 +142,21 @@ function wpdev_json_error(int $status, string $error, ?string $detail = null): v
     echo json_encode($o, JSON_UNESCAPED_SLASHES);
 }
 
+function wpdev_require_mutation_token(string $token, string $action): void
+{
+    if ($token === '') {
+        wpdev_json_error(503, 'token_not_configured', 'Set WPDEV_ADMIN_SAVE_TOKEN in docker/.env and restart.');
+        wpdev_admin_api_log("POST {$action} 503 token_not_configured");
+        exit;
+    }
+    $provided = $_SERVER['HTTP_X_WP_DEV_ADMIN_TOKEN'] ?? '';
+    if (!is_string($provided) || !hash_equals($token, $provided)) {
+        wpdev_json_error(403, 'forbidden', 'Missing or invalid admin token.');
+        wpdev_admin_api_log("POST {$action} 403 forbidden");
+        exit;
+    }
+}
+
 function wpdev_parse_main_domain(string $raw): ?string
 {
     $s = strtolower(trim($raw));
@@ -428,12 +443,7 @@ if ($method === 'POST' && $action === 'simply-test') {
 }
 
 if ($method === 'POST' && $action === 'save') {
-    if ($token !== '' && ($_SERVER['HTTP_X_WP_DEV_ADMIN_TOKEN'] ?? '') !== $token) {
-        http_response_code(403);
-        echo json_encode(['ok' => false, 'error' => 'forbidden'], JSON_UNESCAPED_SLASHES);
-        wpdev_admin_api_log('POST save 403 forbidden (token mismatch or missing)');
-        exit;
-    }
+    wpdev_require_mutation_token($token, 'save');
     $body = file_get_contents('php://input');
     if ($body === false || $body === '') {
         http_response_code(400);
@@ -532,12 +542,7 @@ if ($method === 'POST' && $action === 'save') {
 }
 
 if ($method === 'POST' && $action === 'save-docker-env') {
-    if ($token !== '' && ($_SERVER['HTTP_X_WP_DEV_ADMIN_TOKEN'] ?? '') !== $token) {
-        http_response_code(403);
-        echo json_encode(['ok' => false, 'error' => 'forbidden'], JSON_UNESCAPED_SLASHES);
-        wpdev_admin_api_log('POST save-docker-env 403 forbidden');
-        exit;
-    }
+    wpdev_require_mutation_token($token, 'save-docker-env');
     $body = file_get_contents('php://input');
     if ($body === false || $body === '') {
         http_response_code(400);
@@ -614,6 +619,12 @@ if ($method === 'POST' && $action === 'save-docker-env') {
 }
 
 if ($method === 'POST' && $action === 'simply-setup-staging') {
+    wpdev_json_error(410, 'gone', 'This endpoint is deprecated and disabled.');
+    wpdev_admin_api_log('POST simply-setup-staging 410 gone');
+    exit;
+}
+
+if (false && $method === 'POST' && $action === 'simply-setup-staging') {
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
     $input = is_array($in) ? $in : [];

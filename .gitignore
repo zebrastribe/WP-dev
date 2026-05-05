@@ -10,3 +10,4 @@ logs/*
 .DS_Store
 docs/admin/node_modules/
 docs/admin/dist/
+local-commands.md

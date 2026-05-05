@@ -32,7 +32,7 @@ services:
     image: wordpress:php8.2-apache
     restart: unless-stopped
     ports:
-      - "${WP_PORT:-8888}:80"
+      - "127.0.0.1:${WP_PORT:-8888}:80"
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_USER: ${MYSQL_USER:-wordpress}
@@ -76,12 +76,13 @@ services:
       - "127.0.0.1:${WPDEV_TERMINAL_RUNNER_PORT:-7682}:7682"
     environment:
       WPDEV_TERMINAL_AUTH: ${WPDEV_TERMINAL_AUTH:-wpdev:wpdev}
+      WPDEV_TERMINAL_RUNNER_TOKEN: ${WPDEV_TERMINAL_RUNNER_TOKEN:-}
+      WPDEV_TERMINAL_RUNNER_ORIGIN: ${WPDEV_TERMINAL_RUNNER_ORIGIN:-http://localhost:${WP_PORT:-8888}}
       WPDEV_TERMINAL_WORKDIR: ${WPDEV_TERMINAL_WORKDIR:-/workspace}
       WPDEV_TERMINAL_RUNNER_PORT: ${WPDEV_TERMINAL_RUNNER_PORT:-7682}
     volumes:
       - ../:/workspace
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/.ssh:/root/.ssh:rw
+      - ${HOME}/.ssh:/root/.ssh:ro
 
 volumes:
   db_data:
