@@ -25,9 +25,13 @@ export function BackupRestore() {
       const res = await loadTerminalRunnerSecrets();
       if (cancelled) return;
       if (!res.ok) {
+        const startupHint =
+          res.error === "not_found"
+            ? "This admin API is outdated. Run: npm run admin:build:wp && npm run wp-dev -- down && npm run wp-dev -- up (in the same clone)."
+            : "Run: npm run wp-dev -- up";
         setRunnerReady(false);
         setRunnerMessage(
-          `Runner credentials are not initialized yet (${res.error}${res.detail ? `: ${res.detail}` : ""}). Run: npm run wp-dev -- up`,
+          `Runner credentials are not initialized yet (${res.error}${res.detail ? `: ${res.detail}` : ""}). ${startupHint}`,
         );
         return;
       }
