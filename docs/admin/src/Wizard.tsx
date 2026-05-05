@@ -4,6 +4,7 @@ import {
   checkStagingDbConnection,
   checkStagingHttps,
   getTerminalJobStatus,
+  loadTerminalRunnerSecrets,
   loadStagingDbSecrets,
   loadSimplyStatus,
   loadWpDevConfig,
@@ -200,9 +201,10 @@ export function Wizard() {
   const [terminalPrep, setTerminalPrep] = useState<TerminalPrepState>(null);
   const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
   const [showTerminal, setShowTerminal] = useState(true);
+  const [terminalPort, setTerminalPort] = useState(7681);
   const terminalAuthValue = terminalAuth.trim() || "wpdev:wpdev";
   const terminalUrl = (() => {
-    const base = new URL(`${window.location.protocol}//127.0.0.1:7681/`);
+    const base = new URL(`${window.location.protocol}//127.0.0.1:${terminalPort}/`);
     const [user, pass] = terminalAuthValue.split(":", 2);
     if (user && pass) {
       // Best-effort: many browsers use these credentials without a login prompt.
@@ -375,6 +377,18 @@ export function Wizard() {
   useEffect(() => {
     void refreshSimplyStatus();
   }, [refreshSimplyStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const s = await loadTerminalRunnerSecrets();
+      if (cancelled || !s.ok) return;
+      setTerminalPort(s.terminalPort);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const patch = useCallback(<K extends keyof WizardData>(key: K, val: WizardData[K]) => {
     setData((d) => ({ ...d, [key]: val }));

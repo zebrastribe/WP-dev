@@ -25,8 +25,17 @@ export type SimplyStatusResponse =
   | { ok: false; error: string };
 
 export type TerminalRunnerSecretsResponse =
-  | { ok: true; terminalAuth: string; runnerToken: string; runnerOrigin: string | null }
+  | {
+      ok: true;
+      terminalAuth: string;
+      runnerToken: string;
+      runnerOrigin: string | null;
+      terminalPort: number;
+      runnerPort: number;
+    }
   | { ok: false; error: string; detail?: string };
+
+let terminalRunnerPort = 7682;
 
 export async function loadWpDevConfig(): Promise<Record<string, unknown> | null> {
   const url = apiPhpUrl("load");
@@ -199,11 +208,18 @@ export async function loadTerminalRunnerSecrets(): Promise<TerminalRunnerSecrets
     }
     const o = data as Record<string, unknown>;
     if (res.ok && o.ok === true) {
+      const parsedTerminalPort = Number(o.terminalPort ?? 7681);
+      const parsedRunnerPort = Number(o.runnerPort ?? 7682);
+      terminalRunnerPort =
+        Number.isFinite(parsedRunnerPort) && parsedRunnerPort > 0 ? parsedRunnerPort : 7682;
       return {
         ok: true,
         terminalAuth: String(o.terminalAuth ?? ""),
         runnerToken: String(o.runnerToken ?? ""),
         runnerOrigin: typeof o.runnerOrigin === "string" ? o.runnerOrigin : null,
+        terminalPort:
+          Number.isFinite(parsedTerminalPort) && parsedTerminalPort > 0 ? parsedTerminalPort : 7681,
+        runnerPort: terminalRunnerPort,
       };
     }
     return {
@@ -453,7 +469,7 @@ export async function checkStagingDomain(payload?: {
 
 function terminalRunnerBaseUrl(): string {
   const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
-  return `${protocol}//127.0.0.1:7682`;
+  return `${protocol}//127.0.0.1:${terminalRunnerPort}`;
 }
 
 function basicAuthHeader(auth: string): string {

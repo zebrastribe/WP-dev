@@ -13,6 +13,7 @@ import { execa } from "execa";
 import type { RemoteEnvConfig, WpDevConfig } from "../config/schema.js";
 import type { SshSession } from "./ssh.js";
 import {
+  dockerComposeProjectId,
   getComposeProjectDir,
   getDockerComposeLeadArgs,
 } from "./docker-compose.js";
@@ -34,10 +35,18 @@ export async function wpLocalRaw(
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const projectDir = getComposeProjectDir(configDir, config);
   const service = config.local.composeService;
-  const args = [
+  const composeLead = [
     ...getDockerComposeLeadArgs(config),
+  ];
+  const runArgs = [
     "run",
     "--rm",
+    "-e",
+    "HTTP_HOST=localhost",
+    "-e",
+    "REQUEST_URI=/",
+    "-e",
+    "HTTPS=off",
     ...(execOptions.runUserRoot ? (["--user", "0"] as const) : []),
     "-T",
     service,
@@ -46,11 +55,30 @@ export async function wpLocalRaw(
     ...(execOptions.runUserRoot ? (["--allow-root"] as const) : []),
     `--path=${CONTAINER_WP_PATH}`,
   ];
-  const r = await execa("docker", args, {
+  let r = await execa("docker", [...composeLead, ...runArgs], {
     cwd: projectDir,
     reject: false,
     ...(execOptions.input !== undefined ? { input: execOptions.input } : {}),
   });
+  const composePluginBroken =
+    r.exitCode !== 0 &&
+    (r.stderr.includes("Invalid Plugins:") ||
+      r.stderr.includes("unknown shorthand flag: 'p' in -p") ||
+      r.stdout.includes("Invalid Plugins:") ||
+      r.stdout.includes("unknown shorthand flag: 'p' in -p"));
+  if (composePluginBroken) {
+    const fallbackLead = [
+      "-p",
+      dockerComposeProjectId(config),
+      "-f",
+      config.local.composeFile,
+    ];
+    r = await execa("docker-compose", [...fallbackLead, ...runArgs], {
+      cwd: projectDir,
+      reject: false,
+      ...(execOptions.input !== undefined ? { input: execOptions.input } : {}),
+    });
+  }
   return {
     stdout: typeof r.stdout === "string" ? r.stdout : String(r.stdout ?? ""),
     stderr: typeof r.stderr === "string" ? r.stderr : String(r.stderr ?? ""),

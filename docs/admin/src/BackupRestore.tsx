@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { getTerminalJobStatus, loadTerminalRunnerSecrets, runTerminalAction } from "./api";
 
 type EnvName = "local" | "staging" | "production";
+type BackupKind = "db" | "full";
 
 export function BackupRestore() {
   const [terminalAuth, setTerminalAuth] = useState("");
   const [runnerToken, setRunnerToken] = useState("");
   const [env, setEnv] = useState<EnvName>("local");
+  const [backupKind, setBackupKind] = useState<BackupKind>("full");
   const [restoreFile, setRestoreFile] = useState("");
   const [productionConfirm, setProductionConfirm] = useState("");
   const [busy, setBusy] = useState(false);
@@ -71,7 +73,11 @@ export function BackupRestore() {
         const txt = st.output || "Running...";
         if (st.status === "done" && st.exitCode !== null && st.exitCode !== 0) {
           if (
-            txt.includes("Local WordPress is not installed or docker services are not running")
+            action === "backup_create" &&
+            args.env === "local" &&
+            (txt.includes("Local WordPress is not installed") ||
+              txt.includes("assertLocalWpInstalled") ||
+              txt.includes("backup local"))
           ) {
             setOutput(
               "Cannot create local backup yet: local WordPress is not installed for this project.\n" +
@@ -98,7 +104,10 @@ export function BackupRestore() {
     <div className="space-y-4">
       <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Backup / Restore</h2>
       <p className="text-sm text-slate-600 dark:text-slate-400">
-        Create/list/restore database backups for local, staging, and production.
+        Create/list/restore backups. Full backup includes database + wp-content files.
+      </p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        For staging/production full backup/restore, remote host must support SSH access and have WP-CLI + rsync available.
       </p>
 
       <div
@@ -125,21 +134,37 @@ export function BackupRestore() {
       </div>
 
       <div className="flex flex-wrap gap-2">
+        <div className="inline-flex rounded-lg border border-slate-300 dark:border-slate-600">
+          <button
+            type="button"
+            onClick={() => setBackupKind("full")}
+            className={`px-3 py-1.5 text-xs ${backupKind === "full" ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-800"}`}
+          >
+            Full (DB + files)
+          </button>
+          <button
+            type="button"
+            onClick={() => setBackupKind("db")}
+            className={`px-3 py-1.5 text-xs ${backupKind === "db" ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-800"}`}
+          >
+            Database only
+          </button>
+        </div>
         <button
           type="button"
           disabled={busy || !canRun}
-          onClick={() => void runAction("backup_create", { env })}
+          onClick={() => void runAction("backup_create", { env, kind: backupKind })}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
         >
-          {busy ? "Running..." : `Create ${env} backup`}
+          {busy ? "Running..." : `Create ${env} ${backupKind === "full" ? "full" : "database"} backup`}
         </button>
         <button
           type="button"
           disabled={busy || !canRun}
-          onClick={() => void runAction("backup_list", { env })}
+          onClick={() => void runAction("backup_list", { env, kind: backupKind })}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
         >
-          List {env} backups
+          List {env} {backupKind === "full" ? "full" : "database"} backups
         </button>
       </div>
 
