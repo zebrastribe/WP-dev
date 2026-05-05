@@ -202,6 +202,104 @@ function maybeUpdateLocalUrlPort(
   }
 }
 
+function maybeUpdateRunnerOriginPort(envPath: string, oldPort: number, newPort: number): void {
+  const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+  const runnerOrigin = readEnvValue(current, "WPDEV_TERMINAL_RUNNER_ORIGIN");
+  if (!runnerOrigin) return;
+  let u: URL;
+  try {
+    u = new URL(runnerOrigin);
+  } catch {
+    return;
+  }
+  const host = u.hostname.toLowerCase();
+  const currentPort =
+    u.port.length > 0 ? Number.parseInt(u.port, 10) : u.protocol === "https:" ? 443 : 80;
+  if ((host === "localhost" || host === "127.0.0.1") && currentPort === oldPort) {
+    u.port = String(newPort);
+    const next = setEnvValueInContent(
+      current,
+      "WPDEV_TERMINAL_RUNNER_ORIGIN",
+      u.toString().replace(/\/$/, ""),
+    );
+    writeFileSync(envPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
+  }
+}
+
+async function ensureNonConflictingPublishedPorts(
+  loaded: LoadedConfig,
+  envPath: string,
+): Promise<void> {
+  const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+  const currentWpPort = Number.parseInt(readEnvValue(envContent, "WP_PORT") || "8888", 10);
+  const currentTerminalPort = Number.parseInt(
+    readEnvValue(envContent, "WPDEV_TERMINAL_PORT") || "7681",
+    10,
+  );
+  const currentRunnerPort = Number.parseInt(
+    readEnvValue(envContent, "WPDEV_TERMINAL_RUNNER_PORT") || "7682",
+    10,
+  );
+  const current = {
+    WP_PORT: Number.isFinite(currentWpPort) && currentWpPort > 0 ? currentWpPort : 8888,
+    WPDEV_TERMINAL_PORT:
+      Number.isFinite(currentTerminalPort) && currentTerminalPort > 0 ? currentTerminalPort : 7681,
+    WPDEV_TERMINAL_RUNNER_PORT:
+      Number.isFinite(currentRunnerPort) && currentRunnerPort > 0 ? currentRunnerPort : 7682,
+  };
+
+  const used = new Set<number>();
+  let changed = false;
+
+  const allocate = async (key: keyof typeof current, startAt: number): Promise<number> => {
+    let candidate = startAt;
+    while (candidate <= 65535) {
+      if (!used.has(candidate) && (await isPortFree(candidate))) {
+        used.add(candidate);
+        return candidate;
+      }
+      candidate += 1;
+    }
+    throw new Error(`Could not find a free local TCP port for ${key} from ${startAt}..65535`);
+  };
+
+  const nextWpPort = await allocate("WP_PORT", current.WP_PORT);
+  if (nextWpPort !== current.WP_PORT) {
+    setPortInEnvFile(envPath, "WP_PORT", nextWpPort);
+    maybeUpdateLocalUrlPort(loaded, current.WP_PORT, nextWpPort);
+    maybeUpdateRunnerOriginPort(envPath, current.WP_PORT, nextWpPort);
+    changed = true;
+  }
+
+  const nextTerminalPort = await allocate("WPDEV_TERMINAL_PORT", current.WPDEV_TERMINAL_PORT);
+  if (nextTerminalPort !== current.WPDEV_TERMINAL_PORT) {
+    setPortInEnvFile(envPath, "WPDEV_TERMINAL_PORT", nextTerminalPort);
+    changed = true;
+  }
+
+  const nextRunnerPort = await allocate(
+    "WPDEV_TERMINAL_RUNNER_PORT",
+    current.WPDEV_TERMINAL_RUNNER_PORT,
+  );
+  if (nextRunnerPort !== current.WPDEV_TERMINAL_RUNNER_PORT) {
+    setPortInEnvFile(envPath, "WPDEV_TERMINAL_RUNNER_PORT", nextRunnerPort);
+    changed = true;
+  }
+
+  if (changed) {
+    logInfo(
+      `Auto-adjusted published ports in ${envPath}: ` +
+        `WP_PORT=${nextWpPort}, ` +
+        `WPDEV_TERMINAL_PORT=${nextTerminalPort}, ` +
+        `WPDEV_TERMINAL_RUNNER_PORT=${nextRunnerPort}`,
+    );
+    console.error(
+      `Auto-adjusted published ports to avoid conflicts: ` +
+        `WP_PORT=${nextWpPort}, terminal=${nextTerminalPort}, runner=${nextRunnerPort}`,
+    );
+  }
+}
+
 function printPublishedAccessUrls(loaded: LoadedConfig): void {
   const { site, admin, warnings } = getPublishedLocalAccess(loaded);
   for (const w of warnings) console.error(w);
@@ -255,6 +353,7 @@ async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
 export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
   const envPath = ensureComposeEnvExists(loaded);
+  await ensureNonConflictingPublishedPorts(loaded, envPath);
   ensureSecurityEnvDefaults(envPath);
   warnIfSecurityEnvPlaceholders(envPath);
   try {
@@ -272,27 +371,26 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
       readEnvValue(envContent, "WPDEV_TERMINAL_RUNNER_PORT") || "7682",
       10,
     );
-    if (conflictPort === terminalPort || conflictPort === runnerPort) {
-      throw new Error(
-        `Terminal port ${conflictPort} is already in use by another stack. ` +
-          "Stop the other WP-dev clone first (npm run wp-dev -- down there), " +
-          "or set fixed non-conflicting terminal ports in docker/.env " +
-          "(WPDEV_TERMINAL_PORT / WPDEV_TERMINAL_RUNNER_PORT).",
-      );
-    }
-
+    const key =
+      conflictPort === wpPort
+        ? "WP_PORT"
+        : conflictPort === terminalPort
+          ? "WPDEV_TERMINAL_PORT"
+          : conflictPort === runnerPort
+            ? "WPDEV_TERMINAL_RUNNER_PORT"
+            : "WP_PORT";
     const nextPort = await findFreePort(conflictPort + 1);
-    setPortInEnvFile(envPath, "WP_PORT", nextPort);
-    maybeUpdateLocalUrlPort(loaded, wpPort, nextPort);
+    setPortInEnvFile(envPath, key, nextPort);
+    if (key === "WP_PORT") {
+      maybeUpdateLocalUrlPort(loaded, wpPort, nextPort);
+      maybeUpdateRunnerOriginPort(envPath, wpPort, nextPort);
+    }
     ensureSecurityEnvDefaults(envPath);
 
-    logInfo(
-      `Port ${conflictPort} is in use. Updated ${envPath} to WP_PORT=${nextPort} and retrying docker compose up -d`,
-    );
-    console.error(
-      `Port ${conflictPort} is already in use. Switched this clone to WP_PORT=${nextPort} and retrying...`,
-    );
+    logInfo(`Port ${conflictPort} is in use. Updated ${envPath} ${key}=${nextPort} and retrying.`);
+    console.error(`Port ${conflictPort} is in use. Switched ${key} to ${nextPort} and retrying...`);
 
+    await ensureNonConflictingPublishedPorts(loaded, envPath);
     await compose(loaded.configDir, loaded.config, ["up", "-d"], { stdio: "pipe" });
   }
 
