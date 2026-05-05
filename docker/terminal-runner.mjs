@@ -91,13 +91,72 @@ function commandForAction(action, args) {
   }
   if (action === "backup_create") {
     const env = safeArg(args?.env);
+    const kindRaw = safeArg(args?.kind);
+    const kind = kindRaw === "full" ? "full" : "db";
     if (!["local", "staging", "production"].includes(env)) return null;
+    if (env === "local") {
+      if (kind === "full") {
+        return [
+          'PROJECT="$(node -e \'try{const c=require("/workspace/wp-dev.config.json");process.stdout.write(String(c.project||"site").replace(/[^a-zA-Z0-9_-]/g,"-"))}catch{process.stdout.write("site")}\')"',
+          'STAMP="$(date +%F-%H-%M-%S)"',
+          'OUT="$HOME/.wp-dev/backups/$PROJECT/local/full-$STAMP.tar.gz"',
+          'TMPDIR="$(mktemp -d)"',
+          'DBTMP="$TMPDIR/db.sql"',
+          'mkdir -p "$(dirname "$OUT")"',
+          'test -n "$MYSQL_DATABASE" || { echo "Missing MYSQL_DATABASE in terminal environment."; rm -rf "$TMPDIR"; exit 1; }',
+          'test -n "$MYSQL_USER" || { echo "Missing MYSQL_USER in terminal environment."; rm -rf "$TMPDIR"; exit 1; }',
+          'test -n "$MYSQL_PASSWORD" || { echo "Missing MYSQL_PASSWORD in terminal environment."; rm -rf "$TMPDIR"; exit 1; }',
+          'test -d "/workspace/wordpress/wp-content" || { echo "Missing /workspace/wordpress/wp-content directory."; rm -rf "$TMPDIR"; exit 1; }',
+          'mysqldump --no-tablespaces -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" > "$DBTMP" || { rm -rf "$TMPDIR"; exit 1; }',
+          'tar -czf "$OUT" -C /workspace/wordpress wp-content -C "$TMPDIR" db.sql || { rm -f "$OUT"; rm -rf "$TMPDIR"; exit 1; }',
+          'rm -rf "$TMPDIR"',
+          'echo "Local full backup written to $OUT"',
+        ].join("; ");
+      }
+      return [
+        'PROJECT="$(node -e \'try{const c=require("/workspace/wp-dev.config.json");process.stdout.write(String(c.project||"site").replace(/[^a-zA-Z0-9_-]/g,"-"))}catch{process.stdout.write("site")}\')"',
+        'STAMP="$(date +%F-%H-%M-%S)"',
+        'OUT="$HOME/.wp-dev/backups/$PROJECT/local/db-$STAMP.sql"',
+        'TMP="$OUT.tmp"',
+        'mkdir -p "$(dirname "$OUT")"',
+        'test -n "$MYSQL_DATABASE" || { echo "Missing MYSQL_DATABASE in terminal environment."; exit 1; }',
+        'test -n "$MYSQL_USER" || { echo "Missing MYSQL_USER in terminal environment."; exit 1; }',
+        'test -n "$MYSQL_PASSWORD" || { echo "Missing MYSQL_PASSWORD in terminal environment."; exit 1; }',
+        'mysqldump --no-tablespaces -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" > "$TMP" || { rm -f "$TMP"; exit 1; }',
+        'mv "$TMP" "$OUT"',
+        'echo "Local database backup written to $OUT"',
+      ].join("; ");
+    }
+    if (kind === "full") {
+      return [
+        "set -e",
+        `CFG="$(node -e 'try{const c=require("/workspace/wp-dev.config.json");const r=c["${env}"]||{};const p=String(c.project||"site").replace(/[^a-zA-Z0-9_-]/g,"-");process.stdout.write(["PROJECT="+p,"HOST="+String(r.host||""),"USER="+String(r.user||""),"REMOTE_PATH="+String(r.path||""),"PORT="+String(r.port||""),"KEY="+String(r.identityFile||"")].join("\\n"))}catch{process.exit(1)}')"`,
+        'eval "$CFG"',
+        `test -n "$HOST" && test -n "$USER" && test -n "$REMOTE_PATH" || { echo "Missing ${env} SSH settings in wp-dev.config.json"; exit 1; }`,
+        'STAMP="$(date +%F-%H-%M-%S)"',
+        `OUT="$HOME/.wp-dev/backups/$PROJECT/${env}/full-$STAMP.tar.gz"`,
+        'mkdir -p "$(dirname "$OUT")"',
+        `SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=15 -o UpdateHostKeys=no"`,
+        'test -n "$PORT" && SSH_OPTS="$SSH_OPTS -o Port=$PORT"',
+        'test -n "$KEY" && SSH_OPTS="$SSH_OPTS -i $KEY"',
+        `REMOTE_DIR="/tmp/wp-dev-full-${env}-$STAMP"`,
+        `ssh $SSH_OPTS "$USER@$HOST" "set -e; mkdir -p \\"$REMOTE_DIR\\"; cd \\"$REMOTE_PATH\\"; wp db export \\"$REMOTE_DIR/db.sql\\" --allow-root >/dev/null; tar -czf \\"$REMOTE_DIR/full.tar.gz\\" -C \\"$REMOTE_PATH\\" wp-content -C \\"$REMOTE_DIR\\" db.sql"`,
+        `scp $SSH_OPTS "$USER@$HOST:$REMOTE_DIR/full.tar.gz" "$OUT"`,
+        `ssh $SSH_OPTS "$USER@$HOST" "rm -rf \\"$REMOTE_DIR\\""`,
+        `echo "${env} full backup written to $OUT"`,
+      ].join("; ");
+    }
     return `npm run wp-dev -- backup ${env}`;
   }
   if (action === "backup_list") {
     const env = safeArg(args?.env);
+    const kindRaw = safeArg(args?.kind);
+    const kind = kindRaw === "full" ? "full" : "db";
     if (!["local", "staging", "production"].includes(env)) return null;
-    return `mkdir -p ~/.wp-dev/backups; ls -1t ~/.wp-dev/backups/*/${env}/*.sql 2>/dev/null | head -n 30 || true`;
+    if (kind === "full") {
+      return `mkdir -p ~/.wp-dev/backups; OUT="$(ls -1t ~/.wp-dev/backups/*/${env}/full-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No full backups found for ${env}."; else printf "%s\\n" "$OUT"; fi`;
+    }
+    return `mkdir -p ~/.wp-dev/backups; OUT="$(ls -1t ~/.wp-dev/backups/*/${env}/db-*.sql ~/.wp-dev/backups/*/${env}/*.sql 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No database backups found for ${env}."; else printf "%s\\n" "$OUT"; fi`;
   }
   if (action === "restore_env") {
     const env = safeArg(args?.env);
@@ -105,6 +164,34 @@ function commandForAction(action, args) {
     const confirm = safeArg(args?.confirm);
     if (!["local", "staging", "production"].includes(env) || !file) return null;
     if (env === "production" && confirm !== "RESTORE_PRODUCTION") return null;
+    if (env === "local") {
+      return [
+        `test -f ${file} || { echo "Backup file not found: ${file}"; exit 1; }`,
+        'test -n "$MYSQL_DATABASE" || { echo "Missing MYSQL_DATABASE in terminal environment."; exit 1; }',
+        'test -n "$MYSQL_USER" || { echo "Missing MYSQL_USER in terminal environment."; exit 1; }',
+        'test -n "$MYSQL_PASSWORD" || { echo "Missing MYSQL_PASSWORD in terminal environment."; exit 1; }',
+        `case ${file} in *.tar.gz) TMPDIR="$(mktemp -d)"; tar -xzf ${file} -C "$TMPDIR" || { rm -rf "$TMPDIR"; exit 1; }; test -f "$TMPDIR/db.sql" || { echo "Invalid full backup archive: missing db.sql"; rm -rf "$TMPDIR"; exit 1; }; test -d "$TMPDIR/wp-content" || { echo "Invalid full backup archive: missing wp-content"; rm -rf "$TMPDIR"; exit 1; }; mysql -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < "$TMPDIR/db.sql" || { rm -rf "$TMPDIR"; exit 1; }; mkdir -p /workspace/wordpress/wp-content; rsync -a --delete "$TMPDIR/wp-content/" /workspace/wordpress/wp-content/ || { rm -rf "$TMPDIR"; exit 1; }; rm -rf "$TMPDIR"; echo "Local full restore completed (database + wp-content).";; *) mysql -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < ${file} && echo "Local database restore completed.";; esac`,
+      ].join("; ");
+    }
+    if (safeArg(file).endsWith(".tar.gz")) {
+      return [
+        "set -e",
+        `CFG="$(node -e 'try{const c=require("/workspace/wp-dev.config.json");const r=c["${env}"]||{};process.stdout.write(["HOST="+String(r.host||""),"USER="+String(r.user||""),"REMOTE_PATH="+String(r.path||""),"PORT="+String(r.port||""),"KEY="+String(r.identityFile||"")].join("\\n"))}catch{process.exit(1)}')"`,
+        'eval "$CFG"',
+        `test -n "$HOST" && test -n "$USER" && test -n "$REMOTE_PATH" || { echo "Missing ${env} SSH settings in wp-dev.config.json"; exit 1; }`,
+        `test -f ${file} || { echo "Backup file not found: ${file}"; exit 1; }`,
+        `SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=15 -o UpdateHostKeys=no"`,
+        'test -n "$PORT" && SSH_OPTS="$SSH_OPTS -o Port=$PORT"',
+        'test -n "$KEY" && SSH_OPTS="$SSH_OPTS -i $KEY"',
+        `STAMP="$(date +%s)"`,
+        `REMOTE_DIR="/tmp/wp-dev-restore-full-${env}-$STAMP"`,
+        `ssh $SSH_OPTS "$USER@$HOST" "mkdir -p \\"$REMOTE_DIR\\""`,
+        `scp $SSH_OPTS ${file} "$USER@$HOST:$REMOTE_DIR/full.tar.gz"`,
+        `ssh $SSH_OPTS "$USER@$HOST" "set -e; tar -xzf \\"$REMOTE_DIR/full.tar.gz\\" -C \\"$REMOTE_DIR\\"; test -f \\"$REMOTE_DIR/db.sql\\"; test -d \\"$REMOTE_DIR/wp-content\\"; cd \\"$REMOTE_PATH\\"; wp db import \\"$REMOTE_DIR/db.sql\\" --allow-root >/dev/null; mkdir -p \\"$REMOTE_PATH/wp-content\\"; rsync -a --delete \\"$REMOTE_DIR/wp-content/\\" \\"$REMOTE_PATH/wp-content/\\""`,
+        `ssh $SSH_OPTS "$USER@$HOST" "rm -rf \\"$REMOTE_DIR\\""`,
+        `echo "${env} full restore completed (database + wp-content)."`,
+      ].join("; ");
+    }
     const yesFlag = env === "production" ? " --yes" : "";
     return `test -f ${file} || { echo "Backup file not found: ${file}"; exit 1; }; npm run wp-dev -- restore ${env} ${file}${yesFlag}`;
   }

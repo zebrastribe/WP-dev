@@ -352,6 +352,10 @@ if ($method === 'GET' && $action === 'terminal-runner-secrets') {
     $auth = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_AUTH');
     $runnerToken = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_TOKEN');
     $runnerOrigin = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_ORIGIN');
+    $terminalPortRaw = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_PORT');
+    $runnerPortRaw = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_PORT');
+    $terminalPort = is_string($terminalPortRaw) && ctype_digit($terminalPortRaw) ? (int) $terminalPortRaw : 7681;
+    $runnerPort = is_string($runnerPortRaw) && ctype_digit($runnerPortRaw) ? (int) $runnerPortRaw : 7682;
     if (!is_string($auth) || trim($auth) === '' || !is_string($runnerToken) || trim($runnerToken) === '') {
         http_response_code(503);
         echo json_encode(
@@ -368,6 +372,8 @@ if ($method === 'GET' && $action === 'terminal-runner-secrets') {
             'terminalAuth' => $auth,
             'runnerToken' => $runnerToken,
             'runnerOrigin' => is_string($runnerOrigin) ? $runnerOrigin : null,
+            'terminalPort' => $terminalPort,
+            'runnerPort' => $runnerPort,
         ],
         JSON_UNESCAPED_SLASHES
     );

@@ -6,6 +6,7 @@ RUN apt-get update \
     git \
     openssh-client \
     rsync \
+    default-mysql-client \
     docker.io \
     docker-compose \
     ca-certificates \
