@@ -197,16 +197,6 @@ export const SimplyDns: FC = () => (
       </li>
     </ul>
     <p className="text-xs text-slate-500">
-      Control panel:{" "}
-      <a
-        href="https://www.simply.com/en/controlpanel"
-        className="text-brand-600 underline dark:text-brand-400"
-        target="_blank"
-        rel="noreferrer"
-      >
-        simply.com/en/controlpanel
-      </a>
-      {" · "}
       API reference:{" "}
       <a
         href="https://www.simply.com/en/docs/api/"
@@ -239,7 +229,7 @@ export type NavId =
   | "commands"
   | "pullpush"
   | "backups"
-  | "simply"
+  | "provider"
   | "updating"
   | "config";
 
@@ -250,7 +240,7 @@ export const NAV_ITEMS: { id: NavId; label: string; Component: FC }[] = [
   { id: "commands", label: "Commands", Component: Commands },
   { id: "pullpush", label: "Pull & push", Component: PullPush },
   { id: "backups", label: "Backups", Component: Backups },
-  { id: "simply", label: "Provider integration", Component: SimplyDns },
+  { id: "provider", label: "Provider integration", Component: SimplyDns },
   { id: "updating", label: "Updating wp-dev", Component: Updating },
   { id: "config", label: "Config assistant", Component: ConfigAssistant },
 ];

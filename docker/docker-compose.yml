@@ -66,5 +66,20 @@ services:
       db:
         condition: service_healthy
 
+  terminal:
+    build:
+      context: .
+      dockerfile: terminal.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WPDEV_TERMINAL_PORT:-7681}:7681"
+    environment:
+      WPDEV_TERMINAL_AUTH: ${WPDEV_TERMINAL_AUTH:-wpdev:wpdev}
+      WPDEV_TERMINAL_WORKDIR: ${WPDEV_TERMINAL_WORKDIR:-/workspace}
+    volumes:
+      - ../:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.ssh:/root/.ssh:rw
+
 volumes:
   db_data:
