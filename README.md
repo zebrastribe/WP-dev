@@ -94,6 +94,8 @@ Wizard highlights:
 
 Always **`cd`** to the **clone root** — the folder that contains **`package.json`** and **`wp-dev.config.json`** — before **`wp-dev …`**.
 
+Need reusable command snippets? Use tracked `local-commands.example.md`, then copy it to your private `local-commands.md` (gitignored) and customize.
+
 | Path | Role |
 |------|------|
 | **`wordpress/`** | Local WordPress files (bind-mounted into Docker) |
