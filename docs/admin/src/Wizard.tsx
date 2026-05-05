@@ -1079,17 +1079,17 @@ export function Wizard() {
               }}
               className="rounded border-slate-300"
             />
-            Enable optional provider integration (Simply.com account + optional API key). Key is saved to host{" "}
+            Enable optional provider integration (account + optional API key). Key is saved to host{" "}
             <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> as{" "}
             <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_SIMPLY_API_KEY</code>, not in wp-dev.config.json.
           </label>
           {useProviderIntegration && (
             <div className="space-y-3">
               <label className="block">
-                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">simply.account (S123456 or UE12345)</span>
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">provider.account (optional)</span>
                 <input
                   className={input}
-                  placeholder="S123456 or UE12345"
+                  placeholder="Provider account id (e.g. S123456)"
                   value={data.simply?.account ?? ""}
                   onChange={(e) =>
                     setData((d) => ({
@@ -1101,7 +1101,7 @@ export function Wizard() {
               </label>
               <label className="block">
                 <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                  Simply.com API key (optional; saved to docker/.env on Save)
+                  Provider API key (optional; saved to docker/.env on Save)
                 </span>
                 <input
                   className={input}
@@ -1119,7 +1119,7 @@ export function Wizard() {
                 {providerKeyPresent === false ? "Save API key below, then verify." : "You can verify API access now."}
               </div>
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-                <strong>Manual setup required:</strong> do staging setup in Simply Control Panel.
+                <strong>Manual setup required:</strong> do staging setup in your hosting control panel.
                 <ol className="mt-2 list-inside list-decimal space-y-1">
                   <li>Create/verify subdomain (for example <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">staging.example.com</code>).</li>
                   <li>Map subdomain to the correct folder (for example <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">/staging</code>).</li>
@@ -1140,21 +1140,21 @@ export function Wizard() {
                       if (!saved.ok) {
                         setProviderKeySaveMessage({
                           tone: "error",
-                          text: `Could not save Simply API key: ${saved.error}`,
+                          text: `Could not save provider API key: ${saved.error}`,
                         });
                         return;
                       }
                       setProviderApiKey("");
                       setProviderKeySaveMessage({
                         tone: "success",
-                        text: "Saved Simply API key to local docker/.env (gitignored).",
+                        text: "Saved provider API key to local docker/.env (gitignored).",
                       });
                     } finally {
                       setProviderKeySaveBusy(false);
                     }
                   }}
                 >
-                  {providerKeySaveBusy ? "Saving key..." : "Save Simply API key locally"}
+                  {providerKeySaveBusy ? "Saving key..." : "Save provider API key locally"}
                 </button>
                 <button
                   type="button"
@@ -1170,21 +1170,21 @@ export function Wizard() {
                       if (r.ok) {
                         setAlert({
                           tone: "success",
-                          text: `Simply API verified (HTTP ${r.status}).`,
+                          text: `Provider API verified (HTTP ${r.status}).`,
                         });
                         return;
                       }
                       const detail = r.detail ? `\n${r.detail}` : "";
                       setAlert({
                         tone: "error",
-                        text: `Simply API verify failed: ${r.error}${detail}`,
+                        text: `Provider API verify failed: ${r.error}${detail}`,
                       });
                     } finally {
                       setProviderApiTestBusy(false);
                     }
                   }}
                 >
-                  {providerApiTestBusy ? "Verifying..." : "Verify Simply API now"}
+                  {providerApiTestBusy ? "Verifying..." : "Verify provider API now"}
                 </button>
                 <button
                   type="button"
@@ -1199,7 +1199,7 @@ export function Wizard() {
                   rel="noreferrer"
                   className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                 >
-                  Open Simply control panel
+                  Open hosting control panel
                 </a>
                 <button
                   type="button"
