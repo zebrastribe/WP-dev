@@ -6,9 +6,13 @@ Vite + React + Tailwind app served from your **local WordPress URL** at **`/admi
 
 | Area | Description |
 |------|--------------|
-| **Setup wizard** | Multi-step form: project, local URL, production + staging SSH, optional Simply — **saves `wp-dev.config.json`** in the repo root via **`api.php`** (same port as WordPress). |
+| **Setup wizard** | Multi-step host-agnostic form: project, local URL, Production Host, Staging Host, optional Provider integration — **saves `wp-dev.config.json`** in the repo root via **`api.php`** (same port as WordPress). |
 | **Documentation** | In-app copy of the main workflows; per-section **notes** in `localStorage`. |
 | **Config assistant** | Tab under Documentation: form + raw JSON for power users. |
+
+Wizard utilities:
+- SSH key setup guide + copyable SSH test command buttons in Production/Staging steps.
+- Staging domain check button (DNS + HTTPS + HTTP redirect + final host match).
 
 ## Build & open
 

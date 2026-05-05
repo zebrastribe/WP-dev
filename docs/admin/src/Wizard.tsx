@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  checkStagingDomain,
   checkStagingDbConnection,
   checkStagingHttps,
   loadStagingDbSecrets,
@@ -7,16 +8,27 @@ import {
   loadWpDevConfig,
   saveDockerEnvSecrets,
   saveWpDevConfig,
-  setupSimplyStagingFromUi,
   verifySimplyApi,
 } from "./api";
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
-const STEP_LABELS = ["Welcome", "Production", "Staging", "Simply", "Save"] as const;
+const STEP_LABELS = ["Welcome", "Production Host", "Staging Host", "Provider", "Save"] as const;
 
 type WizardAlert = { tone: "info" | "success" | "error"; text: string };
 type ChecklistStatus = "done" | "warn" | "todo";
+type DomainCheckResult = {
+  host: string;
+  dnsOk: boolean;
+  dnsRecords: string[];
+  httpsOk: boolean;
+  httpsStatus: number;
+  redirectsToHttps: boolean;
+  httpStatus: number;
+  finalHostMatches: boolean;
+  hints: string[];
+  checkedAtIso: string;
+} | null;
 
 const PULL_TERMINAL_HINT = [
   "Run commands in a terminal (not in the browser).",
@@ -147,16 +159,17 @@ export function Wizard() {
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardData>(defaults);
   const [hasStagingServer, setHasStagingServer] = useState(false);
-  const [useSimply, setUseSimply] = useState(false);
+  const [useProviderIntegration, setUseProviderIntegration] = useState(false);
   const [saveToken, setSaveToken] = useState("");
   /** Never stored in localStorage draft; optional write to host docker/.env after config save. */
-  const [simplyApiKey, setSimplyApiKey] = useState("");
-  const [simplyKeyPresent, setSimplyKeyPresent] = useState<boolean | null>(null);
-  const [simplyTestBusy, setSimplyTestBusy] = useState(false);
-  const [simplySetupBusy, setSimplySetupBusy] = useState(false);
-  const [simplyKeySaveBusy, setSimplyKeySaveBusy] = useState(false);
-  const [simplyKeySaveMessage, setSimplyKeySaveMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [providerApiKey, setProviderApiKey] = useState("");
+  const [providerKeyPresent, setProviderKeyPresent] = useState<boolean | null>(null);
+  const [providerApiTestBusy, setProviderApiTestBusy] = useState(false);
+  const [providerKeySaveBusy, setProviderKeySaveBusy] = useState(false);
+  const [providerKeySaveMessage, setProviderKeySaveMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [sslCheckBusy, setSslCheckBusy] = useState(false);
+  const [domainCheckBusy, setDomainCheckBusy] = useState(false);
+  const [domainCheckResult, setDomainCheckResult] = useState<DomainCheckResult>(null);
   const [readinessBusy, setReadinessBusy] = useState(false);
   const [dbCheckBusy, setDbCheckBusy] = useState(false);
   const [dbCheckMessage, setDbCheckMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -229,7 +242,7 @@ export function Wizard() {
                 : undefined,
           });
           setHasStagingServer(!String((loaded.staging as Remote)?.host ?? "").includes("example.invalid"));
-          setUseSimply(Boolean(loaded.simply));
+          setUseProviderIntegration(Boolean(loaded.simply));
           setAlert({
             tone: "info",
             text: aligned.changed
@@ -305,10 +318,10 @@ export function Wizard() {
   const refreshSimplyStatus = useCallback(async () => {
     const r = await loadSimplyStatus();
     if (r.ok) {
-      setSimplyKeyPresent(r.apiKeyPresent);
+      setProviderKeyPresent(r.apiKeyPresent);
       return;
     }
-    setSimplyKeyPresent(null);
+    setProviderKeyPresent(null);
   }, []);
 
   useEffect(() => {
@@ -352,7 +365,7 @@ export function Wizard() {
   };
 
   const saveSimplyKeyNow = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
-    const key = simplyApiKey.trim();
+    const key = providerApiKey.trim();
     if (!key) return { ok: false, error: "Enter a Simply API key first." };
     const r = await saveDockerEnvSecrets(
       { WPDEV_SIMPLY_API_KEY: key },
@@ -361,7 +374,7 @@ export function Wizard() {
     if (!r.ok) return { ok: false, error: "error" in r ? r.error : "unknown_error" };
     await refreshSimplyStatus();
     return { ok: true };
-  }, [simplyApiKey, saveToken, refreshSimplyStatus]);
+  }, [providerApiKey, saveToken, refreshSimplyStatus]);
 
   const saveStagingDbSecretsNow = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
     const dbHost = data.staging.db?.host?.trim() || "";
@@ -419,6 +432,13 @@ export function Wizard() {
     }
   };
 
+  const buildSshTestCommand = (env: "staging" | "production"): string => {
+    const remote = data[env];
+    const host = remote.host.trim() || "<ssh-host>";
+    const user = remote.user.trim() || "<ssh-user>";
+    return `ssh -o BatchMode=yes -o ConnectTimeout=10 ${user}@${host} "pwd && ls -la && wp --info"`;
+  };
+
   const onSave = async () => {
     setSaving(true);
     setAlert(null);
@@ -433,7 +453,7 @@ export function Wizard() {
         ? data.staging
         : { ...STAGING_PLACEHOLDER, user: data.production.user || data.staging.user || "deploy" };
       const payload = toJson({ ...data, staging });
-      if (!useSimply) delete payload.simply;
+      if (!useProviderIntegration) delete payload.simply;
       const res = await saveWpDevConfig(payload, saveToken.trim() || undefined);
       if (!res.ok) {
         const err = "error" in res ? res.error : "unknown";
@@ -447,12 +467,12 @@ export function Wizard() {
         return;
       }
       let extra = "";
-      if (useSimply && data.simply?.account && simplyApiKey.trim()) {
+      if (useProviderIntegration && data.simply?.account && providerApiKey.trim()) {
         const keyRes = await saveDockerEnvSecrets(
-          { WPDEV_SIMPLY_API_KEY: simplyApiKey.trim() },
+          { WPDEV_SIMPLY_API_KEY: providerApiKey.trim() },
           saveToken.trim() || undefined,
         );
-        setSimplyApiKey("");
+        setProviderApiKey("");
         if (!keyRes.ok) {
           extra = `\n\nSimply API key was NOT saved to docker/.env: ${"error" in keyRes ? keyRes.error : "unknown"}. Config JSON did save. Fix permissions/mount or save token, then save again with the key.`;
           logAdmin("warn", "Wizard: docker/.env secret save failed", "error" in keyRes ? keyRes.error : "");
@@ -635,14 +655,21 @@ export function Wizard() {
           <p className="text-xs text-slate-500">
             After save, open this URL in another tab to run the WordPress installer (or continue after a pull).
           </p>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
+            <p className="font-semibold text-slate-800 dark:text-slate-100">Host-agnostic workflow</p>
+            <p className="mt-1">
+              wp-dev works with any host that supports SSH + rsync + WP-CLI. Configure host/user/path/url for
+              production and staging, test SSH from terminal, then run pull/push commands.
+            </p>
+          </div>
         </div>
       )}
 
       {step === 1 && (
         <div className="space-y-4">
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Production is your live (or primary remote) WordPress. SSH details are often different from the public
-            domain on shared hosting.
+            Production host is your live (or primary remote) WordPress. SSH details are often different from the
+            public domain on shared hosting.
           </p>
           {(["host", "user", "path", "url"] as const).map((key) => (
             <label key={key} className="block capitalize">
@@ -654,6 +681,32 @@ export function Wizard() {
               />
             </label>
           ))}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
+            <p className="font-semibold text-slate-800 dark:text-slate-100">SSH key setup (required)</p>
+            <ol className="mt-2 list-inside list-decimal space-y-1">
+              <li>Create keypair: <code>ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "you@host"</code></li>
+              <li>Add <code>~/.ssh/id_ed25519.pub</code> to your hosting SSH keys in the control panel.</li>
+              <li>Use the hosting SSH hostname + user in fields above (often not the public domain).</li>
+              <li>Run the test command in terminal; it must work without password prompts.</li>
+            </ol>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void copyCommand(buildSshTestCommand("production"))}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Copy SSH test command (production)
+              </button>
+              <a
+                href="https://www.simply.com/en/controlpanel"
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Open Simply control panel
+              </a>
+            </div>
+          </div>
           <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
             <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
               Optional: production.db bootstrap settings
@@ -708,6 +761,110 @@ export function Wizard() {
                   />
                 </label>
               ))}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
+                <p className="font-semibold text-slate-800 dark:text-slate-100">Test staging SSH access</p>
+                <p className="mt-1">
+                  Run this from terminal before pull/push. It should return path/listing and WP-CLI info.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void copyCommand(buildSshTestCommand("staging"))}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                  >
+                    Copy SSH test command (staging)
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={domainCheckBusy}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                    onClick={async () => {
+                      setDomainCheckBusy(true);
+                      try {
+                        const r = await checkStagingDomain({ url: data.staging.url.trim() || undefined });
+                        if (!r.ok) {
+                          setDomainCheckResult(null);
+                          setAlert({
+                            tone: "error",
+                            text: `Staging domain check failed: ${r.error}${r.detail ? `\n${r.detail}` : ""}`,
+                          });
+                          return;
+                        }
+                        setDomainCheckResult({
+                          host: r.host,
+                          dnsOk: r.dns.ok,
+                          dnsRecords: r.dns.records,
+                          httpsOk: r.https.ok,
+                          httpsStatus: r.https.status,
+                          redirectsToHttps: r.http.redirectsToHttps,
+                          httpStatus: r.http.status,
+                          finalHostMatches: r.finalHostMatches,
+                          hints: r.hints,
+                          checkedAtIso: new Date().toISOString(),
+                        });
+                        const lines: string[] = [
+                          `Host: ${r.host}`,
+                          `DNS records found: ${r.dns.ok ? "YES" : "NO"}${r.dns.records.length ? ` (${r.dns.records.join(", ")})` : ""}`,
+                          `HTTPS reachable: ${r.https.ok ? "YES" : "NO"} (HTTP ${r.https.status})`,
+                          `HTTP -> HTTPS redirect: ${r.http.redirectsToHttps ? "YES" : "NO"} (HTTP ${r.http.status})`,
+                          `Final host matches staging URL: ${r.finalHostMatches ? "YES" : "NO"}`,
+                          "",
+                          ...r.hints.map((h) => `- ${h}`),
+                        ];
+                        const healthy =
+                          r.dns.ok && r.https.ok && r.http.redirectsToHttps && r.finalHostMatches;
+                        setAlert({
+                          tone: healthy ? "success" : "info",
+                          text: `Staging domain check:\n${lines.join("\n")}`,
+                        });
+                      } finally {
+                        setDomainCheckBusy(false);
+                      }
+                    }}
+                  >
+                    {domainCheckBusy ? "Checking domain..." : "Test staging domain setup"}
+                  </button>
+                </div>
+                {domainCheckResult && (
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="font-semibold text-slate-800 dark:text-slate-100">Staging domain status</p>
+                      <p className="text-[11px] text-slate-500">
+                        Checked {new Date(domainCheckResult.checkedAtIso).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <p className="text-slate-600 dark:text-slate-300">
+                        Host: <span className="font-medium">{domainCheckResult.host}</span>
+                      </p>
+                      <p className={domainCheckResult.dnsOk ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
+                        DNS: {domainCheckResult.dnsOk ? "OK" : "Missing"}
+                      </p>
+                      <p className={domainCheckResult.httpsOk ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
+                        HTTPS: {domainCheckResult.httpsOk ? "OK" : "Not OK"} (HTTP {domainCheckResult.httpsStatus})
+                      </p>
+                      <p className={domainCheckResult.redirectsToHttps ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
+                        HTTP→HTTPS: {domainCheckResult.redirectsToHttps ? "Yes" : "No"} (HTTP {domainCheckResult.httpStatus})
+                      </p>
+                      <p className={domainCheckResult.finalHostMatches ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
+                        Final host match: {domainCheckResult.finalHostMatches ? "Yes" : "No"}
+                      </p>
+                    </div>
+                    {domainCheckResult.dnsRecords.length > 0 && (
+                      <p className="mt-2 text-slate-600 dark:text-slate-300">
+                        DNS records: {domainCheckResult.dnsRecords.join(", ")}
+                      </p>
+                    )}
+                    <ul className="mt-2 list-inside list-disc space-y-1 text-slate-600 dark:text-slate-300">
+                      {domainCheckResult.hints.map((hint) => (
+                        <li key={hint}>{hint}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
               <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
                 <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
                   Required for push staging: staging.db settings
@@ -913,19 +1070,20 @@ export function Wizard() {
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
-              checked={useSimply}
+              checked={useProviderIntegration}
               onChange={(e) => {
                 const v = e.target.checked;
                 logAdmin("info", `Wizard: Simply.com block → ${v ? "on" : "off"}`);
-                setUseSimply(v);
+                setUseProviderIntegration(v);
                 if (!v) setData((d) => ({ ...d, simply: undefined }));
               }}
               className="rounded border-slate-300"
             />
-            Add Simply.com account + optional API key (saved to host <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> as{" "}
-            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_SIMPLY_API_KEY</code>, not in wp-dev.config.json)
+            Enable optional provider integration (Simply.com account + optional API key). Key is saved to host{" "}
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> as{" "}
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_SIMPLY_API_KEY</code>, not in wp-dev.config.json.
           </label>
-          {useSimply && (
+          {useProviderIntegration && (
             <div className="space-y-3">
               <label className="block">
                 <span className="text-xs font-medium text-slate-600 dark:text-slate-400">simply.account (S123456 or UE12345)</span>
@@ -950,62 +1108,64 @@ export function Wizard() {
                   type="password"
                   autoComplete="off"
                   placeholder="Leave empty to keep existing key on server"
-                  value={simplyApiKey}
-                  onChange={(e) => setSimplyApiKey(e.target.value)}
+                  value={providerApiKey}
+                  onChange={(e) => setProviderApiKey(e.target.value)}
                 />
               </label>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
                 Server key status:{" "}
-                {simplyKeyPresent === null ? "unknown" : simplyKeyPresent ? "present" : "missing"}.
+                {providerKeyPresent === null ? "unknown" : providerKeyPresent ? "present" : "missing"}.
                 {" "}
-                {simplyKeyPresent === false ? "Save API key below, then verify." : "You can verify API access now."}
+                {providerKeyPresent === false ? "Save API key below, then verify." : "You can verify API access now."}
               </div>
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-                <strong>Important:</strong> wp-dev can automate Simply DNS + wp-dev config updates, but Simply's
-                public API does not currently expose the same subdomain folder mapping flow as the Control Panel.
-                After DNS setup, create/verify the subdomain in Simply Subdomains and set the folder (for example
-                <code className="rounded bg-amber-100 px-1 dark:bg-amber-900"> /staging </code>), then issue/verify
-                SSL for that hostname.
+                <strong>Manual setup required:</strong> do staging setup in Simply Control Panel.
+                <ol className="mt-2 list-inside list-decimal space-y-1">
+                  <li>Create/verify subdomain (for example <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">staging.example.com</code>).</li>
+                  <li>Map subdomain to the correct folder (for example <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">/staging</code>).</li>
+                  <li>Issue/verify SSL certificate for the staging hostname.</li>
+                  <li>Set <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">staging.url</code> in wizard to that HTTPS hostname.</li>
+                </ol>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled={simplyKeySaveBusy}
+                  disabled={providerKeySaveBusy}
                   className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                   onClick={async () => {
-                    setSimplyKeySaveBusy(true);
-                    setSimplyKeySaveMessage(null);
+                    setProviderKeySaveBusy(true);
+                    setProviderKeySaveMessage(null);
                     try {
                       const saved = await saveSimplyKeyNow();
                       if (!saved.ok) {
-                        setSimplyKeySaveMessage({
+                        setProviderKeySaveMessage({
                           tone: "error",
                           text: `Could not save Simply API key: ${saved.error}`,
                         });
                         return;
                       }
-                      setSimplyApiKey("");
-                      setSimplyKeySaveMessage({
+                      setProviderApiKey("");
+                      setProviderKeySaveMessage({
                         tone: "success",
                         text: "Saved Simply API key to local docker/.env (gitignored).",
                       });
                     } finally {
-                      setSimplyKeySaveBusy(false);
+                      setProviderKeySaveBusy(false);
                     }
                   }}
                 >
-                  {simplyKeySaveBusy ? "Saving key..." : "Save Simply API key locally"}
+                  {providerKeySaveBusy ? "Saving key..." : "Save Simply API key locally"}
                 </button>
                 <button
                   type="button"
-                  disabled={simplyTestBusy}
+                  disabled={providerApiTestBusy}
                   className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                   onClick={async () => {
-                    setSimplyTestBusy(true);
+                    setProviderApiTestBusy(true);
                     try {
                       const r = await verifySimplyApi({
                         account: data.simply?.account?.trim() || undefined,
-                        apiKey: simplyApiKey.trim() || undefined,
+                        apiKey: providerApiKey.trim() || undefined,
                       });
                       if (r.ok) {
                         setAlert({
@@ -1020,11 +1180,11 @@ export function Wizard() {
                         text: `Simply API verify failed: ${r.error}${detail}`,
                       });
                     } finally {
-                      setSimplyTestBusy(false);
+                      setProviderApiTestBusy(false);
                     }
                   }}
                 >
-                  {simplyTestBusy ? "Verifying..." : "Verify Simply API now"}
+                  {providerApiTestBusy ? "Verifying..." : "Verify Simply API now"}
                 </button>
                 <button
                   type="button"
@@ -1033,51 +1193,14 @@ export function Wizard() {
                 >
                   Refresh key status
                 </button>
-                <button
-                  type="button"
-                  disabled={simplySetupBusy}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                  onClick={async () => {
-                    setSimplySetupBusy(true);
-                    try {
-                      const r = await setupSimplyStagingFromUi({
-                        account: data.simply?.account?.trim() || undefined,
-                        apiKey: simplyApiKey.trim() || undefined,
-                      });
-                      if (!r.ok) {
-                        setAlert({
-                          tone: "error",
-                          text: `Create staging DNS failed: ${r.error}${r.detail ? `\n${r.detail}` : ""}`,
-                        });
-                        return;
-                      }
-                      if (r.staging) {
-                        setData((d) => ({
-                          ...d,
-                          staging: {
-                            ...d.staging,
-                            host: r.staging?.host ?? d.staging.host,
-                            user: r.staging?.user ?? d.staging.user,
-                            path: r.staging?.path ?? d.staging.path,
-                            url: r.staging?.url ?? d.staging.url,
-                          },
-                        }));
-                        setHasStagingServer(true);
-                      }
-                      setAlert({
-                        tone: "success",
-                        text:
-                          "Staging DNS/config setup complete.\n" +
-                          r.lines.join("\n") +
-                          "\n\nNote: this creates DNS/config hints, not full hosting/WordPress provisioning.",
-                      });
-                    } finally {
-                      setSimplySetupBusy(false);
-                    }
-                  }}
+                <a
+                  href="https://www.simply.com/en/controlpanel"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                 >
-                  {simplySetupBusy ? "Creating staging..." : "Create staging DNS + config now"}
-                </button>
+                  Open Simply control panel
+                </a>
                 <button
                   type="button"
                   disabled={sslCheckBusy}
@@ -1117,15 +1240,15 @@ export function Wizard() {
                   {sslCheckBusy ? "Checking HTTPS..." : "Verify staging HTTPS"}
                 </button>
               </div>
-              {simplyKeySaveMessage && (
+              {providerKeySaveMessage && (
                 <div
                   className={`rounded border px-3 py-2 text-xs ${
-                    simplyKeySaveMessage.tone === "success"
+                    providerKeySaveMessage.tone === "success"
                       ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
                       : "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-100"
                   }`}
                 >
-                  {simplyKeySaveMessage.text}
+                  {providerKeySaveMessage.text}
                 </div>
               )}
               <p className="text-xs text-slate-500">
@@ -1162,7 +1285,7 @@ export function Wizard() {
                 staging: hasStagingServer
                   ? data.staging
                   : { ...STAGING_PLACEHOLDER, user: data.production.user || "deploy" },
-                simply: useSimply ? data.simply : undefined,
+                simply: useProviderIntegration ? data.simply : undefined,
               }),
               null,
               2,

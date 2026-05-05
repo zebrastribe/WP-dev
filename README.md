@@ -32,7 +32,7 @@ npm run setup          # Docker check, npm install, build CLI + admin UI into wo
 
 1. **`wp-dev up`** — starts MySQL + WordPress + WP-CLI service.  
 2. **Configure** — either:
-   - **Browser:** open **`http://localhost:<WP_PORT>/admin/`** (default port **`8888`** — set **`WP_PORT`** in **`docker/.env`**, copy from **`docker/.env.example`**). Use the **Setup wizard** → **Save** writes **`wp-dev.config.json`**.  
+   - **Browser:** open **`http://localhost:<WP_PORT>/admin/`** (default port **`8888`** — set **`WP_PORT`** in **`docker/.env`**, copy from **`docker/.env.example`**). Use the host-agnostic **Setup wizard** (Production Host / Staging Host / Provider) → **Save** writes **`wp-dev.config.json`**.  
    - **Terminal:** **`wp-dev init`** (interactive).  
 3. **Open the site** — URL is **`local.url`** in **`wp-dev.config.json`** (example: **`http://localhost:8888`**). Finish the WordPress installer if this is a new DB.
 
@@ -69,6 +69,11 @@ npm run setup          # Docker check, npm install, build CLI + admin UI into wo
 |--|-----|
 | **WordPress** | **`local.url`** from config (example **`http://localhost:8888`**) |
 | **Wizard + docs + config assistant** | **`http://localhost:<WP_PORT>/admin/`** — same host/port as WordPress; **`WP_PORT`** in **`docker/.env`** (default **8888**) |
+
+Wizard highlights:
+- **Production Host** / **Staging Host** steps include SSH key setup guidance and a button to copy an SSH test command.
+- **Staging Host** includes **Test staging domain setup** (DNS + HTTPS + HTTP→HTTPS + final host match).
+- **Provider** step is optional integration (for example Simply.com); manual hosting panel setup remains required.
 
 **Security:** the WordPress container only bind-mounts **`wp-dev.config.json`** and **`logs/`** (not the whole repo). If others can reach your **`WP_PORT`**, set **`WPDEV_ADMIN_SAVE_TOKEN`** in **`docker/.env`** and the same value in the wizard when saving. If **Save** fails with permission denied, **`chmod u+rw wp-dev.config.json`** on the host or use **`wp-dev init`** instead.
 

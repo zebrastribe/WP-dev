@@ -10,8 +10,8 @@ export function apiPhpUrl(
     | "simply-status"
     | "staging-db-secrets"
     | "simply-test"
-    | "simply-setup-staging"
     | "staging-https-check"
+    | "staging-domain-check"
     | "staging-db-check",
 ): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -249,49 +249,6 @@ export async function verifySimplyApi(
   }
 }
 
-export type SimplySetupStagingResponse =
-  | { ok: true; lines: string[]; staging?: { host?: string; path?: string; url?: string; user?: string } }
-  | { ok: false; error: string; detail?: string };
-
-export async function setupSimplyStagingFromUi(payload: {
-  account?: string;
-  apiKey?: string;
-  apex?: string;
-  stagingLabel?: string;
-  keepExistingDns?: boolean;
-}): Promise<SimplySetupStagingResponse> {
-  try {
-    const res = await fetch(apiPhpUrl("simply-setup-staging"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify(payload),
-    });
-    const data = (await res.json()) as unknown;
-    if (!data || typeof data !== "object") {
-      return { ok: false, error: "invalid_response" };
-    }
-    const o = data as Record<string, unknown>;
-    if (res.ok && o.ok === true) {
-      return {
-        ok: true,
-        lines: Array.isArray(o.lines) ? o.lines.map((x) => String(x)) : [],
-        staging:
-          o.staging && typeof o.staging === "object"
-            ? (o.staging as { host?: string; path?: string; url?: string; user?: string })
-            : undefined,
-      };
-    }
-    return {
-      ok: false,
-      error: String(o.error ?? `HTTP ${res.status}`),
-      detail: typeof o.detail === "string" ? o.detail : undefined,
-    };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
-  }
-}
-
 export type StagingHttpsCheckResponse =
   | {
       ok: true;
@@ -384,6 +341,70 @@ export async function checkStagingDbConnection(payload: {
         message: String(o.message ?? "Connection OK"),
         server: typeof o.server === "string" ? o.server : undefined,
         database: typeof o.database === "string" ? o.database : undefined,
+      };
+    }
+    return {
+      ok: false,
+      error: String(o.error ?? `HTTP ${res.status}`),
+      detail: typeof o.detail === "string" ? o.detail : undefined,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export type StagingDomainCheckResponse =
+  | {
+      ok: true;
+      url: string;
+      host: string;
+      dns: { ok: boolean; records: string[] };
+      https: { ok: boolean; status: number; location?: string | null };
+      http: { status: number; location?: string | null; redirectsToHttps: boolean };
+      finalHostMatches: boolean;
+      hints: string[];
+    }
+  | { ok: false; error: string; detail?: string };
+
+export async function checkStagingDomain(payload?: {
+  url?: string;
+}): Promise<StagingDomainCheckResponse> {
+  try {
+    const res = await fetch(apiPhpUrl("staging-domain-check"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(payload ?? {}),
+    });
+    const data = (await res.json()) as unknown;
+    if (!data || typeof data !== "object") {
+      return { ok: false, error: "invalid_response" };
+    }
+    const o = data as Record<string, unknown>;
+    if (res.ok && o.ok === true) {
+      const dnsObj = (o.dns as Record<string, unknown> | undefined) ?? {};
+      const httpsObj = (o.https as Record<string, unknown> | undefined) ?? {};
+      const httpObj = (o.http as Record<string, unknown> | undefined) ?? {};
+      return {
+        ok: true,
+        url: String(o.url ?? ""),
+        host: String(o.host ?? ""),
+        dns: {
+          ok: Boolean(dnsObj.ok),
+          records: Array.isArray(dnsObj.records) ? dnsObj.records.map((x) => String(x)) : [],
+        },
+        https: {
+          ok: Boolean(httpsObj.ok),
+          status: Number(httpsObj.status ?? 0),
+          location: (httpsObj.location as string | null | undefined) ?? null,
+        },
+        http: {
+          status: Number(httpObj.status ?? 0),
+          location: (httpObj.location as string | null | undefined) ?? null,
+          redirectsToHttps: Boolean(httpObj.redirectsToHttps),
+        },
+        finalHostMatches: Boolean(o.finalHostMatches),
+        hints: Array.isArray(o.hints) ? o.hints.map((x) => String(x)) : [],
       };
     }
     return {

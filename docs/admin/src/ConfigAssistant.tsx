@@ -7,7 +7,7 @@ const DEFAULT_JSON = JSON.stringify(EXAMPLE_WP_DEV_CONFIG, null, 2);
 
 export function ConfigAssistant() {
   const [raw, setRaw] = useState(DEFAULT_JSON);
-  const [simplyApiKey, setSimplyApiKey] = useState("");
+  const [providerApiKey, setProviderApiKey] = useState("");
   const [saveToken, setSaveToken] = useState("");
   const [secretSaveMsg, setSecretSaveMsg] = useState<string | null>(null);
   const [savingSecret, setSavingSecret] = useState(false);
@@ -179,8 +179,8 @@ export function ConfigAssistant() {
               autoComplete="off"
               className="w-full max-w-md rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="Paste key, then Save key below"
-              value={simplyApiKey}
-              onChange={(e) => setSimplyApiKey(e.target.value)}
+              value={providerApiKey}
+              onChange={(e) => setProviderApiKey(e.target.value)}
             />
           </label>
           <label className="mt-2 block">
@@ -197,21 +197,21 @@ export function ConfigAssistant() {
           </label>
           <button
             type="button"
-            disabled={savingSecret || !simplyApiKey.trim()}
+            disabled={savingSecret || !providerApiKey.trim()}
             className="mt-2 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
             onClick={async () => {
               setSavingSecret(true);
               setSecretSaveMsg(null);
               try {
                 const r = await saveDockerEnvSecrets(
-                  { WPDEV_SIMPLY_API_KEY: simplyApiKey.trim() },
+                  { WPDEV_SIMPLY_API_KEY: providerApiKey.trim() },
                   saveToken.trim() || undefined,
                 );
                 if (!r.ok) {
                   setSecretSaveMsg(`Failed: ${"error" in r ? r.error : "unknown"}`);
                   logAdmin("warn", "ConfigAssistant: save-docker-env failed", "error" in r ? r.error : "");
                 } else {
-                  setSimplyApiKey("");
+                  setProviderApiKey("");
                   setSecretSaveMsg("Saved to docker/.env. Run wp-dev down && wp-dev up on the host.");
                   logAdmin("info", "ConfigAssistant: WPDEV_SIMPLY_API_KEY saved via API");
                 }

@@ -19,7 +19,7 @@ import {
 } from "../services/wpcli.js";
 import { logInfo } from "../utils/logger.js";
 import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
-import { cmdFixPermissions } from "./fix-permissions.js";
+import { cmdFixPermissions, cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
 import { cmdSimplySetupStagingDns } from "./simply.js";
 import { getSimplyApiKey } from "../services/simply.js";
 import { isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
@@ -121,6 +121,16 @@ export async function cmdPull(
       }
       logInfo(`pull ${env}: force option home/siteurl -> ${config.local.url}`);
       await wpLocalForceSiteUrls(configDir, config, config.local.url);
+      try {
+        logInfo(`pull ${env}: restore runtime write permissions for wp-content`);
+        await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logInfo(`pull ${env}: runtime write permissions step failed (${msg})`);
+        console.error(
+          "Warning: wp-content runtime write permissions could not be applied. If plugins cannot write files, run: npm run wp-dev -- up",
+        );
+      }
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

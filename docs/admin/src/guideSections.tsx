@@ -41,7 +41,7 @@ export const Overview: FC = () => (
       </li>
       <li>
         <strong>Staging / production</strong> — remotes for sync; they are not created automatically except
-        optional Simply.com DNS helpers (see Simply tab).
+        optional provider integrations (see Provider integration tab).
       </li>
     </ul>
   </Prose>
@@ -178,27 +178,35 @@ export const Backups: FC = () => (
 export const SimplyDns: FC = () => (
   <Prose>
     <p>
-      Optional <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">simply.account</code> in{" "}
+      wp-dev is host-agnostic: any host with SSH + rsync + WP-CLI works. Provider integrations are optional.
+      For Simply.com, add <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">simply.account</code> in{" "}
       <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev.config.json</code> plus{" "}
       <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_SIMPLY_API_KEY</code> in{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> (Wizard / Config Assistant can write the key; it is never stored in JSON).{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">simply setup-staging-dns</code> adds an{" "}
-      <strong>A</strong> record for <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">&lt;label&gt;.&lt;apex&gt;</code>{" "}
-      (default <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">staging</code>) and patches staging hints. After{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">pull production</code>, wp-dev runs this automatically when staging is still a placeholder (skip with{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">--skip-simply-staging-dns</code>).
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>.
     </p>
     <ul className="list-inside list-disc space-y-1">
       <li>
-        <strong>Conflict</strong> (existing A to another IP, or CNAME, etc.): wp-dev does <strong>not</strong> overwrite. Use{" "}
-        <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">--keep-existing-dns</code> (config only) or{" "}
-        <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">--staging-label dev</code> for another hostname.
+        Configure staging subdomain in Simply Control Panel: create subdomain, map it to the correct folder, and issue SSL.
       </li>
       <li>
-        <strong>init</strong> — after Simply account, if the API key is set, you may be prompted for the same choices interactively.
+        Set <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">staging.url</code> in config to the final HTTPS hostname.
+      </li>
+      <li>
+        Test from terminal before sync:
+        <code className="ml-1 rounded bg-slate-100 px-1 dark:bg-slate-800">ssh -o BatchMode=yes user@host "pwd && wp --info"</code>
       </li>
     </ul>
     <p className="text-xs text-slate-500">
+      Control panel:{" "}
+      <a
+        href="https://www.simply.com/en/controlpanel"
+        className="text-brand-600 underline dark:text-brand-400"
+        target="_blank"
+        rel="noreferrer"
+      >
+        simply.com/en/controlpanel
+      </a>
+      {" · "}
       API reference:{" "}
       <a
         href="https://www.simply.com/en/docs/api/"
@@ -242,7 +250,7 @@ export const NAV_ITEMS: { id: NavId; label: string; Component: FC }[] = [
   { id: "commands", label: "Commands", Component: Commands },
   { id: "pullpush", label: "Pull & push", Component: PullPush },
   { id: "backups", label: "Backups", Component: Backups },
-  { id: "simply", label: "Simply.com DNS", Component: SimplyDns },
+  { id: "simply", label: "Provider integration", Component: SimplyDns },
   { id: "updating", label: "Updating wp-dev", Component: Updating },
   { id: "config", label: "Config assistant", Component: ConfigAssistant },
 ];
