@@ -4,9 +4,25 @@ import { randomUUID } from "node:crypto";
 
 const PORT = Number(process.env.WPDEV_TERMINAL_RUNNER_PORT || 7682);
 const AUTH = process.env.WPDEV_TERMINAL_AUTH || "wpdev:wpdev";
+const RUNNER_TOKEN = process.env.WPDEV_TERMINAL_RUNNER_TOKEN || "";
+const ALLOWED_ORIGIN = process.env.WPDEV_TERMINAL_RUNNER_ORIGIN || "";
 const WORKDIR = process.env.WPDEV_TERMINAL_WORKDIR || "/workspace";
 const MAX_OUTPUT = 64_000;
 const JOB_TTL_MS = 10 * 60 * 1000;
+const JOB_TIMEOUT_MS = 8 * 60 * 1000;
+
+if (AUTH === "wpdev:wpdev") {
+  console.error("Refusing to start terminal runner: WPDEV_TERMINAL_AUTH is using insecure default.");
+  process.exit(1);
+}
+if (!RUNNER_TOKEN) {
+  console.error("Refusing to start terminal runner: WPDEV_TERMINAL_RUNNER_TOKEN is required.");
+  process.exit(1);
+}
+if (!ALLOWED_ORIGIN) {
+  console.error("Refusing to start terminal runner: WPDEV_TERMINAL_RUNNER_ORIGIN is required.");
+  process.exit(1);
+}
 
 const jobs = new Map();
 
@@ -17,21 +33,25 @@ function pruneJobs() {
   }
 }
 
-function json(res, status, body) {
+function json(req, res, status, body) {
+  const origin = req.headers.origin || "";
+  const allowOrigin = origin === ALLOWED_ORIGIN ? origin : ALLOWED_ORIGIN;
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
+    "access-control-allow-origin": allowOrigin,
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,authorization",
+    "access-control-allow-headers": "content-type,authorization,x-wp-dev-terminal-token",
     "cache-control": "no-store",
   });
   res.end(JSON.stringify(body));
 }
 
-function unauthorized(res) {
+function unauthorized(req, res) {
+  const origin = req.headers.origin || "";
+  const allowOrigin = origin === ALLOWED_ORIGIN ? origin : ALLOWED_ORIGIN;
   res.writeHead(401, {
     "www-authenticate": 'Basic realm="wp-dev terminal runner"',
-    "access-control-allow-origin": "*",
+    "access-control-allow-origin": allowOrigin,
   });
   res.end("Unauthorized");
 }
@@ -50,6 +70,15 @@ function safeArg(v) {
   return typeof v === "string" && /^[a-zA-Z0-9._:@/-]+$/.test(v) ? v : "";
 }
 
+function hasValidRunnerToken(req) {
+  return (req.headers["x-wp-dev-terminal-token"] || "") === RUNNER_TOKEN;
+}
+
+function isAllowedOrigin(req) {
+  const origin = req.headers.origin || "";
+  return origin === ALLOWED_ORIGIN;
+}
+
 function commandForAction(action, args) {
   if (action === "generate_keypair") {
     return 'test -f ~/.ssh/id_ed25519 || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C "$USER@$(hostname)"; ls -la ~/.ssh/id_ed25519*; echo ""; echo "Public key:"; cat ~/.ssh/id_ed25519.pub';
@@ -60,10 +89,6 @@ function commandForAction(action, args) {
     if (!user || !host) return null;
     return `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} "pwd && ls -la && wp --info"`;
   }
-  if (action === "pull_production") return "npm run wp-dev -- pull production";
-  if (action === "pull_staging") return "npm run wp-dev -- pull staging";
-  if (action === "push_staging") return "npm run wp-dev -- push staging";
-  if (action === "push_production") return "npm run wp-dev -- push production";
   return null;
 }
 
@@ -80,6 +105,15 @@ function startJob(command) {
   };
   jobs.set(id, job);
   const child = spawn("bash", ["-lc", command], { cwd: WORKDIR });
+  const timeout = setTimeout(() => {
+    if (job.status === "running") {
+      child.kill("SIGKILL");
+      job.output = `${job.output}\n[runner] job timeout exceeded\n`.slice(-MAX_OUTPUT);
+      job.status = "done";
+      job.exitCode = 124;
+      job.updatedAt = Date.now();
+    }
+  }, JOB_TIMEOUT_MS);
   const append = (chunk) => {
     const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
     job.output = (job.output + text).slice(-MAX_OUTPUT);
@@ -88,11 +122,13 @@ function startJob(command) {
   child.stdout.on("data", append);
   child.stderr.on("data", append);
   child.on("close", (code) => {
+    clearTimeout(timeout);
     job.status = "done";
     job.exitCode = typeof code === "number" ? code : 1;
     job.updatedAt = Date.now();
   });
   child.on("error", (err) => {
+    clearTimeout(timeout);
     append(`\n[runner error] ${err?.message || String(err)}\n`);
     job.status = "done";
     job.exitCode = 1;
@@ -103,11 +139,23 @@ function startJob(command) {
 
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
-    json(res, 200, { ok: true });
+    if (!isAllowedOrigin(req)) {
+      json(req, res, 403, { ok: false, error: "forbidden_origin" });
+      return;
+    }
+    json(req, res, 200, { ok: true });
+    return;
+  }
+  if (!isAllowedOrigin(req)) {
+    json(req, res, 403, { ok: false, error: "forbidden_origin" });
+    return;
+  }
+  if (!hasValidRunnerToken(req)) {
+    json(req, res, 403, { ok: false, error: "forbidden_token" });
     return;
   }
   if (parseAuth(req) !== AUTH) {
-    unauthorized(res);
+    unauthorized(req, res);
     return;
   }
   pruneJobs();
@@ -124,17 +172,17 @@ const server = http.createServer(async (req, res) => {
       try {
         data = body ? JSON.parse(body) : {};
       } catch {
-        json(res, 400, { ok: false, error: "invalid_json" });
+        json(req, res, 400, { ok: false, error: "invalid_json" });
         return;
       }
       const action = typeof data.action === "string" ? data.action : "";
       const command = commandForAction(action, data.args || {});
       if (!command) {
-        json(res, 400, { ok: false, error: "invalid_action_or_args" });
+        json(req, res, 400, { ok: false, error: "invalid_action_or_args" });
         return;
       }
       const jobId = startJob(command);
-      json(res, 200, { ok: true, jobId, command });
+      json(req, res, 200, { ok: true, jobId, command });
     });
     return;
   }
@@ -143,14 +191,14 @@ const server = http.createServer(async (req, res) => {
     const id = url.pathname.replace("/status/", "");
     const job = jobs.get(id);
     if (!job) {
-      json(res, 404, { ok: false, error: "job_not_found" });
+      json(req, res, 404, { ok: false, error: "job_not_found" });
       return;
     }
-    json(res, 200, { ok: true, ...job });
+    json(req, res, 200, { ok: true, ...job });
     return;
   }
 
-  json(res, 404, { ok: false, error: "not_found" });
+  json(req, res, 404, { ok: false, error: "not_found" });
 });
 
 server.listen(PORT, "0.0.0.0");

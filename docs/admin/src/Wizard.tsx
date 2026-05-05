@@ -16,7 +16,7 @@ import {
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
-const STEP_LABELS = ["Welcome", "Production Host", "Staging Host", "Save"] as const;
+const STEP_LABELS = ["Welcome", "Production Host", "Staging Host", "Save", "Links"] as const;
 
 type WizardAlert = { tone: "info" | "success" | "error"; text: string };
 type ChecklistStatus = "done" | "warn" | "todo";
@@ -200,7 +200,7 @@ export function Wizard() {
   const terminalUrl = `${window.location.protocol}//127.0.0.1:7681/`;
 
   const goStep = useCallback((n: number) => {
-    const i = Math.max(0, Math.min(3, n));
+    const i = Math.max(0, Math.min(STEP_LABELS.length - 1, n));
     logAdmin("info", `Wizard: step → ${i + 1} ${STEP_LABELS[i]}`);
     setStep(i);
   }, []);
@@ -447,10 +447,10 @@ export function Wizard() {
     let copied = false;
     if (action) {
       setTerminalRun({ running: true, output: "Starting command...\n" });
-      const started = await runTerminalAction(terminalAuthValue, action, args);
+      const started = await runTerminalAction(terminalAuthValue, saveToken, action, args);
       if (started.ok) {
         for (let i = 0; i < 240; i += 1) {
-          const status = await getTerminalJobStatus(terminalAuthValue, started.jobId);
+          const status = await getTerminalJobStatus(terminalAuthValue, saveToken, started.jobId);
           if (!status.ok) {
             setTerminalRun({
               running: false,
@@ -544,6 +544,13 @@ export function Wizard() {
     setAlert(null);
     logAdmin("info", "Wizard: save clicked", `project=${data.project.trim()}`);
     try {
+      if (!saveToken.trim()) {
+        setAlert({
+          tone: "error",
+          text: "Save token is required. Set WPDEV_ADMIN_SAVE_TOKEN in docker/.env and paste the same value here.",
+        });
+        return;
+      }
       if (!data.production.host.trim() || !data.production.url.trim()) {
         logAdmin("warn", "Wizard: save blocked — missing production host or URL");
         setAlert({ tone: "error", text: "Production host and URL are required before saving." });
@@ -616,6 +623,7 @@ export function Wizard() {
           "Saved wp-dev.config.json. If you changed project or ports, run: wp-dev down && wp-dev up — then open your local WordPress URL." +
           extra,
       });
+      goStep(4);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logAdmin("error", "Wizard: save threw", msg);
@@ -713,6 +721,10 @@ export function Wizard() {
           data.staging.url.trim(),
       );
 
+  const localLink = data.local.url.trim();
+  const productionLink = data.production.url.trim();
+  const stagingLink = hasStagingServer ? data.staging.url.trim() : "";
+
   if (loading) {
     return (
       <p className="text-sm text-slate-600 dark:text-slate-400">
@@ -802,7 +814,8 @@ export function Wizard() {
           <span className={stagingReady ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
             3) Staging {stagingReady ? "OK" : "TODO"}
           </span>
-          <span className="text-slate-500 dark:text-slate-400">4) Save + Run checks</span>
+          <span className="text-slate-500 dark:text-slate-400">4) Save</span>
+          <span className="text-slate-500 dark:text-slate-400">5) Open links</span>
         </div>
       </div>
 
@@ -853,7 +866,7 @@ export function Wizard() {
           </p>
           <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
             <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
-              Terminal settings (recommended before SSH tests)
+              Terminal settings (required before one-click run)
             </summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="block">
@@ -876,6 +889,19 @@ export function Wizard() {
                   value={terminalWorkdir}
                   onChange={(e) => setTerminalWorkdir(e.target.value)}
                   placeholder="/workspace"
+                />
+              </label>
+              <label className="block md:col-span-2">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Runner token (same as WPDEV_ADMIN_SAVE_TOKEN) *
+                </span>
+                <input
+                  className={input}
+                  type="password"
+                  autoComplete="off"
+                  value={saveToken}
+                  onChange={(e) => setSaveToken(e.target.value)}
+                  placeholder="Required for secure command execution"
                 />
               </label>
             </div>
@@ -1562,7 +1588,7 @@ export function Wizard() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => void runTerminalCommand("npm run wp-dev -- pull production", "pull", "pull_production")}
+                onClick={() => void runTerminalCommand("npm run wp-dev -- pull production", "pull")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Run: pull production to localhost
@@ -1570,7 +1596,7 @@ export function Wizard() {
               <button
                 type="button"
                 disabled={!hasStagingServer}
-                onClick={() => void runTerminalCommand("npm run wp-dev -- pull staging", "pull", "pull_staging")}
+                onClick={() => void runTerminalCommand("npm run wp-dev -- pull staging", "pull")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Run: pull staging to localhost
@@ -1578,14 +1604,14 @@ export function Wizard() {
               <button
                 type="button"
                 disabled={!hasStagingServer}
-                onClick={() => void runTerminalCommand("npm run wp-dev -- push staging", "push", "push_staging")}
+                onClick={() => void runTerminalCommand("npm run wp-dev -- push staging", "push")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Run: push staging from localhost
               </button>
               <button
                 type="button"
-                onClick={() => void runTerminalCommand("npm run wp-dev -- push production", "push", "push_production")}
+                onClick={() => void runTerminalCommand("npm run wp-dev -- push production", "push")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
                 Run: push production from localhost
@@ -1593,19 +1619,18 @@ export function Wizard() {
             </div>
           </div>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            If you set <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code> in{" "}
-            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>, paste the same value
-            here so the browser can send it on save.
+            Save token is required. Set <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code> in{" "}
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>, then paste the same value here.
           </p>
           <label className="block">
-            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Optional save token</span>
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Save token *</span>
             <input
               className={input}
               type="password"
               autoComplete="off"
               value={saveToken}
               onChange={(e) => setSaveToken(e.target.value)}
-              placeholder="Leave empty if not configured"
+              placeholder="Required"
             />
           </label>
           <pre className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
@@ -1646,6 +1671,40 @@ export function Wizard() {
         </div>
       )}
 
+      {step === 4 && (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Open these links to verify your environment after save/sync.
+          </p>
+          <div className="grid gap-3">
+            <a
+              href={localLink || "#"}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+            >
+              Localhost: {localLink || "Not set"}
+            </a>
+            <a
+              href={stagingLink || "#"}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+            >
+              Staging: {stagingLink || "Not set"}
+            </a>
+            <a
+              href={productionLink || "#"}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+            >
+              Production: {productionLink || "Not set"}
+            </a>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-between border-t border-slate-100 pt-4 dark:border-slate-800">
         <button
           type="button"
@@ -1657,11 +1716,11 @@ export function Wizard() {
         </button>
         <button
           type="button"
-          disabled={step === 3}
+          disabled={step === STEP_LABELS.length - 1}
           onClick={() => goStep(step + 1)}
           className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
         >
-          {step === 3 ? "Finish" : "Next →"}
+          {step === STEP_LABELS.length - 1 ? "Finish" : "Next →"}
         </button>
       </div>
     </div>

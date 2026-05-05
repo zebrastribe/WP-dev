@@ -426,6 +426,15 @@ function basicAuthHeader(auth: string): string {
   return `Basic ${btoa(auth)}`;
 }
 
+function runnerSecurityHeaders(auth: string, token: string): Record<string, string> {
+  const trimmed = token.trim();
+  if (!trimmed) return {};
+  return {
+    Authorization: basicAuthHeader(auth),
+    "X-WP-DEV-Terminal-Token": trimmed,
+  };
+}
+
 export type TerminalAction =
   | "generate_keypair"
   | "ssh_test"
@@ -444,15 +453,20 @@ export type TerminalJobStatus =
 
 export async function runTerminalAction(
   auth: string,
+  token: string,
   action: TerminalAction,
   args?: Record<string, string>,
 ): Promise<TerminalRunResponse> {
+  const secureHeaders = runnerSecurityHeaders(auth, token);
+  if (!secureHeaders.Authorization || !secureHeaders["X-WP-DEV-Terminal-Token"]) {
+    return { ok: false, error: "missing_runner_token" };
+  }
   try {
     const res = await fetch(`${terminalRunnerBaseUrl()}/run`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: basicAuthHeader(auth),
+        ...secureHeaders,
       },
       body: JSON.stringify({ action, args: args ?? {} }),
     });
@@ -470,13 +484,19 @@ export async function runTerminalAction(
   }
 }
 
-export async function getTerminalJobStatus(auth: string, jobId: string): Promise<TerminalJobStatus> {
+export async function getTerminalJobStatus(
+  auth: string,
+  token: string,
+  jobId: string,
+): Promise<TerminalJobStatus> {
+  const secureHeaders = runnerSecurityHeaders(auth, token);
+  if (!secureHeaders.Authorization || !secureHeaders["X-WP-DEV-Terminal-Token"]) {
+    return { ok: false, error: "missing_runner_token" };
+  }
   try {
     const res = await fetch(`${terminalRunnerBaseUrl()}/status/${encodeURIComponent(jobId)}`, {
       method: "GET",
-      headers: {
-        Authorization: basicAuthHeader(auth),
-      },
+      headers: secureHeaders,
     });
     const data = (await res.json()) as Record<string, unknown>;
     if (!res.ok || data.ok !== true) {
