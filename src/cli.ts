@@ -244,10 +244,11 @@ async function main(): Promise<void> {
     .description("Import a SQL backup (overwrites DB on target)")
     .argument("<env>", "local | staging | production")
     .argument("<file>", "Path to .sql backup file")
-    .action(async (env: string, file: string) => {
+    .option("--yes", "Skip interactive production confirmation prompt")
+    .action(async (env: string, file: string, opts: { yes?: boolean }) => {
       const t = parseRestoreTarget(env);
       await runWithConfig(`restore ${t}`, (loaded) =>
-        cmdRestore(loaded, t, file),
+        cmdRestore(loaded, t, file, { yes: Boolean(opts.yes) }),
       );
     });
 

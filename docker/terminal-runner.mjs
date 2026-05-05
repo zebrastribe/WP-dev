@@ -67,7 +67,7 @@ function parseAuth(req) {
 }
 
 function safeArg(v) {
-  return typeof v === "string" && /^[a-zA-Z0-9._:@/-]+$/.test(v) ? v : "";
+  return typeof v === "string" && /^[a-zA-Z0-9._:@~/-]+$/.test(v) ? v : "";
 }
 
 function hasValidRunnerToken(req) {
@@ -88,6 +88,47 @@ function commandForAction(action, args) {
     const host = safeArg(args?.host);
     if (!user || !host) return null;
     return `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} "pwd && ls -la && wp --info"`;
+  }
+  if (action === "backup_create") {
+    const env = safeArg(args?.env);
+    if (!["local", "staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- backup ${env}`;
+  }
+  if (action === "backup_list") {
+    const env = safeArg(args?.env);
+    if (!["local", "staging", "production"].includes(env)) return null;
+    return `mkdir -p ~/.wp-dev/backups; ls -1t ~/.wp-dev/backups/*/${env}/*.sql 2>/dev/null | head -n 30 || true`;
+  }
+  if (action === "restore_env") {
+    const env = safeArg(args?.env);
+    const file = safeArg(args?.file);
+    const confirm = safeArg(args?.confirm);
+    if (!["local", "staging", "production"].includes(env) || !file) return null;
+    if (env === "production" && confirm !== "RESTORE_PRODUCTION") return null;
+    const yesFlag = env === "production" ? " --yes" : "";
+    return `test -f ${file} || { echo "Backup file not found: ${file}"; exit 1; }; npm run wp-dev -- restore ${env} ${file}${yesFlag}`;
+  }
+  if (action === "git_status") {
+    return "git status --short";
+  }
+  if (action === "git_log") {
+    return "git log -n 30 --pretty=format:'%h|%ad|%an|%s' --date=short";
+  }
+  if (action === "git_show") {
+    const commit = safeArg(args?.commit);
+    if (!commit) return null;
+    return `git show --stat --patch --no-color ${commit}`;
+  }
+  if (action === "git_rollback_branch") {
+    const commit = safeArg(args?.commit);
+    if (!commit) return null;
+    return `git checkout -b rollback/${Date.now()} ${commit} && git status --short`;
+  }
+  if (action === "git_reset_hard") {
+    const commit = safeArg(args?.commit);
+    const confirm = safeArg(args?.confirm);
+    if (!commit || confirm !== "HARD_RESET_CONFIRM") return null;
+    return `git reset --hard ${commit} && git status --short`;
   }
   return null;
 }

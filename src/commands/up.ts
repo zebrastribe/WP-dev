@@ -48,6 +48,38 @@ function setWpPortInEnvFile(path: string, port: number): void {
   writeFileSync(path, `${prefix}${line}\n`, "utf8");
 }
 
+function readEnvValue(content: string, key: string): string {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = content.match(new RegExp(`^${escaped}=(.*)$`, "m"));
+  if (!m) return "";
+  return (m[1] || "").trim();
+}
+
+function warnIfSecurityEnvPlaceholders(envPath: string): void {
+  const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+  const required = [
+    "WPDEV_ADMIN_SAVE_TOKEN",
+    "WPDEV_TERMINAL_AUTH",
+    "WPDEV_TERMINAL_RUNNER_TOKEN",
+    "WPDEV_TERMINAL_RUNNER_ORIGIN",
+  ] as const;
+  const missingOrPlaceholder = required.filter((k) => {
+    const v = readEnvValue(current, k);
+    if (!v) return true;
+    return (
+      v.includes("change-me") ||
+      v === "wpdev:wpdev" ||
+      (k === "WPDEV_TERMINAL_RUNNER_ORIGIN" && v.includes("localhost:8888"))
+    );
+  });
+  if (missingOrPlaceholder.length === 0) return;
+  console.error(
+    "Security setup required in docker/.env before using admin terminal/save features:\n" +
+      missingOrPlaceholder.map((k) => `  - ${k}`).join("\n") +
+      "\nSet strong values, then run: npm run wp-dev -- down && npm run wp-dev -- up\n",
+  );
+}
+
 async function isPortFree(port: number): Promise<boolean> {
   return await new Promise<boolean>((resolve) => {
     const server = net.createServer();
@@ -139,6 +171,8 @@ async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
 
 export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
+  const envPath = ensureComposeEnvExists(loaded);
+  warnIfSecurityEnvPlaceholders(envPath);
   try {
     logInfo("docker compose up -d");
     await compose(loaded.configDir, loaded.config, ["up", "-d"], { stdio: "pipe" });
@@ -148,7 +182,6 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
     if (!conflictPort) throw e;
 
     const nextPort = await findFreePort(conflictPort + 1);
-    const envPath = ensureComposeEnvExists(loaded);
     setWpPortInEnvFile(envPath, nextPort);
     maybeUpdateLocalUrlPort(loaded, conflictPort, nextPort);
 
