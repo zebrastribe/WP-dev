@@ -54,6 +54,7 @@ function setPortInEnvFile(
   path: string,
   key:
     | "WP_PORT"
+    | "WP_HTTPS_PORT"
     | "WPDEV_TERMINAL_PORT"
     | "WPDEV_TERMINAL_RUNNER_PORT"
     | "WPDEV_HOST_RUNNER_PORT",
@@ -247,6 +248,7 @@ async function ensureNonConflictingPublishedPorts(
 ): Promise<void> {
   const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const currentWpPort = Number.parseInt(readEnvValue(envContent, "WP_PORT") || "8888", 10);
+  const currentHttpsPort = Number.parseInt(readEnvValue(envContent, "WP_HTTPS_PORT") || "8443", 10);
   const currentTerminalPort = Number.parseInt(
     readEnvValue(envContent, "WPDEV_TERMINAL_PORT") || "7681",
     10,
@@ -261,6 +263,7 @@ async function ensureNonConflictingPublishedPorts(
   );
   const current = {
     WP_PORT: Number.isFinite(currentWpPort) && currentWpPort > 0 ? currentWpPort : 8888,
+    WP_HTTPS_PORT: Number.isFinite(currentHttpsPort) && currentHttpsPort > 0 ? currentHttpsPort : 8443,
     WPDEV_TERMINAL_PORT:
       Number.isFinite(currentTerminalPort) && currentTerminalPort > 0 ? currentTerminalPort : 7681,
     WPDEV_TERMINAL_RUNNER_PORT:
@@ -291,6 +294,11 @@ async function ensureNonConflictingPublishedPorts(
     maybeUpdateRunnerOriginPort(envPath, current.WP_PORT, nextWpPort);
     changed = true;
   }
+  const nextHttpsPort = await allocate("WP_HTTPS_PORT", current.WP_HTTPS_PORT);
+  if (nextHttpsPort !== current.WP_HTTPS_PORT) {
+    setPortInEnvFile(envPath, "WP_HTTPS_PORT", nextHttpsPort);
+    changed = true;
+  }
 
   const nextTerminalPort = await allocate("WPDEV_TERMINAL_PORT", current.WPDEV_TERMINAL_PORT);
   if (nextTerminalPort !== current.WPDEV_TERMINAL_PORT) {
@@ -319,13 +327,14 @@ async function ensureNonConflictingPublishedPorts(
     logInfo(
       `Auto-adjusted published ports in ${envPath}: ` +
         `WP_PORT=${nextWpPort}, ` +
+        `WP_HTTPS_PORT=${nextHttpsPort}, ` +
         `WPDEV_TERMINAL_PORT=${nextTerminalPort}, ` +
         `WPDEV_TERMINAL_RUNNER_PORT=${nextRunnerPort}, ` +
         `WPDEV_HOST_RUNNER_PORT=${nextHostRunnerPort}`,
     );
     console.error(
       `Auto-adjusted published ports to avoid conflicts: ` +
-        `WP_PORT=${nextWpPort}, terminal=${nextTerminalPort}, runner=${nextRunnerPort}, host-runner=${nextHostRunnerPort}`,
+        `WP_PORT=${nextWpPort}, https=${nextHttpsPort}, terminal=${nextTerminalPort}, runner=${nextRunnerPort}, host-runner=${nextHostRunnerPort}`,
     );
   }
 }
@@ -383,12 +392,19 @@ async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
 export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
   const envPath = ensureComposeEnvExists(loaded);
+  const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+  const sslEnabled = /^(1|true|yes)$/i.test(readEnvValue(envContent, "WPDEV_LOCAL_HTTPS"));
   await ensureNonConflictingPublishedPorts(loaded, envPath);
   ensureSecurityEnvDefaults(envPath);
   warnIfSecurityEnvPlaceholders(envPath);
   try {
-    logInfo("docker compose up -d");
-    await compose(loaded.configDir, loaded.config, ["up", "-d"], { stdio: "pipe" });
+    logInfo(`docker compose ${sslEnabled ? "--profile ssl " : ""}up -d`);
+    await compose(
+      loaded.configDir,
+      loaded.config,
+      sslEnabled ? ["--profile", "ssl", "up", "-d"] : ["up", "-d"],
+      { stdio: "pipe" },
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const conflictPort = extractBoundPort(msg);
@@ -396,6 +412,7 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
 
     const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
     const wpPort = Number.parseInt(readEnvValue(envContent, "WP_PORT") || "8888", 10);
+    const httpsPort = Number.parseInt(readEnvValue(envContent, "WP_HTTPS_PORT") || "8443", 10);
     const terminalPort = Number.parseInt(readEnvValue(envContent, "WPDEV_TERMINAL_PORT") || "7681", 10);
     const runnerPort = Number.parseInt(
       readEnvValue(envContent, "WPDEV_TERMINAL_RUNNER_PORT") || "7682",
@@ -404,6 +421,8 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
     const key =
       conflictPort === wpPort
         ? "WP_PORT"
+        : conflictPort === httpsPort
+          ? "WP_HTTPS_PORT"
         : conflictPort === terminalPort
           ? "WPDEV_TERMINAL_PORT"
           : conflictPort === runnerPort
@@ -421,7 +440,12 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
     console.error(`Port ${conflictPort} is in use. Switched ${key} to ${nextPort} and retrying...`);
 
     await ensureNonConflictingPublishedPorts(loaded, envPath);
-    await compose(loaded.configDir, loaded.config, ["up", "-d"], { stdio: "pipe" });
+    await compose(
+      loaded.configDir,
+      loaded.config,
+      sslEnabled ? ["--profile", "ssl", "up", "-d"] : ["up", "-d"],
+      { stdio: "pipe" },
+    );
   }
 
   await ensureAdminSaveWriteAccess(loaded);

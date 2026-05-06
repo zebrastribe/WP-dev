@@ -236,6 +236,16 @@ V1 is complete when:
 
 ---
 
+# 🗺️ POST-V1 ROADMAP (IDEAS)
+
+Items that can be considered after V1 stability:
+
+* Localhost SSL support (trusted local HTTPS certificate flow)
+* Local PHP runtime selector (support PHP 7.x through latest supported)
+* Source map maintenance pass (review build outputs and update source map generation/versioning as needed)
+
+---
+
 # 🧠 DESIGN PHILOSOPHY
 
 This tool should behave like:

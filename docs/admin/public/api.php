@@ -2,7 +2,7 @@
 /**
  * wp-dev admin: load/save wp-dev.config.json from the browser (same origin as /admin/).
  * Config and logs are bind-mounted at /wp-dev-repo/ (see docker-compose.yml).
- * Optional: set WPDEV_ADMIN_SAVE_TOKEN in docker/.env — then send header X-WP-DEV-Admin-Token on POST.
+ * Optional: set WPDEV_ADMIN_SAVE_TOKEN in docker/.env — then send header X-WP-DEV-Admin-Token on POST and on GET actions that return secrets (staging-db-secrets, terminal-runner-secrets).
  * POST action=save-docker-env: JSON {"WPDEV_SIMPLY_API_KEY":"…"} → upserts into host docker/.env (requires ../docker mount).
  * Validation uses wp-dev.config.schema.json (generated from Zod via `npm run generate:schema`).
  * Appends one line per request to /wp-dev-repo/logs/wp-dev-admin-api.log (no request body logged).
@@ -153,6 +153,20 @@ function wpdev_require_mutation_token(string $token, string $action): void
     if (!is_string($provided) || !hash_equals($token, $provided)) {
         wpdev_json_error(403, 'forbidden', 'Missing or invalid admin token.');
         wpdev_admin_api_log("POST {$action} 403 forbidden");
+        exit;
+    }
+}
+
+/** When WPDEV_ADMIN_SAVE_TOKEN is set, require the same header for sensitive GETs (secrets). */
+function wpdev_require_admin_token_if_configured(string $token, string $action): void
+{
+    if ($token === '') {
+        return;
+    }
+    $provided = $_SERVER['HTTP_X_WP_DEV_ADMIN_TOKEN'] ?? '';
+    if (!is_string($provided) || !hash_equals($token, $provided)) {
+        wpdev_json_error(403, 'forbidden', 'Missing or invalid admin token.');
+        wpdev_admin_api_log("GET {$action} 403 forbidden");
         exit;
     }
 }
@@ -334,7 +348,24 @@ if ($method === 'GET' && $action === 'simply-status') {
     exit;
 }
 
+if ($method === 'GET' && $action === 'docker-env-public') {
+    $phpVersion = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_PHP_VERSION');
+    if (!is_string($phpVersion) || preg_match('/^(7\.4|8\.[0-4])$/', $phpVersion) !== 1) {
+        $phpVersion = '8.2';
+    }
+    wpdev_admin_api_log('GET docker-env-public 200');
+    echo json_encode(
+        [
+            'ok' => true,
+            'phpVersion' => $phpVersion,
+        ],
+        JSON_UNESCAPED_SLASHES
+    );
+    exit;
+}
+
 if ($method === 'GET' && $action === 'staging-db-secrets') {
+    wpdev_require_admin_token_if_configured($token, 'staging-db-secrets');
     $out = [
         'ok' => true,
         'host' => wpdev_dotenv_value($dockerEnvPath, 'WPDEV_STAGING_DB_HOST'),
@@ -349,6 +380,7 @@ if ($method === 'GET' && $action === 'staging-db-secrets') {
 }
 
 if ($method === 'GET' && $action === 'terminal-runner-secrets') {
+    wpdev_require_admin_token_if_configured($token, 'terminal-runner-secrets');
     $auth = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_AUTH');
     $runnerToken = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_TOKEN');
     $runnerOrigin = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_ORIGIN');
@@ -591,6 +623,7 @@ if ($method === 'POST' && $action === 'save-docker-env') {
     }
     $allowed = [
         'WPDEV_SIMPLY_API_KEY',
+        'WPDEV_PHP_VERSION',
         'WPDEV_STAGING_DB_HOST',
         'WPDEV_STAGING_DB_NAME',
         'WPDEV_STAGING_DB_USER',
@@ -605,6 +638,17 @@ if ($method === 'POST' && $action === 'save-docker-env') {
         $val = $data[$key];
         if (!is_string($val) || $val === '') {
             continue;
+        }
+        if ($key === 'WPDEV_PHP_VERSION') {
+            if (preg_match('/^(7\.4|8\.[0-4])$/', $val) !== 1) {
+                http_response_code(400);
+                echo json_encode(
+                    ['ok' => false, 'error' => 'invalid_php_version', 'detail' => 'Allowed: 7.4, 8.0, 8.1, 8.2, 8.3, 8.4'],
+                    JSON_UNESCAPED_SLASHES
+                );
+                wpdev_admin_api_log('POST save-docker-env 400 invalid_php_version');
+                exit;
+            }
         }
         $updates[$key] = $val;
     }
