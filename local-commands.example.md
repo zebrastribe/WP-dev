@@ -47,6 +47,6 @@ git push
 git status &&
 git diff &&
 git add <file1> <file2> &&
-git commit -m "your message" &&
+git commit -m "your message mm" &&
 git push
 ```

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { getTerminalJobStatus, loadTerminalRunnerSecrets, runTerminalAction } from "./api";
+import {
+  getTerminalJobStatus,
+  loadTerminalRunnerSecrets,
+  readStoredAdminSaveToken,
+  runTerminalAction,
+  writeStoredAdminSaveToken,
+} from "./api";
 
 type EnvName = "local" | "staging" | "production";
 type BackupKind = "db" | "full";
@@ -15,6 +21,7 @@ export function BackupRestore() {
   const [output, setOutput] = useState("");
   const [runnerReady, setRunnerReady] = useState(false);
   const [runnerMessage, setRunnerMessage] = useState<string>("");
+  const [adminSaveToken, setAdminSaveToken] = useState(readStoredAdminSaveToken);
 
   const canRun = useMemo(
     () => Boolean(terminalAuth.trim() && runnerToken.trim()),
@@ -24,16 +31,22 @@ export function BackupRestore() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const res = await loadTerminalRunnerSecrets();
+      const res = await loadTerminalRunnerSecrets(adminSaveToken.trim() || undefined);
       if (cancelled) return;
       if (!res.ok) {
+        const forbiddenHint =
+          res.error === "forbidden"
+            ? " Enter WPDEV_ADMIN_SAVE_TOKEN below (stored in this browser for Terminal / Backup tabs)."
+            : "";
         const startupHint =
           res.error === "not_found"
             ? "This admin API is outdated. Run: npm run admin:build:wp && npm run wp-dev -- down && npm run wp-dev -- up (in the same clone)."
-            : "Run: npm run wp-dev -- up";
+            : res.error === "forbidden"
+              ? ""
+              : "Run: npm run wp-dev -- up";
         setRunnerReady(false);
         setRunnerMessage(
-          `Runner credentials are not initialized yet (${res.error}${res.detail ? `: ${res.detail}` : ""}). ${startupHint}`,
+          `Runner credentials are not initialized yet (${res.error}${res.detail ? `: ${res.detail}` : ""}).${forbiddenHint} ${startupHint}`.trim(),
         );
         return;
       }
@@ -45,7 +58,7 @@ export function BackupRestore() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [adminSaveToken]);
 
   const runAction = async (action: "backup_create" | "backup_list" | "restore_env", args: Record<string, string>) => {
     if (!canRun) {
@@ -118,6 +131,24 @@ export function BackupRestore() {
         }`}
       >
         {runnerMessage || "Loading runner security settings..."}
+      </div>
+
+      <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/40">
+        <label className="block font-medium text-slate-700 dark:text-slate-300">
+          Admin save token (only if WPDEV_ADMIN_SAVE_TOKEN is set in docker/.env)
+        </label>
+        <input
+          type="password"
+          autoComplete="off"
+          value={adminSaveToken}
+          onChange={(e) => {
+            const v = e.target.value;
+            setAdminSaveToken(v);
+            writeStoredAdminSaveToken(v);
+          }}
+          className="mt-1 w-full max-w-md rounded border border-slate-300 bg-white px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
+          placeholder="Paste token to load runner secrets from the API"
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

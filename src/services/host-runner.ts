@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
@@ -11,10 +11,6 @@ function readEnvValue(content: string, key: string): string {
 
 function pidFilePath(configDir: string): string {
   return join(configDir, "logs", "wp-dev-host-runner.pid");
-}
-
-function logFilePath(configDir: string): string {
-  return join(configDir, "logs", "wp-dev-host-runner.log");
 }
 
 function parsePid(raw: string): number | null {
@@ -62,11 +58,10 @@ export function startHostRunner(configDir: string, envPath: string): void {
     if (existingPid && isPidAlive(existingPid)) return;
   }
 
-  const log = createWriteStream(logFilePath(configDir), { flags: "a" });
   const child = spawn(process.execPath, [join(configDir, "docker", "host-runner.mjs")], {
     cwd: configDir,
     detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: "ignore",
     env: {
       ...process.env,
       WPDEV_HOST_RUNNER_PORT: port,
@@ -76,8 +71,6 @@ export function startHostRunner(configDir: string, envPath: string): void {
       WPDEV_TERMINAL_WORKDIR: configDir,
     },
   });
-  child.stdout.pipe(log);
-  child.stderr.pipe(log);
   child.unref();
   writeFileSync(pidPath, `${child.pid}\n`, "utf8");
 }
