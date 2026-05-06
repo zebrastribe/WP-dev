@@ -32,28 +32,48 @@ export async function rsyncPull(
   localDir: string,
   options: RsyncOptions,
 ): Promise<void> {
-  const excludes = [...DEFAULT_EXCLUDES, ...(options.excludes ?? [])];
-  const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
-  const remoteUrl = `${remote.user}@${remote.host}:${remote.path.replace(/\/$/, "")}/`;
-  const args = [
-    "-avz",
-    ...excludeArgs,
-    "--no-owner",
-    "--no-group",
-    "-e",
-    buildSshRsyncEnv(remote),
-    ...(options.dryRun ? ["--dry-run"] : []),
-    remoteUrl,
-    localDir.replace(/\/$/, "") + "/",
-  ];
-  const r = await execa("rsync", args, {
-    reject: false,
-    stdout: "inherit",
-    stderr: "pipe",
-  });
-  if (r.stderr) process.stderr.write(r.stderr);
-  if (r.exitCode !== 0) {
-    const err = r.stderr ?? "";
+  const runPull = async (targetPath: string) => {
+    const excludes = [...DEFAULT_EXCLUDES, ...(options.excludes ?? [])];
+    const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
+    const remoteUrl = `${remote.user}@${remote.host}:${targetPath.replace(/\/$/, "")}/`;
+    const args = [
+      "-avz",
+      ...excludeArgs,
+      "--no-owner",
+      "--no-group",
+      "-e",
+      buildSshRsyncEnv(remote),
+      ...(options.dryRun ? ["--dry-run"] : []),
+      remoteUrl,
+      localDir.replace(/\/$/, "") + "/",
+    ];
+    return execa("rsync", args, {
+      reject: false,
+      stdout: "inherit",
+      stderr: "pipe",
+    });
+  };
+
+  const first = await runPull(remote.path);
+  if (first.stderr) process.stderr.write(first.stderr);
+  if (first.exitCode === 0) return;
+
+  const firstErr = first.stderr ?? "";
+  const canRetryRelative =
+    remote.path.startsWith("/") &&
+    /No such file or directory|change_dir .* failed/i.test(firstErr);
+  if (canRetryRelative) {
+    const relPath = remote.path.replace(/^\/+/, "");
+    const retry = await runPull(relPath);
+    if (retry.stderr) process.stderr.write(retry.stderr);
+    if (retry.exitCode === 0) {
+      process.stderr.write(
+        `\n[wp-dev] pull retry succeeded using relative remote path "${relPath}" instead of "${remote.path}".\n` +
+          `Update your config path to "${relPath}" for shared hosting compatibility.\n`,
+      );
+      return;
+    }
+    const err = retry.stderr ?? "";
     let hint = "";
     if (/Permission denied|mkstemp|Operation not permitted/i.test(err)) {
       hint =
@@ -63,7 +83,21 @@ export async function rsyncPull(
       hint +=
         "\n\n(If you also see rsync inflate errors, they are often a follow-on after partial writes; retry after fix-permissions.)";
     }
-    throw new Error(`rsync pull failed with exit code ${r.exitCode}${hint}`);
+    throw new Error(`rsync pull failed with exit code ${retry.exitCode}${hint}`);
+  }
+
+  {
+    const err = firstErr;
+    let hint = "";
+    if (/Permission denied|mkstemp|Operation not permitted/i.test(err)) {
+      hint =
+        "\n\nLikely fix: Docker created files under wordpress/ as www-data, so host rsync cannot write. From the repo root run:\n  npm run wp-dev -- fix-permissions\nThen retry this pull.";
+    }
+    if (/inflate returned/i.test(err)) {
+      hint +=
+        "\n\n(If you also see rsync inflate errors, they are often a follow-on after partial writes; retry after fix-permissions.)";
+    }
+    throw new Error(`rsync pull failed with exit code ${first.exitCode}${hint}`);
   }
 }
 

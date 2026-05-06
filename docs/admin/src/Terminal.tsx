@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { getTerminalJobStatus, loadTerminalRunnerSecrets, runTerminalAction } from "./api";
+import {
+  getTerminalJobStatus,
+  loadTerminalRunnerSecrets,
+  readStoredAdminSaveToken,
+  runTerminalAction,
+  writeStoredAdminSaveToken,
+} from "./api";
 
 type EnvName = "local" | "staging" | "production";
 
@@ -10,9 +16,10 @@ export function TerminalTab() {
   const [runnerReady, setRunnerReady] = useState(false);
   const [runnerMessage, setRunnerMessage] = useState("");
   const [env, setEnv] = useState<EnvName>("staging");
-  const [showTerminal, setShowTerminal] = useState(true);
+  const [showTerminal, setShowTerminal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
+  const [adminSaveToken, setAdminSaveToken] = useState(readStoredAdminSaveToken);
 
   const canRun = useMemo(
     () => Boolean(runnerReady && terminalAuth.trim() && runnerToken.trim()),
@@ -22,16 +29,22 @@ export function TerminalTab() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const res = await loadTerminalRunnerSecrets();
+      const res = await loadTerminalRunnerSecrets(adminSaveToken.trim() || undefined);
       if (cancelled) return;
       if (!res.ok) {
+        const forbiddenHint =
+          res.error === "forbidden"
+            ? " Enter the same value as WPDEV_ADMIN_SAVE_TOKEN (docker/.env) below and it will be stored in this browser for these tabs."
+            : "";
         const startupHint =
           res.error === "not_found"
             ? "This admin API is outdated. Run: npm run admin:build:wp && npm run wp-dev -- down && npm run wp-dev -- up (in the same clone)."
-            : "Run: npm run wp-dev -- up";
+            : res.error === "forbidden"
+              ? ""
+              : "Run: npm run wp-dev -- up";
         setRunnerReady(false);
         setRunnerMessage(
-          `Runner credentials are not initialized yet (${res.error}${res.detail ? `: ${res.detail}` : ""}). ${startupHint}`,
+          `Runner credentials are not initialized yet (${res.error}${res.detail ? `: ${res.detail}` : ""}).${forbiddenHint} ${startupHint}`.trim(),
         );
         return;
       }
@@ -44,7 +57,7 @@ export function TerminalTab() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [adminSaveToken]);
 
   const terminalUrl = useMemo(() => {
     const base = new URL(`${window.location.protocol}//127.0.0.1:${terminalPort}/`);
@@ -107,7 +120,7 @@ export function TerminalTab() {
     <div className="space-y-4">
       <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Terminal</h2>
       <p className="text-sm text-slate-600 dark:text-slate-400">
-        Use browser terminal for SSH and checks, and run push/pull directly from the buttons below.
+        Use the action buttons below; command output always appears in the lower output window.
       </p>
 
       <div
@@ -120,12 +133,30 @@ export function TerminalTab() {
         {runnerMessage || "Loading terminal settings..."}
       </div>
 
+      <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/40">
+        <label className="block font-medium text-slate-700 dark:text-slate-300">
+          Admin save token (only if WPDEV_ADMIN_SAVE_TOKEN is set in docker/.env)
+        </label>
+        <input
+          type="password"
+          autoComplete="off"
+          value={adminSaveToken}
+          onChange={(e) => {
+            const v = e.target.value;
+            setAdminSaveToken(v);
+            writeStoredAdminSaveToken(v);
+          }}
+          className="mt-1 w-full max-w-md rounded border border-slate-300 bg-white px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
+          placeholder="Paste token to load runner secrets from the API"
+        />
+      </div>
+
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Browser terminal</h3>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Interactive shell (optional)</h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Type directly here. If this panel is blank, click "Open in new tab" and use the same quick-run buttons below.
+              Hidden by default. Open only when you need manual commands; quick actions run below either way.
             </p>
           </div>
           <div className="flex gap-2">

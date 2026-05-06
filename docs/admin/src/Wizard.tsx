@@ -202,6 +202,7 @@ export function Wizard() {
   const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
   const [showTerminal, setShowTerminal] = useState(true);
   const [terminalPort, setTerminalPort] = useState(7681);
+  const [runnerToken, setRunnerToken] = useState("");
   const terminalUrl = (() => {
     const base = new URL(`${window.location.protocol}//127.0.0.1:${terminalPort}/`);
     return base.toString();
@@ -292,22 +293,6 @@ export function Wizard() {
           } else {
             setAlert(null);
           }
-          const secrets = await loadStagingDbSecrets();
-          if (secrets.ok) {
-            setData((d) => ({
-              ...d,
-              staging: {
-                ...d.staging,
-                db: {
-                  host: secrets.host,
-                  name: secrets.name,
-                  user: secrets.user,
-                  password: secrets.password,
-                  prefix: secrets.prefix,
-                },
-              },
-            }));
-          }
         } else {
           const raw = localStorage.getItem(DRAFT_KEY);
           if (raw) {
@@ -348,6 +333,38 @@ export function Wizard() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const secrets = await loadStagingDbSecrets(saveToken.trim() || undefined);
+      if (cancelled || !secrets.ok) return;
+      if (
+        !secrets.host.trim() &&
+        !secrets.name.trim() &&
+        !secrets.user.trim() &&
+        !secrets.password
+      ) {
+        return;
+      }
+      setData((d) => ({
+        ...d,
+        staging: {
+          ...d.staging,
+          db: {
+            host: secrets.host,
+            name: secrets.name,
+            user: secrets.user,
+            password: secrets.password,
+            prefix: secrets.prefix,
+          },
+        },
+      }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [saveToken]);
+
+  useEffect(() => {
     const t = window.setTimeout(() => {
       try {
         localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
@@ -374,14 +391,18 @@ export function Wizard() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const s = await loadTerminalRunnerSecrets();
-      if (cancelled || !s.ok) return;
+      const s = await loadTerminalRunnerSecrets(saveToken.trim() || undefined);
+      if (cancelled || !s.ok) {
+        if (!cancelled && !s.ok) setRunnerToken("");
+        return;
+      }
       setTerminalPort(s.terminalPort);
+      setRunnerToken(s.runnerToken);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [saveToken]);
 
   const patch = useCallback(<K extends keyof WizardData>(key: K, val: WizardData[K]) => {
     setData((d) => ({ ...d, [key]: val }));
@@ -488,10 +509,10 @@ export function Wizard() {
     let copied = false;
     if (action) {
       setTerminalRun({ running: true, output: "Starting command...\n" });
-      const started = await runTerminalAction(terminalAuthValue, saveToken, action, args);
+      const started = await runTerminalAction(terminalAuth.trim(), runnerToken.trim(), action, args);
       if (started.ok) {
         for (let i = 0; i < 240; i += 1) {
-          const status = await getTerminalJobStatus(terminalAuthValue, saveToken, started.jobId);
+          const status = await getTerminalJobStatus(terminalAuth.trim(), runnerToken.trim(), started.jobId);
           if (!status.ok) {
             setTerminalRun({
               running: false,

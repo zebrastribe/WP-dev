@@ -27,6 +27,30 @@ export type PushOptions = {
   dryRun: boolean;
 };
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+async function sanitizeRemoteGeneratedAssetUrls(
+  sshExec: (command: string) => Promise<{ code: number | null; stderr: string; stdout: string }>,
+  wpPath: string,
+  fromUrl: string,
+  toUrl: string,
+): Promise<void> {
+  const cmd = [
+    `ROOT_PATH=${shellQuote(wpPath)}`,
+    `FROM_URL=${shellQuote(fromUrl)}`,
+    `TO_URL=${shellQuote(toUrl)}`,
+    "changed=0",
+    "for d in \"$ROOT_PATH/wp-content/uploads/elementor/css\" \"$ROOT_PATH/wp-content/cache\"; do [ -d \"$d\" ] || continue; while IFS= read -r -d '' f; do if grep -q \"$FROM_URL\" \"$f\"; then sed -i \"s|$FROM_URL|$TO_URL|g\" \"$f\" && changed=$((changed+1)); fi; done < <(find \"$d\" -type f \\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.txt' -o -name '*.html' -o -name '*.xml' -o -name '*.map' \\) -print0); done",
+    "echo \"asset-url-sanitize changed_files=$changed\"",
+  ].join("; ");
+  const r = await sshExec(cmd);
+  if (r.code !== 0) {
+    throw new Error(`Remote asset URL sanitize failed: ${r.stderr || r.stdout}`);
+  }
+}
+
 export async function cmdPush(
   loaded: LoadedConfig,
   env: RemoteEnvName,
@@ -146,6 +170,13 @@ export async function cmdPush(
       for (const fromUrl of localCandidates) {
         logInfo(`push ${env}: search-replace ${fromUrl} -> ${remote.url}`);
         await wpRemoteSearchReplace(ssh, wpPath, fromUrl, remote.url);
+        logInfo(`push ${env}: sanitize generated asset files ${fromUrl} -> ${remote.url}`);
+        await sanitizeRemoteGeneratedAssetUrls(
+          (command) => ssh.exec(command),
+          wpPath,
+          fromUrl,
+          remote.url,
+        );
       }
       if (env === "staging" && config.production.url !== remote.url) {
         const productionCandidates = getUrlVariants(config.production.url).filter(
@@ -154,10 +185,20 @@ export async function cmdPush(
         for (const fromUrl of productionCandidates) {
           logInfo(`push ${env}: search-replace ${fromUrl} -> ${remote.url}`);
           await wpRemoteSearchReplace(ssh, wpPath, fromUrl, remote.url);
+          logInfo(`push ${env}: sanitize generated asset files ${fromUrl} -> ${remote.url}`);
+          await sanitizeRemoteGeneratedAssetUrls(
+            (command) => ssh.exec(command),
+            wpPath,
+            fromUrl,
+            remote.url,
+          );
         }
       }
       logInfo(`push ${env}: force option home/siteurl -> ${remote.url}`);
       await wpRemoteForceSiteUrls(ssh, wpPath, remote.url);
+      await ssh.exec(
+        `cd ${shellQuote(wpPath)} && wp cache flush --allow-root || true && wp elementor flush_css --allow-root || true`,
+      );
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
