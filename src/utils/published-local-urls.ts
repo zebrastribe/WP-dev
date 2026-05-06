@@ -17,6 +17,16 @@ export function readWpPortFromDockerEnvFile(envFilePath: string): number | undef
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/** Reads `WP_HTTPS_PORT` from `docker/.env` when present. */
+export function readWpHttpsPortFromDockerEnvFile(envFilePath: string): number | undefined {
+  if (!existsSync(envFilePath)) return undefined;
+  const text = readFileSync(envFilePath, "utf8");
+  const m = text.match(/^\s*WP_HTTPS_PORT\s*=\s*"?(\d+)"?\s*$/m);
+  if (!m) return undefined;
+  const n = Number.parseInt(m[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 export type PublishedLocalAccess = {
   site: string;
   admin: string;
@@ -55,6 +65,7 @@ export function getPublishedLocalAccess(loaded: LoadedConfig): PublishedLocalAcc
   const warnings: string[] = [];
   const envPath = dockerComposeEnvPath(loaded);
   const wpPort = readWpPortFromDockerEnvFile(envPath);
+  const wpHttpsPort = readWpHttpsPortFromDockerEnvFile(envPath);
   let site = loaded.config.local.url;
 
   try {
@@ -68,13 +79,16 @@ export function getPublishedLocalAccess(loaded: LoadedConfig): PublishedLocalAcc
         ? 443
         : 80;
 
-    if (isLoopback && wpPort != null && urlPort !== wpPort) {
+    const isHttps = u.protocol === "https:";
+    const expectedPort = isHttps ? wpHttpsPort : wpPort;
+    const expectedLabel = isHttps ? "WP_HTTPS_PORT" : "WP_PORT";
+    if (isLoopback && expectedPort != null && urlPort !== expectedPort) {
       warnings.push(
-        `local.url uses port ${urlPort} but docker/.env has WP_PORT=${wpPort}. Browser URLs below use WP_PORT (what Docker publishes). Update local.url (wizard or file) to match.`,
+        `local.url uses port ${urlPort} but docker/.env has ${expectedLabel}=${expectedPort}. Browser URLs below use ${expectedLabel} (what Docker publishes). Update local.url (wizard or file) to match.`,
       );
-      u.protocol = "http:";
+      u.protocol = isHttps ? "https:" : "http:";
       u.hostname = "localhost";
-      u.port = String(wpPort);
+      u.port = String(expectedPort);
       site = u.toString().replace(/\/$/, "");
     }
   } catch {
@@ -89,8 +103,7 @@ export function getPublishedLocalAccess(loaded: LoadedConfig): PublishedLocalAcc
     const baseForUrl = site.endsWith("/") ? site : `${site}/`;
     admin = new URL("admin/", baseForUrl).toString();
   } catch {
-    admin =
-      wpPort != null ? `http://localhost:${wpPort}/admin/` : `${site.replace(/\/?$/, "")}/admin/`;
+    admin = `${site.replace(/\/?$/, "")}/admin/`;
   }
 
   return { site, admin, warnings };

@@ -1,12 +1,40 @@
 import { logAdmin } from "./adminLog";
 import { validateWpDevConfigJson } from "./validateConfig";
 
+/** Optional browser persistence for `X-WP-DEV-Admin-Token` when loading secrets outside the wizard. */
+export const WPDEV_ADMIN_TOKEN_LS_KEY = "wpdev-admin-save-token";
+
+export function readStoredAdminSaveToken(): string {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage.getItem(WPDEV_ADMIN_TOKEN_LS_KEY) ?? "" : "";
+  } catch {
+    return "";
+  }
+}
+
+export function writeStoredAdminSaveToken(value: string): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const t = value.trim();
+    if (t) localStorage.setItem(WPDEV_ADMIN_TOKEN_LS_KEY, t);
+    else localStorage.removeItem(WPDEV_ADMIN_TOKEN_LS_KEY);
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function adminSaveTokenHeaders(adminSaveToken?: string): HeadersInit {
+  const t = adminSaveToken?.trim();
+  return t ? { "X-WP-DEV-Admin-Token": t } : {};
+}
+
 /** Same-origin /admin/api.php (Docker) or dev proxy to WP port. */
 export function apiPhpUrl(
   action:
     | "load"
     | "save"
     | "save-docker-env"
+    | "docker-env-public"
     | "simply-status"
     | "terminal-runner-secrets"
     | "staging-db-secrets"
@@ -22,6 +50,10 @@ export function apiPhpUrl(
 export type SaveResponse = { ok: true } | { ok: false; error: string };
 export type SimplyStatusResponse =
   | { ok: true; simplyAccount: string | null; apiKeyPresent: boolean }
+  | { ok: false; error: string };
+
+export type DockerEnvPublicResponse =
+  | { ok: true; phpVersion: string }
   | { ok: false; error: string };
 
 export type TerminalRunnerSecretsResponse =
@@ -198,11 +230,34 @@ export async function loadSimplyStatus(): Promise<SimplyStatusResponse> {
   }
 }
 
-export async function loadTerminalRunnerSecrets(): Promise<TerminalRunnerSecretsResponse> {
+export async function loadDockerEnvPublic(): Promise<DockerEnvPublicResponse> {
+  try {
+    const res = await fetch(apiPhpUrl("docker-env-public"), {
+      method: "GET",
+      credentials: "same-origin",
+    });
+    const data = (await res.json()) as unknown;
+    if (!data || typeof data !== "object") {
+      return { ok: false, error: "invalid_response" };
+    }
+    const o = data as Record<string, unknown>;
+    if (res.ok && o.ok === true) {
+      return { ok: true, phpVersion: String(o.phpVersion ?? "8.2") };
+    }
+    return { ok: false, error: String(o.error ?? `HTTP ${res.status}`) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export async function loadTerminalRunnerSecrets(
+  adminSaveToken?: string,
+): Promise<TerminalRunnerSecretsResponse> {
   try {
     const res = await fetch(apiPhpUrl("terminal-runner-secrets"), {
       method: "GET",
       credentials: "same-origin",
+      headers: adminSaveTokenHeaders(adminSaveToken),
     });
     const data = (await res.json()) as unknown;
     if (!data || typeof data !== "object") {
@@ -242,20 +297,27 @@ export async function loadTerminalRunnerSecrets(): Promise<TerminalRunnerSecrets
 
 export type StagingDbSecretsResponse =
   | { ok: true; host: string; name: string; user: string; password: string; prefix: string }
-  | { ok: false; error: string };
+  | { ok: false; error: string; detail?: string };
 
-export async function loadStagingDbSecrets(): Promise<StagingDbSecretsResponse> {
+export async function loadStagingDbSecrets(adminSaveToken?: string): Promise<StagingDbSecretsResponse> {
   try {
     const res = await fetch(apiPhpUrl("staging-db-secrets"), {
       method: "GET",
       credentials: "same-origin",
+      headers: adminSaveTokenHeaders(adminSaveToken),
     });
     const data = (await res.json()) as unknown;
-    if (!res.ok || !data || typeof data !== "object") {
+    if (!data || typeof data !== "object") {
       return { ok: false, error: `HTTP ${res.status}` };
     }
     const o = data as Record<string, unknown>;
-    if (o.ok !== true) return { ok: false, error: String(o.error ?? "unknown_error") };
+    if (!res.ok || o.ok !== true) {
+      return {
+        ok: false,
+        error: String(o.error ?? `HTTP ${res.status}`),
+        detail: typeof o.detail === "string" ? o.detail : undefined,
+      };
+    }
     return {
       ok: true,
       host: String(o.host ?? ""),

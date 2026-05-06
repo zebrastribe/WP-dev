@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { logAdmin } from "./adminLog";
-import { saveDockerEnvSecrets } from "./api";
+import { loadDockerEnvPublic, saveDockerEnvSecrets } from "./api";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
 const DEFAULT_JSON = JSON.stringify(EXAMPLE_WP_DEV_CONFIG, null, 2);
+const PHP_OPTIONS = ["7.4", "8.0", "8.1", "8.2", "8.3", "8.4"] as const;
 
 export function ConfigAssistant() {
   const [raw, setRaw] = useState(DEFAULT_JSON);
   const [providerApiKey, setProviderApiKey] = useState("");
+  const [localPhpVersion, setLocalPhpVersion] = useState<(typeof PHP_OPTIONS)[number]>("8.2");
   const [saveToken, setSaveToken] = useState("");
   const [secretSaveMsg, setSecretSaveMsg] = useState<string | null>(null);
   const [savingSecret, setSavingSecret] = useState(false);
@@ -15,6 +17,13 @@ export function ConfigAssistant() {
 
   useEffect(() => {
     logAdmin("info", "ConfigAssistant: opened");
+    void (async () => {
+      const env = await loadDockerEnvPublic();
+      if (!env.ok) return;
+      if (PHP_OPTIONS.includes(env.phpVersion as (typeof PHP_OPTIONS)[number])) {
+        setLocalPhpVersion(env.phpVersion as (typeof PHP_OPTIONS)[number]);
+      }
+    })();
   }, []);
 
   const parsedResult = useMemo(() => {
@@ -195,16 +204,45 @@ export function ConfigAssistant() {
               onChange={(e) => setSaveToken(e.target.value)}
             />
           </label>
+          <label className="mt-2 block">
+            <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+              Local PHP version (<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_PHP_VERSION</code> in docker/.env)
+            </span>
+            <select
+              className="w-full max-w-xs rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-900"
+              value={localPhpVersion}
+              onChange={(e) =>
+                setLocalPhpVersion(
+                  PHP_OPTIONS.includes(e.target.value as (typeof PHP_OPTIONS)[number])
+                    ? (e.target.value as (typeof PHP_OPTIONS)[number])
+                    : "8.2",
+                )
+              }
+            >
+              {PHP_OPTIONS.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+            <span className="mt-0.5 block text-xs text-slate-500">
+              Saves to host docker/.env. Restart stack after change.
+            </span>
+          </label>
           <button
             type="button"
-            disabled={savingSecret || !providerApiKey.trim()}
+            disabled={savingSecret || (!providerApiKey.trim() && !localPhpVersion.trim())}
             className="mt-2 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
             onClick={async () => {
               setSavingSecret(true);
               setSecretSaveMsg(null);
               try {
+                const body: Record<string, string> = {
+                  WPDEV_PHP_VERSION: localPhpVersion,
+                };
+                if (providerApiKey.trim()) body.WPDEV_SIMPLY_API_KEY = providerApiKey.trim();
                 const r = await saveDockerEnvSecrets(
-                  { WPDEV_SIMPLY_API_KEY: providerApiKey.trim() },
+                  body,
                   saveToken.trim() || undefined,
                 );
                 if (!r.ok) {
@@ -213,7 +251,11 @@ export function ConfigAssistant() {
                 } else {
                   setProviderApiKey("");
                   setSecretSaveMsg("Saved to docker/.env. Run wp-dev down && wp-dev up on the host.");
-                  logAdmin("info", "ConfigAssistant: WPDEV_SIMPLY_API_KEY saved via API");
+                  logAdmin(
+                    "info",
+                    "ConfigAssistant: docker env values saved via API",
+                    `php=${localPhpVersion} simply=${providerApiKey.trim() ? "yes" : "no"}`,
+                  );
                 }
               } catch (e) {
                 setSecretSaveMsg(e instanceof Error ? e.message : String(e));
@@ -222,7 +264,7 @@ export function ConfigAssistant() {
               }
             }}
           >
-            {savingSecret ? "Saving…" : "Save Simply API key to server"}
+            {savingSecret ? "Saving…" : "Save docker env values to server"}
           </button>
           {secretSaveMsg && (
             <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">{secretSaveMsg}</p>

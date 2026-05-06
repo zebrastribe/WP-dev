@@ -14,6 +14,8 @@ import { cmdInit } from "./commands/init.js";
 import { cmdSimplySetupStagingDns, cmdSimplyTest } from "./commands/simply.js";
 import { cmdFixPermissions } from "./commands/fix-permissions.js";
 import { cmdDoctor } from "./commands/doctor.js";
+import { cmdSslDisable, cmdSslEnable } from "./commands/ssl.js";
+import { cmdPhpSet, cmdPhpShow, cmdPhpValidate } from "./commands/php.js";
 import { ensureWpDevConfigJson } from "./config/load.js";
 import { hydrateSimplyApiKeyFromComposeEnv, hydrateStagingDbFromComposeEnv } from "./services/simply.js";
 import { initLogger, logError, logInfo } from "./utils/logger.js";
@@ -132,6 +134,47 @@ async function main(): Promise<void> {
     .description("Start local WordPress (docker compose up -d)")
     .action(async () => {
       await runWithConfig("up", cmdUp);
+    });
+
+  const ssl = program.command("ssl").description("Manage localhost HTTPS for the local Docker stack");
+
+  ssl
+    .command("enable")
+    .description("Enable localhost HTTPS using mkcert and update local.url")
+    .action(async () => {
+      await runWithConfig("ssl enable", cmdSslEnable);
+    });
+
+  ssl
+    .command("disable")
+    .description("Disable localhost HTTPS and switch local.url back to HTTP")
+    .action(async () => {
+      await runWithConfig("ssl disable", cmdSslDisable);
+    });
+
+  const php = program.command("php").description("Manage local PHP runtime version for Docker images");
+
+  php
+    .command("show")
+    .description("Show current local PHP version and allowed values")
+    .action(async () => {
+      await runWithConfig("php show", cmdPhpShow);
+    });
+
+  php
+    .command("validate")
+    .description("Validate a PHP version by checking Docker image tags")
+    .argument("<version>", "e.g. 7.4, 8.1, 8.2, 8.3, 8.4")
+    .action(async (version: string) => {
+      await runWithConfig(`php validate ${version}`, (loaded) => cmdPhpValidate(loaded, version));
+    });
+
+  php
+    .command("set")
+    .description("Set local PHP version (runs validation first)")
+    .argument("<version>", "e.g. 7.4, 8.1, 8.2, 8.3, 8.4")
+    .action(async (version: string) => {
+      await runWithConfig(`php set ${version}`, (loaded) => cmdPhpSet(loaded, version));
     });
 
   program

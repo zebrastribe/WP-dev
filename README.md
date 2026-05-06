@@ -41,6 +41,35 @@ npm run setup          # Docker check, npm install, build CLI + admin UI into wo
    - **Terminal:** **`wp-dev init`** (interactive).  
 3. **Open the site** — URL is **`local.url`** in **`wp-dev.config.json`** (example: **`http://localhost:8888`**). Finish the WordPress installer if this is a new DB.
 
+### Optional: localhost HTTPS
+
+```bash
+npm run wp-dev -- ssl enable
+npm run wp-dev -- down
+npm run wp-dev -- up
+```
+
+- Requires `mkcert` installed and initialized (`mkcert -install` once).
+- Generates certs under `docker/certs/`.
+- Enables `WPDEV_LOCAL_HTTPS=1`, sets `WP_HTTPS_PORT` (default `8443`), and updates `local.url` to `https://localhost:<WP_HTTPS_PORT>`.
+- Disable anytime with `npm run wp-dev -- ssl disable`.
+
+### Optional: local PHP version selector
+
+```bash
+npm run wp-dev -- php show
+npm run wp-dev -- php validate 8.3
+npm run wp-dev -- php set 8.3
+npm run wp-dev -- down
+npm run wp-dev -- up
+```
+
+- `php set` validates first by checking both Docker tags exist:
+  - `wordpress:php<version>-apache`
+  - `wordpress:cli-php<version>`
+- Allowed versions: `7.4`, `8.0`, `8.1`, `8.2`, `8.3`, `8.4`.
+- Value is saved in `docker/.env` as `WPDEV_PHP_VERSION`.
+
 **`npm run setup` does not run `pull`.** It only prepares the tool and the admin build.
 
 **After you change admin UI code** under **`docs/admin/`**, rebuild: **`npm run admin:build:wp`** (or **`npm run setup`** again).
