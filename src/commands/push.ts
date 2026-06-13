@@ -19,9 +19,11 @@ import {
   wpRemoteSearchReplace,
 } from "../services/wpcli.js";
 import { ensureBackupDir, timestampedDbName } from "../services/backup.js";
-import { confirmProduction } from "../utils/confirm.js";
+import { confirmRemoteTarget } from "../utils/confirm.js";
 import { logInfo } from "../utils/logger.js";
 import { getUrlVariants } from "../utils/url-variants.js";
+import { verifyRemoteSiteUrls } from "../utils/sync-verify.js";
+import { assertHostSyncTools } from "../utils/host-prereq.js";
 
 export type PushOptions = {
   dryRun: boolean;
@@ -60,12 +62,14 @@ export async function cmdPush(
   const remote = getRemoteEnv(config, env);
   const localWpRoot = resolveFromConfigDir(configDir, config.local.wpRoot);
 
-  if (env === "production" && !options.dryRun) {
-    const ok = await confirmProduction(
-      "You are about to push the local database and files to PRODUCTION.",
+  if (!options.dryRun) {
+    const ok = await confirmRemoteTarget(
+      env,
+      remote,
+      "push",
     );
     if (!ok) {
-      logInfo("push production: user aborted at confirmation");
+      logInfo(`push ${env}: user aborted at confirmation`);
       console.error("Aborted.");
       process.exitCode = 1;
       return;
@@ -80,6 +84,8 @@ export async function cmdPush(
     await rsyncPush(remote, localWpRoot, { dryRun: true });
     return;
   }
+
+  assertHostSyncTools();
 
   await assertLocalWpInstalled(configDir, config);
   if (env === "staging") {
@@ -153,36 +159,22 @@ export async function cmdPush(
     }
 
     logInfo(`push ${env}: rsync files -> remote`);
-    await rsyncPush(remote, localWpRoot, { dryRun: false });
-
-    const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-push-"));
-    const localDump = join(tmpDir, "local.sql");
-    const remoteImport = `/tmp/wp-dev-push-import-${Date.now()}.sql`;
     try {
-      logInfo(`push ${env}: export local db, import on remote`);
-      await wpLocalDbExportToFile(configDir, config, localDump);
-      await ssh.putFile(localDump, remoteImport);
-      await wpRemoteDbImport(ssh, wpPath, remoteImport);
-      await ssh.exec(`rm -f ${remoteImport}`);
-      const localCandidates = getUrlVariants(config.local.url).filter(
-        (candidate) => candidate !== remote.url,
-      );
-      for (const fromUrl of localCandidates) {
-        logInfo(`push ${env}: search-replace ${fromUrl} -> ${remote.url}`);
-        await wpRemoteSearchReplace(ssh, wpPath, fromUrl, remote.url);
-        logInfo(`push ${env}: sanitize generated asset files ${fromUrl} -> ${remote.url}`);
-        await sanitizeRemoteGeneratedAssetUrls(
-          (command) => ssh.exec(command),
-          wpPath,
-          fromUrl,
-          remote.url,
-        );
-      }
-      if (env === "staging" && config.production.url !== remote.url) {
-        const productionCandidates = getUrlVariants(config.production.url).filter(
+      await rsyncPush(remote, localWpRoot, { dryRun: false });
+
+      const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-push-"));
+      const localDump = join(tmpDir, "local.sql");
+      const remoteImport = `/tmp/wp-dev-push-import-${Date.now()}.sql`;
+      try {
+        logInfo(`push ${env}: export local db, import on remote`);
+        await wpLocalDbExportToFile(configDir, config, localDump);
+        await ssh.putFile(localDump, remoteImport);
+        await wpRemoteDbImport(ssh, wpPath, remoteImport);
+        await ssh.exec(`rm -f ${remoteImport}`);
+        const localCandidates = getUrlVariants(config.local.url).filter(
           (candidate) => candidate !== remote.url,
         );
-        for (const fromUrl of productionCandidates) {
+        for (const fromUrl of localCandidates) {
           logInfo(`push ${env}: search-replace ${fromUrl} -> ${remote.url}`);
           await wpRemoteSearchReplace(ssh, wpPath, fromUrl, remote.url);
           logInfo(`push ${env}: sanitize generated asset files ${fromUrl} -> ${remote.url}`);
@@ -193,14 +185,56 @@ export async function cmdPush(
             remote.url,
           );
         }
+        if (env === "staging" && config.production.url !== remote.url) {
+          const productionCandidates = getUrlVariants(config.production.url).filter(
+            (candidate) => candidate !== remote.url,
+          );
+          for (const fromUrl of productionCandidates) {
+            logInfo(`push ${env}: search-replace ${fromUrl} -> ${remote.url}`);
+            await wpRemoteSearchReplace(ssh, wpPath, fromUrl, remote.url);
+            logInfo(`push ${env}: sanitize generated asset files ${fromUrl} -> ${remote.url}`);
+            await sanitizeRemoteGeneratedAssetUrls(
+              (command) => ssh.exec(command),
+              wpPath,
+              fromUrl,
+              remote.url,
+            );
+          }
+        }
+        logInfo(`push ${env}: force option home/siteurl -> ${remote.url}`);
+        await wpRemoteForceSiteUrls(ssh, wpPath, remote.url);
+        await ssh.exec(
+          `cd ${shellQuote(wpPath)} && wp cache flush --allow-root || true && wp elementor flush_css --allow-root || true`,
+        );
+        const urlCheck = await verifyRemoteSiteUrls(ssh, wpPath, remote.url);
+        if (!urlCheck.ok) {
+          throw new Error(
+            `Post-sync URL verification failed: home=${urlCheck.home ?? "?"} siteurl=${urlCheck.siteurl ?? "?"} expected=${urlCheck.expected}`,
+          );
+        }
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
       }
-      logInfo(`push ${env}: force option home/siteurl -> ${remote.url}`);
-      await wpRemoteForceSiteUrls(ssh, wpPath, remote.url);
-      await ssh.exec(
-        `cd ${shellQuote(wpPath)} && wp cache flush --allow-root || true && wp elementor flush_css --allow-root || true`,
-      );
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+    } catch (syncErr) {
+      if (prePushBackup && !bootstrappedFreshRemote) {
+        logInfo(`push ${env}: sync failed — rolling back remote DB from ${prePushBackup}`);
+        try {
+          const remoteRollback = `/tmp/wp-dev-push-rollback-${Date.now()}.sql`;
+          await ssh.putFile(prePushBackup, remoteRollback);
+          await wpRemoteDbImport(ssh, wpPath, remoteRollback);
+          await ssh.exec(`rm -f ${remoteRollback}`);
+          console.error(
+            `Rolled back remote DB from pre-push backup: ${prePushBackup}\n` +
+              "Remote files may still differ — re-run push or restore from a full backup.",
+          );
+        } catch (rollbackErr) {
+          const rb = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+          console.error(
+            `Warning: could not roll back remote DB (${rb}). Pre-push backup kept at: ${prePushBackup}`,
+          );
+        }
+      }
+      throw syncErr;
     }
   } finally {
     ssh.dispose();

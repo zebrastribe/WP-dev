@@ -157,18 +157,91 @@ function wpdev_require_mutation_token(string $token, string $action): void
     }
 }
 
-/** When WPDEV_ADMIN_SAVE_TOKEN is set, require the same header for sensitive GETs (secrets). */
-function wpdev_require_admin_token_if_configured(string $token, string $action): void
+/** Require admin token for sensitive GET/POST actions (503 when token not configured). */
+function wpdev_require_admin_token(string $token, string $action): void
 {
     if ($token === '') {
-        return;
+        wpdev_json_error(503, 'token_not_configured', 'Set WPDEV_ADMIN_SAVE_TOKEN in docker/.env and restart.');
+        wpdev_admin_api_log("{$action} 503 token_not_configured");
+        exit;
     }
     $provided = $_SERVER['HTTP_X_WP_DEV_ADMIN_TOKEN'] ?? '';
     if (!is_string($provided) || !hash_equals($token, $provided)) {
         wpdev_json_error(403, 'forbidden', 'Missing or invalid admin token.');
-        wpdev_admin_api_log("GET {$action} 403 forbidden");
+        wpdev_admin_api_log("{$action} 403 forbidden");
         exit;
     }
+}
+
+/** @deprecated alias — always requires token now */
+function wpdev_require_admin_token_if_configured(string $token, string $action): void
+{
+    wpdev_require_admin_token($token, $action);
+}
+
+function wpdev_is_blocked_db_host(string $host): bool
+{
+    $h = strtolower(trim($host));
+    if ($h === '' || $h === 'db' || $h === 'localhost' || $h === '127.0.0.1' || $h === '::1') {
+        return true;
+    }
+    if (filter_var($h, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+        if (str_starts_with($h, '10.') || str_starts_with($h, '192.168.') || str_starts_with($h, '127.')) {
+            return true;
+        }
+        if (preg_match('/^172\\.(1[6-9]|2\\d|3[0-1])\\./', $h) === 1) {
+            return true;
+        }
+        if (str_starts_with($h, '169.254.')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @return list<string>
+ */
+function wpdev_config_url_hosts(string $configPath): array
+{
+    if (!is_file($configPath) || !is_readable($configPath)) {
+        return [];
+    }
+    $raw = file_get_contents($configPath);
+    $cfg = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+    if (!is_array($cfg)) {
+        return [];
+    }
+    $hosts = [];
+    foreach (['local', 'staging', 'production'] as $env) {
+        if (!isset($cfg[$env]) || !is_array($cfg[$env])) {
+            continue;
+        }
+        $u = $cfg[$env]['url'] ?? null;
+        if (!is_string($u) || trim($u) === '') {
+            continue;
+        }
+        $p = parse_url(trim($u));
+        $host = is_array($p) ? strtolower((string) ($p['host'] ?? '')) : '';
+        if ($host !== '') {
+            $hosts[] = $host;
+        }
+    }
+    return array_values(array_unique($hosts));
+}
+
+function wpdev_url_host_allowed(string $url, string $configPath): bool
+{
+    $p = parse_url(trim($url));
+    if (!is_array($p)) {
+        return false;
+    }
+    $host = strtolower((string) ($p['host'] ?? ''));
+    if ($host === '') {
+        return false;
+    }
+    $allowed = wpdev_config_url_hosts($configPath);
+    return in_array($host, $allowed, true);
 }
 
 function wpdev_parse_main_domain(string $raw): ?string
@@ -292,7 +365,7 @@ function wpdev_admin_api_log(string $message): void
 {
     global $logDir, $logFile;
     if (!is_dir($logDir)) {
-        @mkdir($logDir, 0777, true);
+        @mkdir($logDir, 0750, true);
     }
     $ip = $_SERVER['REMOTE_ADDR'] ?? '-';
     $line = date('c') . " ip={$ip} " . $message . "\n";
@@ -534,6 +607,7 @@ if ($method === 'GET' && $action === 'terminal-runner-secrets') {
 }
 
 if ($method === 'POST' && $action === 'simply-test') {
+    wpdev_require_admin_token($token, 'POST simply-test');
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
     $input = is_array($in) ? $in : [];
@@ -1070,6 +1144,7 @@ if (false && $method === 'POST' && $action === 'simply-setup-staging') {
 }
 
 if ($method === 'POST' && $action === 'staging-https-check') {
+    wpdev_require_admin_token($token, 'POST staging-https-check');
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
     $input = is_array($in) ? $in : [];
@@ -1096,6 +1171,11 @@ if ($method === 'POST' && $action === 'staging-https-check') {
     if (!str_starts_with(strtolower($url), 'https://')) {
         wpdev_json_error(400, 'invalid_staging_url', 'Expected https:// URL');
         wpdev_admin_api_log('POST staging-https-check 400 invalid_staging_url');
+        exit;
+    }
+    if (!wpdev_url_host_allowed($url, $configPath)) {
+        wpdev_json_error(403, 'url_not_allowed', 'URL host must match local/staging/production in wp-dev.config.json');
+        wpdev_admin_api_log('POST staging-https-check 403 url_not_allowed');
         exit;
     }
 
@@ -1144,6 +1224,7 @@ if ($method === 'POST' && $action === 'staging-https-check') {
 }
 
 if ($method === 'POST' && $action === 'staging-domain-check') {
+    wpdev_require_admin_token($token, 'POST staging-domain-check');
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
     $input = is_array($in) ? $in : [];
@@ -1175,6 +1256,11 @@ if ($method === 'POST' && $action === 'staging-domain-check') {
     if ($host === '') {
         wpdev_json_error(400, 'invalid_staging_url', 'Could not parse host from URL');
         wpdev_admin_api_log('POST staging-domain-check 400 invalid_staging_url');
+        exit;
+    }
+    if (!wpdev_url_host_allowed($url, $configPath)) {
+        wpdev_json_error(403, 'url_not_allowed', 'URL host must match local/staging/production in wp-dev.config.json');
+        wpdev_admin_api_log('POST staging-domain-check 403 url_not_allowed');
         exit;
     }
 
@@ -1281,6 +1367,7 @@ if ($method === 'POST' && $action === 'staging-domain-check') {
 }
 
 if ($method === 'POST' && $action === 'staging-db-check') {
+    wpdev_require_admin_token($token, 'POST staging-db-check');
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
     $input = is_array($in) ? $in : [];
@@ -1299,6 +1386,12 @@ if ($method === 'POST' && $action === 'staging-db-check') {
     if ($port < 1 || $port > 65535) {
         wpdev_json_error(400, 'invalid_db_port');
         wpdev_admin_api_log('POST staging-db-check 400 invalid_db_port');
+        exit;
+    }
+
+    if (wpdev_is_blocked_db_host($host)) {
+        wpdev_json_error(403, 'db_host_not_allowed', 'Blocked database host (internal/reserved).');
+        wpdev_admin_api_log('POST staging-db-check 403 db_host_not_allowed');
         exit;
     }
 

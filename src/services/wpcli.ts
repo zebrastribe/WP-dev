@@ -257,6 +257,7 @@ export async function wpRemoteSearchReplace(
     from,
     to,
     "--skip-columns=guid",
+    "--precise",
   ]);
   if (r.code !== 0) {
     throw new Error(`Remote wp search-replace failed: ${r.stderr || r.stdout}`);
@@ -454,6 +455,7 @@ export async function wpLocalSearchReplace(
     from,
     to,
     "--skip-columns=guid",
+    "--precise",
   ]);
   if (r.exitCode !== 0) {
     throw new Error(`Local wp search-replace failed: ${r.stderr || r.stdout}`);

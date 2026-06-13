@@ -25,6 +25,8 @@ import { getSimplyApiKey } from "../services/simply.js";
 import { isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
 import { getUrlVariants } from "../utils/url-variants.js";
 import { getLocalUrlPortMismatch } from "../utils/published-local-urls.js";
+import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
+import { assertHostSyncTools } from "../utils/host-prereq.js";
 
 export type PullOptions = {
   dryRun: boolean;
@@ -57,6 +59,8 @@ export async function cmdPull(
     await rsyncPull(remote, localWpRoot, { dryRun: true });
     return;
   }
+
+  assertHostSyncTools();
 
   let prePullBackup: string | undefined;
   if (options.backupLocal) {
@@ -96,31 +100,57 @@ export async function cmdPull(
           `pull ${env}: fix-permissions failed (${msg}). Run: npm run wp-dev -- fix-permissions — then retry pull.`,
         );
       }
-      await rsyncPull(remote, localWpRoot, { dryRun: false });
+      try {
+        await rsyncPull(remote, localWpRoot, { dryRun: false });
 
-      const sql = readFileSync(localDump, "utf8");
-      if (!/CREATE TABLE|INSERT INTO/i.test(sql)) {
-        throw new Error("Downloaded SQL dump looks empty or invalid.");
-      }
-      const tablePrefix = detectTablePrefixFromSqlDump(sql);
+        const sql = readFileSync(localDump, "utf8");
+        if (!/CREATE TABLE|INSERT INTO/i.test(sql)) {
+          throw new Error("Downloaded SQL dump looks empty or invalid.");
+        }
+        const tablePrefix = detectTablePrefixFromSqlDump(sql);
 
-      logInfo(`pull ${env}: local wp db import`);
-      await wpLocalDbImportFromFile(configDir, config, localDump);
-      if (tablePrefix) {
-        logInfo(
-          `pull ${env}: align local table prefix to "${tablePrefix}" (docker/.env + wp-config.php)`,
+        logInfo(`pull ${env}: local wp db import`);
+        await wpLocalDbImportFromFile(configDir, config, localDump);
+        if (tablePrefix) {
+          logInfo(
+            `pull ${env}: align local table prefix to "${tablePrefix}" (docker/.env + wp-config.php)`,
+          );
+          await wpLocalAlignTablePrefixAfterImport(configDir, config, tablePrefix);
+        }
+        const fromCandidates = getUrlVariants(remote.url).filter(
+          (candidate) => candidate !== config.local.url,
         );
-        await wpLocalAlignTablePrefixAfterImport(configDir, config, tablePrefix);
+        for (const fromUrl of fromCandidates) {
+          logInfo(`pull ${env}: search-replace ${fromUrl} -> ${config.local.url}`);
+          await wpLocalSearchReplace(configDir, config, fromUrl, config.local.url);
+        }
+        logInfo(`pull ${env}: force option home/siteurl -> ${config.local.url}`);
+        await wpLocalForceSiteUrls(configDir, config, config.local.url);
+
+        const urlCheck = await verifyLocalSiteUrls(configDir, config, config.local.url);
+        if (!urlCheck.ok) {
+          throw new Error(
+            `Post-sync URL verification failed: home=${urlCheck.home ?? "?"} siteurl=${urlCheck.siteurl ?? "?"} expected=${urlCheck.expected}`,
+          );
+        }
+      } catch (syncErr) {
+        if (prePullBackup) {
+          logInfo(`pull ${env}: sync failed — rolling back local DB from ${prePullBackup}`);
+          try {
+            await wpLocalDbImportFromFile(configDir, config, prePullBackup);
+            console.error(
+              `Rolled back local DB from pre-pull backup: ${prePullBackup}\n` +
+                "Files may still differ from before pull — re-run pull or restore from a full backup.",
+            );
+          } catch (rollbackErr) {
+            const rb = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+            console.error(
+              `Warning: could not roll back local DB (${rb}). Pre-pull backup kept at: ${prePullBackup}`,
+            );
+          }
+        }
+        throw syncErr;
       }
-      const fromCandidates = getUrlVariants(remote.url).filter(
-        (candidate) => candidate !== config.local.url,
-      );
-      for (const fromUrl of fromCandidates) {
-        logInfo(`pull ${env}: search-replace ${fromUrl} -> ${config.local.url}`);
-        await wpLocalSearchReplace(configDir, config, fromUrl, config.local.url);
-      }
-      logInfo(`pull ${env}: force option home/siteurl -> ${config.local.url}`);
-      await wpLocalForceSiteUrls(configDir, config, config.local.url);
       try {
         logInfo(`pull ${env}: restore runtime write permissions for wp-content`);
         await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
