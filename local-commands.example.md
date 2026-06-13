@@ -17,6 +17,23 @@ ssh-add --apple-use-keychain ~/.ssh/id_ed25519
 # upload ~/.ssh/id_ed25519.pub to your host
 ```
 
+## Update wp-dev (after git pull)
+
+```bash
+git pull --rebase --autostash &&
+npm run build &&
+npm run wp-dev -- up
+```
+
+Fixes stale localhost URLs in WordPress (menus/content) and keeps `WP_PORT` stable on re-run.
+
+Verify:
+
+```bash
+npm run wp-dev -- up          # run twice — port should not keep incrementing
+npm run wp-dev -- doctor --local-http
+```
+
 ## Full refresh
 
 ```bash
