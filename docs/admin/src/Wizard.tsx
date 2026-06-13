@@ -7,17 +7,44 @@ import {
   loadTerminalRunnerSecrets,
   loadStagingDbSecrets,
   loadSimplyStatus,
+  loadLocalStatus,
   loadWpDevConfig,
   runTerminalAction,
   saveDockerEnvSecrets,
   saveWpDevConfig,
   type TerminalAction,
+  type LocalStatus,
   verifySimplyApi,
 } from "./api";
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
-const STEP_LABELS = ["Welcome", "Production Host", "Staging Host", "Save", "Links"] as const;
+const STEP_LABELS = ["Start", "SSH server", "Staging (optional)", "Save & sync", "Done"] as const;
+/** Wizard step index for staging — skipped when syncing from one remote only. */
+const STAGING_STEP = 2;
+
+type SetupWorkflow = "pull" | "local-only";
+
+/** Best-effort site URL from SSH hostname (for DB search-replace after pull). */
+function guessSiteUrlFromSshHost(host: string): string {
+  const h = host.trim().toLowerCase().replace(/^ssh\./, "");
+  if (!h || !h.includes(".")) return "";
+  return `https://${h}`;
+}
+
+function skipStagingWizardStep(workflow: SetupWorkflow, hasStagingServer: boolean): boolean {
+  return workflow === "pull" && !hasStagingServer;
+}
+
+function wizardStepAfter(current: number, skipStaging: boolean): number {
+  if (skipStaging && current === 1) return 3;
+  return Math.min(STEP_LABELS.length - 1, current + 1);
+}
+
+function wizardStepBefore(current: number, skipStaging: boolean): number {
+  if (skipStaging && current === 3) return 1;
+  return Math.max(0, current - 1);
+}
 
 type WizardAlert = { tone: "info" | "success" | "error"; text: string };
 type ChecklistStatus = "done" | "warn" | "todo";
@@ -64,6 +91,14 @@ const STAGING_PLACEHOLDER = {
   user: EXAMPLE_WP_DEV_CONFIG.staging.user,
   path: EXAMPLE_WP_DEV_CONFIG.staging.path,
   url: EXAMPLE_WP_DEV_CONFIG.staging.url,
+} as const;
+
+/** Production placeholder for local-only workflow until user configures real production. */
+const PRODUCTION_PLACEHOLDER = {
+  host: "production.example.invalid",
+  user: "deploy",
+  path: "/var/www/production-not-used",
+  url: "https://production.example.invalid",
 } as const;
 
 type Remote = {
@@ -197,6 +232,8 @@ export function Wizard() {
   const [dbSaveMessage, setDbSaveMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [alert, setAlert] = useState<WizardAlert | null>(null);
   const [loading, setLoading] = useState(true);
+  const [localStatus, setLocalStatus] = useState<LocalStatus | null>(null);
+  const [setupWorkflow, setSetupWorkflow] = useState<SetupWorkflow | null>(null);
   const [saving, setSaving] = useState(false);
   const [terminalPrep, setTerminalPrep] = useState<TerminalPrepState>(null);
   const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
@@ -214,6 +251,14 @@ export function Wizard() {
     setStep(i);
   }, []);
 
+  const goNext = useCallback(() => {
+    setStep((s) => wizardStepAfter(s, skipStagingWizardStep(setupWorkflow ?? "pull", hasStagingServer)));
+  }, [setupWorkflow, hasStagingServer]);
+
+  const goPrev = useCallback(() => {
+    setStep((s) => wizardStepBefore(s, skipStagingWizardStep(setupWorkflow ?? "pull", hasStagingServer)));
+  }, [setupWorkflow, hasStagingServer]);
+
   useEffect(() => {
     logAdmin("info", "Wizard: opened");
   }, []);
@@ -224,8 +269,14 @@ export function Wizard() {
       setLoading(true);
       logAdmin("info", "Wizard: loading configuration from API or draft");
       try {
-        const loaded = await loadWpDevConfig();
+        const [loaded, status] = await Promise.all([loadWpDevConfig(), loadLocalStatus()]);
         if (cancelled) return;
+        if (status.ok) {
+          setLocalStatus(status);
+          if (status.needsSetup) {
+            setSetupWorkflow(status.hasSyncedContent ? "local-only" : "pull");
+          }
+        }
         if (loaded && typeof loaded.project === "string") {
           const loadedLocalUrl = String((loaded.local as WizardData["local"])?.url ?? defaults().local.url);
           const aligned = alignLocalUrlToCurrentBrowser(loadedLocalUrl);
@@ -613,15 +664,35 @@ export function Wizard() {
         });
         return;
       }
-      if (!data.production.host.trim() || !data.production.url.trim()) {
-        logAdmin("warn", "Wizard: save blocked — missing production host or URL");
-        setAlert({ tone: "error", text: "Production host and URL are required before saving." });
-        return;
+      const workflow = setupWorkflow ?? "pull";
+      let production =
+        workflow === "local-only" && !data.production.host.trim()
+          ? { ...PRODUCTION_PLACEHOLDER, user: data.production.user.trim() || "deploy" }
+          : { ...data.production };
+      if (workflow === "pull") {
+        if (!production.host.trim() || !production.user.trim() || !production.path.trim()) {
+          setAlert({
+            tone: "error",
+            text: "SSH host, user, and remote WordPress path are required. Fill them on the SSH server step.",
+          });
+          return;
+        }
+        if (!production.url.trim()) {
+          const guessed = guessSiteUrlFromSshHost(production.host);
+          if (guessed) production = { ...production, url: guessed };
+        }
+        if (!production.url.trim()) {
+          setAlert({
+            tone: "error",
+            text: "Add the live site URL (e.g. https://example.com) so wp-dev can fix database links after pull — or use an SSH hostname that looks like a domain.",
+          });
+          return;
+        }
       }
       const staging = hasStagingServer
         ? data.staging
-        : { ...STAGING_PLACEHOLDER, user: data.production.user || data.staging.user || "deploy" };
-      const payload = toJson({ ...data, staging });
+        : { ...STAGING_PLACEHOLDER, user: production.user || data.staging.user || "deploy" };
+      const payload = toJson({ ...data, staging, production });
       const res = await saveWpDevConfig(payload, saveToken.trim() || undefined);
       if (!res.ok) {
         const err = "error" in res ? res.error : "unknown";
@@ -768,12 +839,6 @@ export function Wizard() {
       return false;
     }
   })();
-  const productionReady = Boolean(
-    data.production.host.trim() &&
-      data.production.user.trim() &&
-      data.production.path.trim() &&
-      data.production.url.trim(),
-  );
   const stagingReady = !hasStagingServer
     ? true
     : Boolean(
@@ -786,6 +851,20 @@ export function Wizard() {
   const localLink = data.local.url.trim();
   const productionLink = data.production.url.trim();
   const stagingLink = hasStagingServer ? data.staging.url.trim() : "";
+  const adminSelfLink = `${window.location.origin}/admin/`;
+  const installLink = localLink ? `${localLink.replace(/\/$/, "")}/wp-admin/install.php` : "";
+  const workflow = setupWorkflow ?? "pull";
+  const skipStaging = skipStagingWizardStep(workflow, hasStagingServer);
+  const permissionsOk =
+    localStatus?.writable.wpContent &&
+    localStatus?.writable.plugins &&
+    localStatus?.writable.upgrade;
+  const sshServerReady = Boolean(
+    data.production.host.trim() &&
+      data.production.user.trim() &&
+      data.production.path.trim() &&
+      (data.production.url.trim() || guessSiteUrlFromSshHost(data.production.host)),
+  );
 
   if (loading) {
     return (
@@ -850,34 +929,45 @@ export function Wizard() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex flex-wrap gap-2 text-xs">
-        {STEP_LABELS.map((label, i) => (
-          <button
-            key={label}
-            type="button"
-            onClick={() => goStep(i)}
-            className={`rounded-full px-3 py-1 font-medium ${
-              step === i
-                ? "bg-brand-600 text-white"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+        {STEP_LABELS.map((label, i) => {
+          if (skipStaging && i === STAGING_STEP) return null;
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => goStep(i)}
+              className={`rounded-full px-3 py-1 font-medium ${
+                step === i
+                  ? "bg-brand-600 text-white"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/50">
         <div className="flex flex-wrap items-center gap-2">
           <span className={stepOneReady ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
             1) Local {stepOneReady ? "OK" : "TODO"}
           </span>
-          <span className={productionReady ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
-            2) Production {productionReady ? "OK" : "TODO"}
+          <span
+            className={
+              sshServerReady || workflow === "local-only"
+                ? "text-emerald-700 dark:text-emerald-300"
+                : "text-amber-700 dark:text-amber-300"
+            }
+          >
+            2) SSH {sshServerReady || workflow === "local-only" ? "OK" : "TODO"}
           </span>
-          <span className={stagingReady ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
-            3) Staging {stagingReady ? "OK" : "TODO"}
-          </span>
-          <span className="text-slate-500 dark:text-slate-400">4) Save</span>
-          <span className="text-slate-500 dark:text-slate-400">5) Open links</span>
+          {!skipStaging && (
+            <span className={stagingReady ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
+              3) Staging {stagingReady ? "OK" : "optional"}
+            </span>
+          )}
+          <span className="text-slate-500 dark:text-slate-400">{skipStaging ? "3" : "4"}) Save & pull</span>
+          <span className="text-slate-500 dark:text-slate-400">{skipStaging ? "4" : "5"}) Done</span>
         </div>
       </div>
 
@@ -895,12 +985,83 @@ export function Wizard() {
 
       {step === 0 && (
         <div className="space-y-4">
+          {localStatus?.needsSetup && (
+            <div className="rounded-lg border-2 border-brand-500 bg-brand-50 p-4 dark:border-brand-600 dark:bg-brand-950/30">
+              <p className="text-base font-bold text-brand-900 dark:text-brand-100">Getting started</p>
+              <p className="mt-1 text-sm text-brand-800 dark:text-brand-200">
+                This clone has no synced WordPress site yet. Complete this wizard, then pull from remote or install
+                WordPress locally.
+              </p>
+              {!localStatus.adminBuilt && (
+                <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+                  Admin UI not built — from the repo root run:{" "}
+                  <code className="rounded bg-white/80 px-1 dark:bg-slate-900">npm run setup</code>
+                </p>
+              )}
+              {!permissionsOk && localStatus && (
+                <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+                  WordPress file permissions look wrong (plugins may fail to update). Run:{" "}
+                  <code className="rounded bg-white/80 px-1 dark:bg-slate-900">npm run wp-dev -- up</code>
+                </p>
+              )}
+            </div>
+          )}
+          <fieldset className="space-y-2 rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+            <legend className="px-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+              What do you want to do?
+            </legend>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-900/50">
+              <input
+                type="radio"
+                name="setup-workflow"
+                checked={workflow === "pull"}
+                onChange={() => {
+                  setSetupWorkflow("pull");
+                  logAdmin("info", "Wizard: workflow → pull from remote");
+                }}
+                className="mt-1"
+              />
+              <span>
+                <span className="block text-sm font-medium text-slate-900 dark:text-white">
+                  Sync from my server (SSH only)
+                </span>
+                <span className="text-xs text-slate-600 dark:text-slate-400">
+                  Set up SSH key, one remote path, save, then pull — no staging domain needed.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-900/50">
+              <input
+                type="radio"
+                name="setup-workflow"
+                checked={workflow === "local-only"}
+                onChange={() => {
+                  setSetupWorkflow("local-only");
+                  logAdmin("info", "Wizard: workflow → local-only");
+                }}
+                className="mt-1"
+              />
+              <span>
+                <span className="block text-sm font-medium text-slate-900 dark:text-white">
+                  New local WordPress site only
+                </span>
+                <span className="text-xs text-slate-600 dark:text-slate-400">
+                  Skip production SSH for now. Save config, then open the WordPress installer.
+                </span>
+              </span>
+            </label>
+          </fieldset>
           <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
             <p className="font-semibold">What to do on this step</p>
             <ol className="mt-1 list-inside list-decimal space-y-1">
               <li>Confirm <code>Project id</code> (used for compose project naming).</li>
               <li>Confirm <code>Local site URL</code> matches your current localhost port.</li>
-              <li>Click <strong>Next</strong> to configure Production Host SSH details.</li>
+              <li>
+                Click <strong>Next</strong>
+                {workflow === "pull"
+                  ? " — SSH key + server path only (staging is optional later)."
+                  : " (SSH step is optional)."}
+              </li>
             </ol>
             <p className="mt-2">
               Status: {stepOneReady ? "Ready to continue" : "Fill required fields before continuing"}.
@@ -1041,22 +1202,84 @@ export function Wizard() {
 
       {step === 1 && (
         <div className="space-y-4">
+          {workflow === "local-only" && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+              Optional for a local-only site — skip to Save & sync. Add SSH here later when you want to pull from a
+              server.
+            </p>
+          )}
+          {workflow === "pull" && (
+            <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+              <p className="font-semibold">Quick path</p>
+              <ol className="mt-1 list-inside list-decimal space-y-1">
+                <li>Generate/upload SSH key below and run the SSH test.</li>
+                <li>Fill SSH host, user, and the WordPress folder path on the server.</li>
+                <li>
+                  Live site URL is only for fixing links in the database — often{" "}
+                  <code>https://yourdomain.com</code> (auto-guessed from SSH host when possible).
+                </li>
+                <li>Next → Save & sync → run pull.</li>
+              </ol>
+            </div>
+          )}
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Fill production SSH + URL, then run key setup and SSH test below.
+            {workflow === "pull"
+              ? "One SSH connection — no separate staging/production domains required."
+              : "Remote SSH (optional for local-only)."}
           </p>
-          {(["host", "user", "path", "url"] as const).map((key) => (
-            <label key={key} className="block capitalize">
-              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">production.{key} *</span>
-              <input
-                className={input}
-                value={data.production[key]}
-                onChange={(e) => patchRemote("production", key, e.target.value)}
-              />
-              {!data.production[key].trim() && (
-                <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">Required field.</p>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+              SSH host{workflow === "pull" ? " *" : ""}
+            </span>
+            <input
+              className={input}
+              placeholder="ssh.example.com or example.com"
+              value={data.production.host}
+              onChange={(e) => patchRemote("production", "host", e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+              SSH user{workflow === "pull" ? " *" : ""}
+            </span>
+            <input
+              className={input}
+              placeholder="deploy"
+              value={data.production.user}
+              onChange={(e) => patchRemote("production", "user", e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+              WordPress path on server{workflow === "pull" ? " *" : ""}
+            </span>
+            <input
+              className={input}
+              placeholder="/var/www/live or public_html"
+              value={data.production.path}
+              onChange={(e) => patchRemote("production", "path", e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+              Live site URL {workflow === "pull" ? "(optional if SSH host is a domain)" : ""}
+            </span>
+            <input
+              className={input}
+              placeholder={
+                guessSiteUrlFromSshHost(data.production.host) || "https://example.com"
+              }
+              value={data.production.url}
+              onChange={(e) => patchRemote("production", "url", e.target.value)}
+            />
+            {workflow === "pull" &&
+              !data.production.url.trim() &&
+              guessSiteUrlFromSshHost(data.production.host) && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Will use {guessSiteUrlFromSshHost(data.production.host)} on save.
+                </p>
               )}
-            </label>
-          ))}
+          </label>
           {terminalPanel}
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
             <p className="font-semibold text-slate-800 dark:text-slate-100">SSH key setup (required)</p>
@@ -1153,8 +1376,25 @@ export function Wizard() {
         </div>
       )}
 
-      {step === 2 && (
+      {step === STAGING_STEP && (
         <div className="space-y-4">
+          {skipStaging && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/40">
+              <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">
+                Staging is not required for localhost sync.
+              </p>
+              <p className="mt-1 text-xs text-emerald-800 dark:text-emerald-200">
+                Enable below only if you use a separate staging server later.
+              </p>
+              <button
+                type="button"
+                onClick={goNext}
+                className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+              >
+                Skip to Save & sync →
+              </button>
+            </div>
+          )}
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -1787,6 +2027,17 @@ export function Wizard() {
                 staging: hasStagingServer
                   ? data.staging
                   : { ...STAGING_PLACEHOLDER, user: data.production.user || "deploy" },
+                production: (() => {
+                  let p =
+                    workflow === "local-only" && !data.production.host.trim()
+                      ? { ...PRODUCTION_PLACEHOLDER, user: data.production.user.trim() || "deploy" }
+                      : { ...data.production };
+                  if (workflow === "pull" && !p.url.trim()) {
+                    const guessed = guessSiteUrlFromSshHost(p.host);
+                    if (guessed) p = { ...p, url: guessed };
+                  }
+                  return p;
+                })(),
                 simply: data.simply,
               }),
               null,
@@ -1820,10 +2071,52 @@ export function Wizard() {
 
       {step === 4 && (
         <div className="space-y-4">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm dark:border-emerald-900 dark:bg-emerald-950/40">
+            <p className="font-semibold text-emerald-900 dark:text-emerald-100">Next steps</p>
+            {workflow === "pull" && !localStatus?.hasSyncedContent && (
+              <ol className="mt-2 list-inside list-decimal space-y-1 text-emerald-900 dark:text-emerald-100">
+                <li>
+                  Go to the <strong>Save</strong> step and click <strong>Run: pull production to localhost</strong>{" "}
+                  (or use the Terminal tab).
+                </li>
+                <li>When pull finishes, open Localhost below to verify the site.</li>
+                <li>Plugin updates need correct permissions — if they fail, run{" "}
+                  <code className="rounded bg-white/60 px-1 dark:bg-slate-900">npm run wp-dev -- up</code>.
+                </li>
+              </ol>
+            )}
+            {workflow === "local-only" && !localStatus?.wpInstalled && (
+              <ol className="mt-2 list-inside list-decimal space-y-1 text-emerald-900 dark:text-emerald-100">
+                <li>Open the WordPress installer link below and complete setup.</li>
+                <li>Return here anytime for pull/push commands and backups.</li>
+              </ol>
+            )}
+            {localStatus?.hasSyncedContent && localStatus.wpInstalled && (
+              <p className="mt-2 text-emerald-900 dark:text-emerald-100">
+                Your local site looks ready. Open the links below to verify staging and production.
+              </p>
+            )}
+          </div>
           <p className="text-sm text-slate-600 dark:text-slate-400">
             Open these links to verify your environment after save/sync.
           </p>
           <div className="grid gap-3">
+            <a
+              href={adminSelfLink}
+              className="rounded-lg border-2 border-brand-500 bg-brand-50 px-4 py-3 text-sm font-medium text-brand-900 dark:border-brand-600 dark:bg-brand-950/40 dark:text-brand-100"
+            >
+              wp-dev admin (this wizard): {adminSelfLink}
+            </a>
+            {installLink && !localStatus?.wpInstalled && (
+              <a
+                href={installLink}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+              >
+                WordPress installer: {installLink}
+              </a>
+            )}
             <a
               href={localLink || "#"}
               target="_blank"
@@ -1856,7 +2149,7 @@ export function Wizard() {
         <button
           type="button"
           disabled={step === 0}
-          onClick={() => goStep(step - 1)}
+          onClick={goPrev}
           className="text-sm text-slate-600 hover:text-slate-900 disabled:opacity-40 dark:text-slate-400"
         >
           ← Previous
@@ -1864,7 +2157,7 @@ export function Wizard() {
         <button
           type="button"
           disabled={step === STEP_LABELS.length - 1}
-          onClick={() => goStep(step + 1)}
+          onClick={goNext}
           className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
         >
           {step === STEP_LABELS.length - 1 ? "Finish" : "Next →"}

@@ -92,8 +92,8 @@ export async function cmdPull(
         await cmdFixPermissions(loaded, { quiet: true });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        logInfo(
-          `pull ${env}: fix-permissions failed (${msg}). If rsync errors with Permission denied, run: npm run wp-dev -- fix-permissions`,
+        throw new Error(
+          `pull ${env}: fix-permissions failed (${msg}). Run: npm run wp-dev -- fix-permissions — then retry pull.`,
         );
       }
       await rsyncPull(remote, localWpRoot, { dryRun: false });

@@ -139,7 +139,7 @@ export default function App() {
               <div>
                 <h1 className="text-2xl font-bold text-slate-900 dark:text-white">wp-dev</h1>
                 <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                  Configure host SSH + URLs, save to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev.config.json</code>, then use the CLI (<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev pull</code> / <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">up</code>).
+                  Configure host SSH + URLs, save to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev.config.json</code>, then pull or install WordPress locally.
                 </p>
               </div>
               <button

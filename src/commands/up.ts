@@ -1,15 +1,16 @@
 import type { LoadedConfig } from "../config/load.js";
-import { writeWpDevConfig } from "../config/load.js";
+import { resolveFromConfigDir, writeWpDevConfig } from "../config/load.js";
 import { compose } from "../services/docker-compose.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
 import { logInfo } from "../utils/logger.js";
 import { getPublishedLocalAccess } from "../utils/published-local-urls.js";
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import net from "node:net";
 import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
 import { startHostRunner, stopHostRunner } from "../services/host-runner.js";
+import { isLocalWpInstalled, waitForLocalMysqlReady } from "../services/wpcli.js";
 
 function extractBoundPort(message: string): number | null {
   const m = message.match(/:(\d+)\s+failed:\s+port is already allocated/i);
@@ -339,17 +340,57 @@ async function ensureNonConflictingPublishedPorts(
   }
 }
 
-function printPublishedAccessUrls(loaded: LoadedConfig): void {
+function printPublishedAccessUrls(loaded: LoadedConfig, wpInstalled?: boolean): void {
   const { site, admin, warnings } = getPublishedLocalAccess(loaded);
   for (const w of warnings) console.error(w);
-  console.error(`\nLocal WordPress: ${site}`);
-  console.error(`Browser admin:   ${admin}`);
+  if (wpInstalled === false) {
+    console.error(`\n*** Start here (setup wizard): ${admin}`);
+    console.error(`Local WordPress: ${site} (opens installer after you pull or finish sync)`);
+  } else {
+    console.error(`\nLocal WordPress: ${site}`);
+    console.error(`Browser admin:   ${admin}`);
+  }
   console.error(
     `\nTo stop this stack and free the published port: npm run wp-dev -- down`,
   );
   console.error(
     `(Each clone has its own Compose project; WP_PORT is in docker/.env.)\n`,
   );
+}
+
+/** Copy onboarding assets into wordpress/ before containers write files as www-data. */
+function ensureWordPressSetupAssets(loaded: LoadedConfig): void {
+  const wpRoot = resolveFromConfigDir(loaded.configDir, loaded.config.local.wpRoot);
+  mkdirSync(join(wpRoot, "wp-content/mu-plugins"), { recursive: true });
+  const src = join(loaded.configDir, "docker/assets/mu-plugins/wp-dev-setup.php");
+  if (existsSync(src)) {
+    copyFileSync(src, join(wpRoot, "wp-content/mu-plugins/wp-dev-setup.php"));
+    logInfo("up: ensured wp-dev setup mu-plugin in wordpress/wp-content/mu-plugins/");
+  }
+}
+
+async function applyRuntimeWritePermissionsWithRetry(
+  loaded: LoadedConfig,
+  attempts = 3,
+): Promise<void> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
+      return;
+    } catch (e) {
+      lastError = e;
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+  }
+  const msg = lastError instanceof Error ? lastError.message : String(lastError);
+  logInfo(`up: could not apply runtime wp-content write permissions (${msg})`);
+  console.error(
+    "Warning: could not apply runtime write permissions for wp-content. Plugin updates may fail.",
+  );
+  console.error("Try: npm run wp-dev -- up   (retry)");
 }
 
 async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
@@ -391,6 +432,7 @@ async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
 
 export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
+  ensureWordPressSetupAssets(loaded);
   const envPath = ensureComposeEnvExists(loaded);
   const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const sslEnabled = /^(1|true|yes)$/i.test(readEnvValue(envContent, "WPDEV_LOCAL_HTTPS"));
@@ -452,13 +494,17 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   stopHostRunner(loaded.configDir);
   startHostRunner(loaded.configDir, envPath);
   try {
-    await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
+    await waitForLocalMysqlReady(loaded.configDir, loaded.config);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    logInfo(`up: could not apply runtime wp-content write permissions (${msg})`);
-    console.error(
-      "Warning: could not apply runtime write permissions for wp-content. Plugins may fail to write files.",
-    );
+    logInfo(`up: mysql readiness wait skipped (${msg})`);
   }
-  printPublishedAccessUrls(loaded);
+  await applyRuntimeWritePermissionsWithRetry(loaded);
+  let wpInstalled: boolean | undefined;
+  try {
+    wpInstalled = await isLocalWpInstalled(loaded.configDir, loaded.config);
+  } catch {
+    wpInstalled = undefined;
+  }
+  printPublishedAccessUrls(loaded, wpInstalled);
 }

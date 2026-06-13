@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { logAdmin } from "./adminLog";
-import { loadDockerEnvPublic, saveDockerEnvSecrets } from "./api";
+import { loadDockerEnvPublic, loadWpDevConfig, saveDockerEnvSecrets } from "./api";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
 const DEFAULT_JSON = JSON.stringify(EXAMPLE_WP_DEV_CONFIG, null, 2);
@@ -8,6 +8,7 @@ const PHP_OPTIONS = ["7.4", "8.0", "8.1", "8.2", "8.3", "8.4"] as const;
 
 export function ConfigAssistant() {
   const [raw, setRaw] = useState(DEFAULT_JSON);
+  const [configSource, setConfigSource] = useState<"active" | "example">("example");
   const [providerApiKey, setProviderApiKey] = useState("");
   const [localPhpVersion, setLocalPhpVersion] = useState<(typeof PHP_OPTIONS)[number]>("8.2");
   const [saveToken, setSaveToken] = useState("");
@@ -18,9 +19,22 @@ export function ConfigAssistant() {
   useEffect(() => {
     logAdmin("info", "ConfigAssistant: opened");
     void (async () => {
-      const env = await loadDockerEnvPublic();
-      if (!env.ok) return;
-      if (PHP_OPTIONS.includes(env.phpVersion as (typeof PHP_OPTIONS)[number])) {
+      const [activeConfig, env] = await Promise.all([loadWpDevConfig(), loadDockerEnvPublic()]);
+
+      if (activeConfig) {
+        setRaw(JSON.stringify(activeConfig, null, 2));
+        setConfigSource("active");
+        logAdmin(
+          "info",
+          "ConfigAssistant: initialized form from active wp-dev.config.json",
+          `project=${String(activeConfig.project ?? "?")}`,
+        );
+      } else {
+        setConfigSource("example");
+        logAdmin("info", "ConfigAssistant: active config missing, using example defaults");
+      }
+
+      if (env.ok && PHP_OPTIONS.includes(env.phpVersion as (typeof PHP_OPTIONS)[number])) {
         setLocalPhpVersion(env.phpVersion as (typeof PHP_OPTIONS)[number]);
       }
     })();
@@ -131,6 +145,13 @@ export function ConfigAssistant() {
           stay out of git (see repo <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">.gitignore</code>
           ).
         </p>
+        {configSource === "example" && (
+          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+            Showing example defaults because active <code>wp-dev.config.json</code> was not loaded from this
+            running stack. Verify you opened the correct local URL for this project (from{" "}
+            <code>docker/.env</code> <code>WP_PORT</code>) and that the stack is running.
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           {field("project", ["project"], "Unique per clone; used for Docker Compose -p and backup paths.")}
           {field("local.url", ["local", "url"], "Browser URL for Docker WordPress, e.g. http://localhost:8888")}
