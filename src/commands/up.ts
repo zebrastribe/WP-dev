@@ -196,9 +196,9 @@ async function isPortFree(port: number): Promise<boolean> {
   });
 }
 
-async function findFreePort(startAt: number): Promise<number> {
+async function findFreePort(startAt: number, projectPorts: Set<number>): Promise<number> {
   for (let p = startAt; p <= 65535; p++) {
-    if (await isPortFree(p)) return p;
+    if (isPortOwnedByComposeProject(p, projectPorts) || (await isPortFree(p))) return p;
   }
   throw new Error(`Could not find a free local TCP port from ${startAt}..65535`);
 }
@@ -384,14 +384,62 @@ function printPublishedAccessUrls(loaded: LoadedConfig, wpInstalled?: boolean): 
   );
 }
 
-/** Copy onboarding assets into wordpress/ before containers write files as www-data. */
-function ensureWordPressSetupAssets(loaded: LoadedConfig): void {
+/** Best-effort copy on host; returns false when wp-content is not writable (www-data). */
+function ensureWordPressSetupAssetsOnHost(loaded: LoadedConfig): boolean {
   const wpRoot = resolveFromConfigDir(loaded.configDir, loaded.config.local.wpRoot);
-  mkdirSync(join(wpRoot, "wp-content/mu-plugins"), { recursive: true });
   const src = join(loaded.configDir, "docker/assets/mu-plugins/wp-dev-setup.php");
-  if (existsSync(src)) {
-    copyFileSync(src, join(wpRoot, "wp-content/mu-plugins/wp-dev-setup.php"));
+  if (!existsSync(src)) return true;
+
+  const destDir = join(wpRoot, "wp-content/mu-plugins");
+  const destFile = join(destDir, "wp-dev-setup.php");
+  try {
+    mkdirSync(destDir, { recursive: true });
+    copyFileSync(src, destFile);
     logInfo("up: ensured wp-dev setup mu-plugin in wordpress/wp-content/mu-plugins/");
+    return true;
+  } catch (e) {
+    const code = e && typeof e === "object" && "code" in e ? String(e.code) : "";
+    if (code === "EACCES" || code === "EPERM") {
+      logInfo(
+        "up: wp-content not writable on host (www-data); will install setup mu-plugin via Docker after stack starts",
+      );
+      return false;
+    }
+    throw e;
+  }
+}
+
+/** Install setup mu-plugin via container when host cannot write wp-content/. */
+async function ensureWordPressSetupAssetsViaDocker(loaded: LoadedConfig): Promise<void> {
+  const src = join(loaded.configDir, "docker/assets/mu-plugins/wp-dev-setup.php");
+  if (!existsSync(src)) return;
+  try {
+    await compose(
+      loaded.configDir,
+      loaded.config,
+      [
+        "run",
+        "--rm",
+        "--no-deps",
+        "--user",
+        "0",
+        "--entrypoint",
+        "sh",
+        "wordpress",
+        "-lc",
+        [
+          "mkdir -p /var/www/html/wp-content/mu-plugins",
+          "cp /wp-dev-repo/docker/assets/mu-plugins/wp-dev-setup.php /var/www/html/wp-content/mu-plugins/wp-dev-setup.php",
+          "chown 33:33 /var/www/html/wp-content/mu-plugins/wp-dev-setup.php",
+          "chmod 664 /var/www/html/wp-content/mu-plugins/wp-dev-setup.php",
+        ].join(" && "),
+      ],
+      { stdio: "pipe" },
+    );
+    logInfo("up: ensured wp-dev setup mu-plugin via Docker");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logInfo(`up: could not install setup mu-plugin via Docker (${msg})`);
   }
 }
 
@@ -458,7 +506,7 @@ async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
 
 export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
-  ensureWordPressSetupAssets(loaded);
+  const muPluginOnHost = ensureWordPressSetupAssetsOnHost(loaded);
   const envPath = ensureComposeEnvExists(loaded);
   const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const sslEnabled = /^(1|true|yes)$/i.test(readEnvValue(envContent, "WPDEV_LOCAL_HTTPS"));
@@ -496,7 +544,10 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
           : conflictPort === runnerPort
             ? "WPDEV_TERMINAL_RUNNER_PORT"
             : "WP_PORT";
-    const nextPort = await findFreePort(conflictPort + 1);
+    const nextPort = await findFreePort(
+      conflictPort + 1,
+      await getComposePublishedHostPorts(loaded.configDir, loaded.config),
+    );
     setPortInEnvFile(envPath, key, nextPort);
     if (key === "WP_PORT") {
       maybeUpdateLocalUrlPort(loaded, nextPort);
@@ -526,6 +577,9 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
     logInfo(`up: mysql readiness wait skipped (${msg})`);
   }
   await applyRuntimeWritePermissionsWithRetry(loaded);
+  if (!muPluginOnHost) {
+    await ensureWordPressSetupAssetsViaDocker(loaded);
+  }
   let wpInstalled: boolean | undefined;
   try {
     wpInstalled = await isLocalWpInstalled(loaded.configDir, loaded.config);
