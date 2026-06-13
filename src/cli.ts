@@ -199,25 +199,34 @@ async function main(): Promise<void> {
   program
     .command("doctor")
     .description(
-      "Check Docker prereq and remote SSH + wp core is-installed (optional rsync pull --dry-run)",
+      "Check local/remote SSH + WordPress; optional rsync dry-run and HTTP probes",
     )
     .argument("[env]", "staging | production (default: both)")
     .option("--rsync", "After WP-CLI check, run rsync pull --dry-run (no DB, no file writes)")
     .option("--http", "Probe remote URL status/redirect chain and verify final host")
-    .action(async (env: string | undefined, opts: { rsync?: boolean; http?: boolean }) => {
+    .option(
+      "--local-http",
+      "Probe local site URL; fail on redirect to wrong localhost port or stale home/siteurl",
+    )
+    .action(async (env: string | undefined, opts: { rsync?: boolean; http?: boolean; localHttp?: boolean }) => {
       const rsync = Boolean(opts.rsync);
       const http = Boolean(opts.http);
+      const localHttp = Boolean(opts.localHttp);
       const envTrim = env?.trim();
       const parsedEnv =
         envTrim && envTrim.length > 0 ? parseRemoteEnv(envTrim) : undefined;
-      const label = parsedEnv
-        ? `doctor ${parsedEnv}${rsync ? " --rsync" : ""}${http ? " --http" : ""}`
-        : `doctor${rsync ? " --rsync" : ""}${http ? " --http" : ""}`;
+      const flags = [
+        rsync ? " --rsync" : "",
+        http ? " --http" : "",
+        localHttp ? " --local-http" : "",
+      ].join("");
+      const label = parsedEnv ? `doctor ${parsedEnv}${flags}` : `doctor${flags}`;
       await runWithConfig(label, (loaded) =>
         cmdDoctor(loaded, {
           env: parsedEnv,
           rsyncDryRun: rsync,
           httpCheck: http,
+          localHttpCheck: localHttp,
         }),
       );
     });
