@@ -79,7 +79,10 @@ export async function cmdFixRuntimeWritePermissions(
       "wordpress",
       "-lc",
       [
+        "mkdir -p /var/www/html/wp-content/mu-plugins",
         "mkdir -p /var/www/html/wp-content/uploads /var/www/html/wp-content/upgrade",
+        "mkdir -p /var/www/html/wp-content/plugins /var/www/html/wp-content/themes",
+        "mkdir -p /var/www/html/wp-content/cache",
         "chown -R 33:33 /var/www/html/wp-content",
         "find /var/www/html/wp-content -type d -exec chmod 775 {} +",
         "find /var/www/html/wp-content -type f -exec chmod 664 {} +",

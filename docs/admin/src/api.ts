@@ -41,7 +41,8 @@ export function apiPhpUrl(
     | "simply-test"
     | "staging-https-check"
     | "staging-domain-check"
-    | "staging-db-check",
+    | "staging-db-check"
+    | "local-status",
 ): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return `${origin}/admin/api.php?action=${action}`;
@@ -55,6 +56,24 @@ export type SimplyStatusResponse =
 export type DockerEnvPublicResponse =
   | { ok: true; phpVersion: string }
   | { ok: false; error: string };
+
+export type LocalStatus = {
+  configPresent: boolean;
+  configIsExample: boolean;
+  adminBuilt: boolean;
+  wpConfigPresent: boolean;
+  wpInstalled: boolean;
+  hasSyncedContent: boolean;
+  hasSyncedPlugins: boolean;
+  pluginCount: number;
+  needsSetup: boolean;
+  setupPhase: "fresh" | "configured" | "installed-empty" | "ready";
+  writable: { wpContent: boolean; plugins: boolean; upgrade: boolean };
+  adminUrl: string;
+  installUrl: string;
+};
+
+export type LocalStatusResponse = { ok: true } & LocalStatus | { ok: false; error: string };
 
 export type TerminalRunnerSecretsResponse =
   | {
@@ -107,6 +126,36 @@ export async function loadWpDevConfig(): Promise<Record<string, unknown> | null>
   } catch (e) {
     logAdmin("error", "loadWpDevConfig: network or fetch failed", e instanceof Error ? e.message : String(e));
     return null;
+  }
+}
+
+export async function loadLocalStatus(): Promise<LocalStatusResponse> {
+  const url = apiPhpUrl("local-status");
+  const t0 = performance.now();
+  logAdmin("info", "loadLocalStatus: request started", url);
+  try {
+    const res = await fetch(url, { method: "GET", credentials: "same-origin" });
+    const ms = Math.round(performance.now() - t0);
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch {
+      logAdmin("error", "loadLocalStatus: response is not JSON", `${res.status} ${ms}ms`);
+      return { ok: false, error: "invalid_response" };
+    }
+    if (!res.ok || !data || typeof data !== "object" || (data as { ok?: boolean }).ok !== true) {
+      const err =
+        data && typeof data === "object" && "error" in data
+          ? String((data as { error: unknown }).error)
+          : `HTTP ${res.status}`;
+      logAdmin("warn", "loadLocalStatus: failed", err);
+      return { ok: false, error: err };
+    }
+    logAdmin("info", "loadLocalStatus: ok", `phase=${String((data as LocalStatus).setupPhase)} ${ms}ms`);
+    return data as LocalStatusResponse;
+  } catch (e) {
+    logAdmin("error", "loadLocalStatus: network or fetch failed", e instanceof Error ? e.message : String(e));
+    return { ok: false, error: "network_error" };
   }
 }
 

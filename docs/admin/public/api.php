@@ -299,6 +299,120 @@ function wpdev_admin_api_log(string $message): void
     @file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
 }
 
+/**
+ * @return array<string, mixed>
+ */
+function wpdev_local_status(): array
+{
+    global $configPath;
+    $wpRoot = '/var/www/html';
+    $configPresent = is_file($configPath) && is_readable($configPath);
+    $configIsExample = false;
+    if ($configPresent) {
+        $raw = (string) file_get_contents($configPath);
+        $configIsExample = str_contains($raw, 'example.invalid');
+    }
+    $adminBuilt = is_file($wpRoot . '/admin/index.html');
+    $wpConfigPresent = is_file($wpRoot . '/wp-config.php');
+
+    $pluginDirs = [];
+    $pluginsPath = $wpRoot . '/wp-content/plugins';
+    if (is_dir($pluginsPath)) {
+        foreach (scandir($pluginsPath) ?: [] as $name) {
+            if ($name === '.' || $name === '..' || $name === 'index.php') {
+                continue;
+            }
+            if (is_dir($pluginsPath . '/' . $name)) {
+                $pluginDirs[] = $name;
+            }
+        }
+    }
+    $defaultPlugins = ['akismet', 'hello-dolly', 'hello'];
+    $nonDefaultPlugins = array_values(array_filter(
+        $pluginDirs,
+        static fn(string $p): bool => !in_array(strtolower($p), $defaultPlugins, true)
+    ));
+    $hasSyncedPlugins = count($nonDefaultPlugins) > 0;
+
+    $uploadsPath = $wpRoot . '/wp-content/uploads';
+    $hasUploads = false;
+    if (is_dir($uploadsPath)) {
+        foreach (scandir($uploadsPath) ?: [] as $name) {
+            if ($name === '.' || $name === '..') {
+                continue;
+            }
+            if (is_file($uploadsPath . '/' . $name) || is_dir($uploadsPath . '/' . $name)) {
+                $hasUploads = true;
+                break;
+            }
+        }
+    }
+
+    $wpInstalled = false;
+    $dbHost = getenv('WORDPRESS_DB_HOST') ?: 'db:3306';
+    $dbUser = getenv('WORDPRESS_DB_USER') ?: 'wordpress';
+    $dbPass = getenv('WORDPRESS_DB_PASSWORD') ?: 'wordpress';
+    $dbName = getenv('WORDPRESS_DB_NAME') ?: 'wordpress';
+    $prefix = getenv('WORDPRESS_TABLE_PREFIX') ?: 'wp_';
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $prefix)) {
+        $prefix = 'wp_';
+    }
+    $host = $dbHost;
+    $port = 3306;
+    if (str_contains($dbHost, ':')) {
+        [$host, $portStr] = explode(':', $dbHost, 2);
+        $port = (int) $portStr;
+        if ($port <= 0) {
+            $port = 3306;
+        }
+    }
+    $mysqli = @new mysqli($host, $dbUser, $dbPass, $dbName, $port);
+    if (!$mysqli->connect_errno) {
+        $table = $prefix . 'options';
+        $sql = "SELECT option_value FROM `{$table}` WHERE option_name='siteurl' LIMIT 1";
+        $res = @$mysqli->query($sql);
+        if ($res instanceof mysqli_result && $res->num_rows > 0) {
+            $row = $res->fetch_assoc();
+            $wpInstalled = is_array($row) && trim((string) ($row['option_value'] ?? '')) !== '';
+        }
+        $mysqli->close();
+    }
+
+    $hasSyncedContent = $hasSyncedPlugins || $hasUploads;
+    $needsSetup = !$wpInstalled || !$hasSyncedContent;
+    $setupPhase = 'ready';
+    if (!$configPresent || $configIsExample) {
+        $setupPhase = 'fresh';
+    } elseif ($needsSetup) {
+        $setupPhase = $wpInstalled ? 'installed-empty' : 'configured';
+    }
+
+    $writable = [
+        'wpContent' => is_dir($wpRoot . '/wp-content') && is_writable($wpRoot . '/wp-content'),
+        'plugins' => is_dir($pluginsPath) && is_writable($pluginsPath),
+        'upgrade' => is_dir($wpRoot . '/wp-content/upgrade') && is_writable($wpRoot . '/wp-content/upgrade'),
+    ];
+    if (!is_dir($wpRoot . '/wp-content/upgrade')) {
+        $writable['upgrade'] = is_writable($wpRoot . '/wp-content');
+    }
+
+    return [
+        'configPresent' => $configPresent,
+        'configIsExample' => $configIsExample,
+        'adminBuilt' => $adminBuilt,
+        'wpConfigPresent' => $wpConfigPresent,
+        'wpInstalled' => $wpInstalled,
+        'hasSyncedContent' => $hasSyncedContent,
+        'hasSyncedPlugins' => $hasSyncedPlugins,
+        'pluginCount' => count($pluginDirs),
+        'needsSetup' => $needsSetup,
+        'setupPhase' => $setupPhase,
+        'writable' => $writable,
+        'adminUrl' => '/admin/',
+        'installUrl' => '/wp-admin/install.php',
+    ];
+}
+
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $action = $_GET['action'] ?? '';
 wpdev_admin_api_log("request method={$method} action={$action}");
@@ -320,6 +434,13 @@ if ($method === 'GET' && $action === 'load') {
     $len = strlen($raw);
     wpdev_admin_api_log("GET load 200 bytes={$len}");
     echo $raw;
+    exit;
+}
+
+if ($method === 'GET' && $action === 'local-status') {
+    $status = wpdev_local_status();
+    wpdev_admin_api_log('GET local-status 200');
+    echo json_encode(['ok' => true, ...$status], JSON_UNESCAPED_SLASHES);
     exit;
 }
 
