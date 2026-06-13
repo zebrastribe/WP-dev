@@ -186,6 +186,7 @@ Each **`wp-dev up`** / **`down`** uses **`docker compose -p <id>`** where **`<id
 **Typical flow:** **`wp-dev up`** → configure remotes → **`wp-dev pull staging`** or **`pull production`** (files + DB + URL rewrite toward **`local.url`**).
 
 - **`pull`:** if WordPress is **already** installed locally, a **pre-pull** DB dump is written under **`~/.wp-dev/backups/<project>/local/`** before overwrite (skip on first empty install, or use **`--no-backup-local`**).  
+- **`up`:** after the stack starts, syncs WordPress **`home`/`siteurl`** to the published local URL when loopback ports drift (see **`purpose/rfc-sync-wordpress-url-on-port-change.md`**).  
 - **`push`:** writes a **pre-push** SQL snapshot on the remote before overwriting the server DB (path printed when done).  
 - **First-time `push staging` bootstrap:** if no WordPress install exists yet at `staging.path`, wp-dev seeds files only and prints next steps. Finish remote WP install (`/wp-admin/install.php`), then run `push staging` again for DB + search-replace.
 - **`wp-dev backup`** / **`wp-dev restore`** — manual DB export/import.  
@@ -232,7 +233,7 @@ npm run wp-dev -- up
 | **`wp-dev fix-permissions`** | Fix **`wordpress/`** ownership for rsync (host vs `www-data`) |
 | **`wp-dev status`** | Local stack health, WP install state, URL check, recent backups |
 | **`wp-dev validate`** | Config + Docker prereqs; **`--remote staging|production`** for SSH/WP check |
-| **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`**, **`--http`** |
+| **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`**, **`--http`**, **`--local-http`** (detect stale localhost port redirects) |
 | **`wp-dev pull`** / **`push`** | Sync with pre-backup, URL verify, DB rollback on failure; **`push staging`** requires typing SSH host |
 | **`wp-dev backup`** / **`restore`** | DB by default; **`backup --files`** = DB + **`wp-content`** tarball; **`restore`** always creates pre-restore DB backup |
 | **`wp-dev logs`** | Tail **`logs/wp-dev.log`** |
@@ -362,6 +363,7 @@ Docker often creates files as **`www-data` (uid 33)** while host **`rsync`** run
 | **rsync path errors** | Wrong **`path`** or unreadable tree — verify on server. |
 | **Empty SQL dump after `pull`** | WP-CLI / **`path`** / permissions — check **`logs/wp-dev.log`**. |
 | **Wrong links after `pull`** | Ensure **`local.url`** (including port) is correct. `pull` now rewrites common remote URL variants (`http/https`, `www/non-www`) and forces local `home/siteurl`; if needed run an extra **`wp search-replace`** — [Remote `url`](#remote-url-and-search-replace). |
+| **Redirect to old localhost port after `up`** | Another clone took your port; wp-dev bumped **`WP_PORT`** but DB still had old **`home`/`siteurl`**. Run **`npm run wp-dev -- up`** (syncs DB URLs on startup) or **`doctor --local-http`**. Clear page cache if a plugin still redirects. |
 | **`mkstemp` under `wordpress/`** | **`wp-dev fix-permissions`**. |
 | **`caching_sha2_password` on import** | Use shipped Compose **`mysql_native_password`**; fix old DB user or volume. |
 | **Can't connect to `db` right after `up`** | Wait for healthy **`db`** or retry **`pull`**. |

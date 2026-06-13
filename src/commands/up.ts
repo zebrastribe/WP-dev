@@ -5,6 +5,7 @@ import { assertDockerReady } from "../utils/docker-prereq.js";
 import { logInfo } from "../utils/logger.js";
 import { getPublishedLocalAccess } from "../utils/published-local-urls.js";
 import { openBrowserCommand } from "../utils/platform-hints.js";
+import { syncLocalWordPressUrls } from "../utils/sync-local-urls.js";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
@@ -509,6 +510,31 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
     wpInstalled = await isLocalWpInstalled(loaded.configDir, loaded.config);
   } catch {
     wpInstalled = undefined;
+  }
+  try {
+    const sync = await syncLocalWordPressUrls(loaded);
+    if (sync.synced) {
+      const from =
+        sync.replacedFrom && sync.replacedFrom.length > 0
+          ? ` (search-replace: ${sync.replacedFrom.join(", ")})`
+          : "";
+      console.error(
+        `Synced WordPress home/siteurl to ${sync.expectedUrl}${from}. ` +
+          `Previous: home=${sync.previousHome ?? "?"} siteurl=${sync.previousSiteurl ?? "?"}`,
+      );
+    } else if (!sync.skipped && !sync.synced) {
+      console.error(
+        `Warning: WordPress URLs may still differ from ${sync.expectedUrl}. ` +
+          `home=${sync.previousHome ?? "?"} siteurl=${sync.previousSiteurl ?? "?"}. ` +
+          `Try: npm run wp-dev -- doctor --local-http`,
+      );
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logInfo(`up: could not sync WordPress URLs (${msg})`);
+    console.error(
+      `Warning: could not sync WordPress home/siteurl to the published local URL (${msg}).`,
+    );
   }
   printPublishedAccessUrls(loaded, wpInstalled);
 }
