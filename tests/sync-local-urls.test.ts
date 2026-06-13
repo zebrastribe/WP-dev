@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   collectStaleLoopbackUrls,
   getLoopbackReplaceCandidates,
+  loopbackContentRegexPatterns,
   loopbackRedirectUsesWrongPort,
   normalizeSiteUrl,
 } from "../src/utils/sync-local-urls.js";
@@ -59,5 +60,11 @@ describe("sync-local-urls", () => {
 
   it("normalizeSiteUrl strips trailing slash", () => {
     expect(normalizeSiteUrl("http://localhost:8888/")).toBe("http://localhost:8888");
+  });
+
+  it("loopbackContentRegexPatterns targets stale localhost ports in content", () => {
+    const patterns = loopbackContentRegexPatterns("http://localhost:8894");
+    expect(patterns.some((p) => p.pattern.includes("[0-9]+"))).toBe(true);
+    expect(patterns.every((p) => p.replacement === "http://localhost:8894")).toBe(true);
   });
 });

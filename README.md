@@ -186,7 +186,7 @@ Each **`wp-dev up`** / **`down`** uses **`docker compose -p <id>`** where **`<id
 **Typical flow:** **`wp-dev up`** → configure remotes → **`wp-dev pull staging`** or **`pull production`** (files + DB + URL rewrite toward **`local.url`**).
 
 - **`pull`:** if WordPress is **already** installed locally, a **pre-pull** DB dump is written under **`~/.wp-dev/backups/<project>/local/`** before overwrite (skip on first empty install, or use **`--no-backup-local`**).  
-- **`up`:** after the stack starts, syncs WordPress **`home`/`siteurl`** to the published local URL when loopback ports drift (see **`purpose/rfc-sync-wordpress-url-on-port-change.md`**).  
+- **`up`:** after the stack starts, syncs WordPress **`home`/`siteurl`** and sweeps stale **`http(s)://localhost:<port>`** URLs in DB content to the published local URL; keeps **`WP_PORT`** stable when this clone already owns the port (see **`purpose/prompt-wp-dev-maintainer-port-stability.md`**).  
 - **`push`:** writes a **pre-push** SQL snapshot on the remote before overwriting the server DB (path printed when done).  
 - **First-time `push staging` bootstrap:** if no WordPress install exists yet at `staging.path`, wp-dev seeds files only and prints next steps. Finish remote WP install (`/wp-admin/install.php`), then run `push staging` again for DB + search-replace.
 - **`wp-dev backup`** / **`wp-dev restore`** — manual DB export/import.  
@@ -363,7 +363,8 @@ Docker often creates files as **`www-data` (uid 33)** while host **`rsync`** run
 | **rsync path errors** | Wrong **`path`** or unreadable tree — verify on server. |
 | **Empty SQL dump after `pull`** | WP-CLI / **`path`** / permissions — check **`logs/wp-dev.log`**. |
 | **Wrong links after `pull`** | Ensure **`local.url`** (including port) is correct. `pull` now rewrites common remote URL variants (`http/https`, `www/non-www`) and forces local `home/siteurl`; if needed run an extra **`wp search-replace`** — [Remote `url`](#remote-url-and-search-replace). |
-| **Redirect to old localhost port after `up`** | Another clone took your port; wp-dev bumped **`WP_PORT`** but DB still had old **`home`/`siteurl`**. Run **`npm run wp-dev -- up`** (syncs DB URLs on startup) or **`doctor --local-http`**. Clear page cache if a plugin still redirects. |
+| **Redirect to old localhost port after `up`** | Another clone took your port, or menus/content still reference an old port. Run **`npm run wp-dev -- up`** twice — second run should not bump **`WP_PORT`** if this stack owns it. Sync fixes options + DB content; use **`doctor --local-http`**. Clear plugin page cache if needed. |
+| **Every `up` bumps `WP_PORT` with no other clones** | Fixed in recent wp-dev: ports owned by this compose project are no longer treated as conflicts. **`git pull`**, **`npm run build`**, **`up`** again. |
 | **`mkstemp` under `wordpress/`** | **`wp-dev fix-permissions`**. |
 | **`caching_sha2_password` on import** | Use shipped Compose **`mysql_native_password`**; fix old DB user or volume. |
 | **Can't connect to `db` right after `up`** | Wait for healthy **`db`** or retry **`pull`**. |
