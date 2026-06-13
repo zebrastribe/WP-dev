@@ -1,14 +1,15 @@
 {
   "name": "wp-dev",
   "version": "0.1.0",
-  "description": "Linux-first WordPress dev CLI: local Docker, pull/push staging & production",
+  "description": "WordPress dev CLI for macOS and Linux: local Docker, pull/push over SSH",
   "type": "module",
   "bin": {
     "wp-dev": "./dist/cli.js"
   },
   "scripts": {
-    "check": "node scripts/check-docker.mjs",
-    "setup": "node scripts/check-docker.mjs && npm install && npm run build && npm ci --prefix docs/admin && npm run build --prefix docs/admin && npm run build:wp --prefix docs/admin",
+    "check": "node scripts/check-prereqs.mjs",
+    "setup": "node scripts/check-prereqs.mjs && npm install && npm run build && npm ci --prefix docs/admin && npm run build --prefix docs/admin && npm run build:wp --prefix docs/admin",
+    "quickstart": "npm run setup && npm run wp-dev -- quickstart",
     "generate:config-artifacts": "tsx scripts/generate-config-artifacts.ts",
     "build": "npm run generate:config-artifacts && tsc",
     "postbuild": "node scripts/chmod-cli.mjs",

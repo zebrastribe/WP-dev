@@ -11,6 +11,9 @@ import { cmdBackup, type BackupTarget } from "./commands/backup.js";
 import { cmdRestore, type RestoreTarget } from "./commands/restore.js";
 import { cmdLogs } from "./commands/logs.js";
 import { cmdInit } from "./commands/init.js";
+import { cmdStatus } from "./commands/status.js";
+import { cmdValidate } from "./commands/validate.js";
+import { cmdQuickstart } from "./commands/quickstart.js";
 import { cmdSimplySetupStagingDns, cmdSimplyTest } from "./commands/simply.js";
 import { cmdFixPermissions } from "./commands/fix-permissions.js";
 import { cmdDoctor } from "./commands/doctor.js";
@@ -194,15 +197,6 @@ async function main(): Promise<void> {
     });
 
   program
-    .command("fix-permissions")
-    .description(
-      "Chown bind-mounted wordpress/ to your host uid:gid (fixes rsync after Docker created files as www-data)",
-    )
-    .action(async () => {
-      await runWithConfig("fix-permissions", cmdFixPermissions);
-    });
-
-  program
     .command("doctor")
     .description(
       "Check Docker prereq and remote SSH + wp core is-installed (optional rsync pull --dry-run)",
@@ -226,6 +220,42 @@ async function main(): Promise<void> {
           httpCheck: http,
         }),
       );
+    });
+
+  program
+    .command("fix-permissions")
+    .description(
+      "Chown bind-mounted wordpress/ to your host uid:gid (fixes rsync after Docker created files as www-data)",
+    )
+    .action(async () => {
+      await runWithConfig("fix-permissions", cmdFixPermissions);
+    });
+
+  program
+    .command("quickstart")
+    .description("macOS/Linux friendly first run: check tools, start Docker, open setup wizard")
+    .action(async () => {
+      await runWithConfig("quickstart", cmdQuickstart);
+    });
+
+  program
+    .command("status")
+    .description("Show local stack health, WordPress install state, and recent backups")
+    .action(async () => {
+      await runWithConfig("status", cmdStatus);
+    });
+
+  program
+    .command("validate")
+    .description("Validate config and Docker prereqs (optional remote SSH check)")
+    .option("--remote <env>", "Also verify SSH + wp on staging or production")
+    .action(async (opts: { remote?: string }) => {
+      const remote =
+        opts.remote?.trim() === "staging" || opts.remote?.trim() === "production"
+          ? (opts.remote.trim() as RemoteEnvName)
+          : undefined;
+      const label = remote ? `validate --remote ${remote}` : "validate";
+      await runWithConfig(label, (loaded) => cmdValidate(loaded, { remote }));
     });
 
   program
@@ -275,11 +305,14 @@ async function main(): Promise<void> {
 
   program
     .command("backup")
-    .description("Export database only to ~/.wp-dev/backups/<project>/<env>/")
+    .description("Export database (or DB + wp-content with --files) to ~/.wp-dev/backups/<project>/<env>/")
     .argument("<env>", "local | staging | production")
-    .action(async (env: string) => {
+    .option("--files", "Include wp-content in a .tar.gz full backup")
+    .action(async (env: string, opts: { files?: boolean }) => {
       const t = parseBackupTarget(env);
-      await runWithConfig(`backup ${t}`, (loaded) => cmdBackup(loaded, t));
+      await runWithConfig(`backup ${t}${opts.files ? " --files" : ""}`, (loaded) =>
+        cmdBackup(loaded, t, { files: Boolean(opts.files) }),
+      );
     });
 
   program

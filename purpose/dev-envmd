@@ -6,9 +6,11 @@ Keep V1 minimal, stable, and production-safe.
 
 ---
 
-# 🚨 V1 SCOPE (STRICT)
+# wp-dev — design notes (updated)
 
-Only implement:
+This document describes the intended scope of **wp-dev**. The project now includes a **browser admin UI** (`/admin/`), **Simply.com API** integration, **localhost HTTPS**, and a **PHP version selector** — beyond the original V1 GUI/API exclusion list.
+
+---
 
 ## 1. Local Development Environment
 

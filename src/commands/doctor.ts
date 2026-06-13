@@ -8,6 +8,7 @@ import { assertRemoteWpInstalled } from "../services/wpcli.js";
 import { getSimplyApiKey, SIMPLY_API_KEY_ENV } from "../services/simply.js";
 import { inferApexFromConfig } from "../services/simply-staging.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
+import { assertHostSyncTools } from "../utils/host-prereq.js";
 import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
 import { logInfo } from "../utils/logger.js";
 
@@ -185,6 +186,9 @@ async function checkOneRemote(
 
 export async function cmdDoctor(loaded: LoadedConfig, options: DoctorOptions): Promise<void> {
   assertDockerReady();
+  if (options.rsyncDryRun) {
+    assertHostSyncTools();
+  }
   const { config } = loaded;
   console.error("\nwp-dev doctor — read-only remote checks (no pull/push, no DB import)\n");
   console.error(`project: ${config.project}`);

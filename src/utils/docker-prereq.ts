@@ -1,12 +1,14 @@
 import { execaSync } from "execa";
 
+import { dockerStartHint } from "../utils/platform-hints.js";
+
 /** Ensures Docker engine and Compose v2 are available (same rules as `npm run check`). */
 export function assertDockerReady(): void {
   try {
     execaSync("docker", ["version"], { stdio: "pipe" });
   } catch {
     throw new Error(
-      "Docker is not installed or the daemon is not running. Start Docker, then run `wp-dev up` again.",
+      `Docker is not installed or the daemon is not running. ${dockerStartHint()}`,
     );
   }
   try {

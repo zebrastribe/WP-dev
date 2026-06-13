@@ -145,15 +145,11 @@ function commandForAction(action, args) {
     if (kind === "full") {
       return [
         "set -e",
-        `CFG="$(node -e 'try{const c=require("/workspace/wp-dev.config.json");const r=c["${env}"]||{};const p=String(c.project||"site").replace(/[^a-zA-Z0-9_-]/g,"-");process.stdout.write(["PROJECT="+p,"HOST="+String(r.host||""),"USER="+String(r.user||""),"REMOTE_PATH="+String(r.path||""),"PORT="+String(r.port||""),"KEY="+String(r.identityFile||"")].join("\\n"))}catch{process.exit(1)}')"`,
-        'eval "$CFG"',
+        `eval "$(node /workspace/docker/runner-remote-env.mjs ${env})"`,
         `test -n "$HOST" && test -n "$USER" && test -n "$REMOTE_PATH" || { echo "Missing ${env} SSH settings in wp-dev.config.json"; exit 1; }`,
         'STAMP="$(date +%F-%H-%M-%S)"',
         `OUT="$HOME/.wp-dev/backups/$PROJECT/${env}/full-$STAMP.tar.gz"`,
         'mkdir -p "$(dirname "$OUT")"',
-        `SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=15 -o UpdateHostKeys=no"`,
-        'test -n "$PORT" && SSH_OPTS="$SSH_OPTS -o Port=$PORT"',
-        'test -n "$KEY" && SSH_OPTS="$SSH_OPTS -i $KEY"',
         `REMOTE_DIR="/tmp/wp-dev-full-${env}-$STAMP"`,
         `ssh $SSH_OPTS "$USER@$HOST" "set -e; mkdir -p \\"$REMOTE_DIR\\"; cd \\"$REMOTE_PATH\\"; wp db export \\"$REMOTE_DIR/db.sql\\" --allow-root >/dev/null; tar -czf \\"$REMOTE_DIR/full.tar.gz\\" -C \\"$REMOTE_PATH\\" wp-content -C \\"$REMOTE_DIR\\" db.sql"`,
         `scp $SSH_OPTS "$USER@$HOST:$REMOTE_DIR/full.tar.gz" "$OUT"`,
@@ -191,13 +187,9 @@ function commandForAction(action, args) {
     if (safeArg(file).endsWith(".tar.gz")) {
       return [
         "set -e",
-        `CFG="$(node -e 'try{const c=require("/workspace/wp-dev.config.json");const r=c["${env}"]||{};process.stdout.write(["HOST="+String(r.host||""),"USER="+String(r.user||""),"REMOTE_PATH="+String(r.path||""),"PORT="+String(r.port||""),"KEY="+String(r.identityFile||"")].join("\\n"))}catch{process.exit(1)}')"`,
-        'eval "$CFG"',
+        `eval "$(node /workspace/docker/runner-remote-env.mjs ${env})"`,
         `test -n "$HOST" && test -n "$USER" && test -n "$REMOTE_PATH" || { echo "Missing ${env} SSH settings in wp-dev.config.json"; exit 1; }`,
         `test -f ${file} || { echo "Backup file not found: ${file}"; exit 1; }`,
-        `SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=15 -o UpdateHostKeys=no"`,
-        'test -n "$PORT" && SSH_OPTS="$SSH_OPTS -o Port=$PORT"',
-        'test -n "$KEY" && SSH_OPTS="$SSH_OPTS -i $KEY"',
         `STAMP="$(date +%s)"`,
         `REMOTE_DIR="/tmp/wp-dev-restore-full-${env}-$STAMP"`,
         `ssh $SSH_OPTS "$USER@$HOST" "mkdir -p \\"$REMOTE_DIR\\""`,

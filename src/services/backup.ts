@@ -19,6 +19,18 @@ export function timestampedDbName(): string {
   return `db-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}.sql`;
 }
 
+export function timestampedFullName(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `full-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}.tar.gz`;
+}
+
+export function timestampedPreRestoreName(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `pre-restore-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}.sql`;
+}
+
 export function assertBackupFileExists(path: string): void {
   if (!existsSync(path)) {
     throw new Error(`Backup file not found: ${path}`);

@@ -14,9 +14,25 @@
 | **Docker** | Engine + **Compose v2** (`docker compose`) |
 | **For `pull` / `push`** | Remote machine with **SSH**, **rsync**, **WP-CLI** on the WordPress root you configure |
 
+Works on **macOS** (Docker Desktop, including Apple Silicon) and **Linux**. On Mac, `ssh` and `rsync` are built in; install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and keep the project folder under your home directory so bind mounts work.
+
 `wp-dev` does **not** create SSH keys for you. You need a keypair and access on the server (see [SSH keypair](#ssh-keypair-not-created-by-wp-dev)).
 
 **Optional:** [Simply.com](https://www.simply.com/en/docs/api/) API — `simply.account` in config + **`WPDEV_SIMPLY_API_KEY`** in the environment — for DNS helpers (`wp-dev simply …`). See [Simply.com staging DNS](#simplycom-staging-dns-api).
+
+---
+
+## macOS
+
+| | |
+|--|--|
+| **Docker** | [Docker Desktop](https://www.docker.com/products/docker-desktop/) — open it and wait until it says **Running** before `wp-dev up`. |
+| **Project path** | Keep the clone under your home folder (e.g. `~/Projects/WP-dev`). Docker Desktop cannot bind-mount arbitrary paths outside allowed directories. |
+| **First run** | `npm run quickstart` — checks tools, builds, starts the stack, prints the wizard URL and `open "…/admin/"`. |
+| **SSH key** | `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519` then `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` — upload the `.pub` file to your host. |
+| **Save token** | After `wp-dev up`, copy **`WPDEV_ADMIN_SAVE_TOKEN`** from **`docker/.env`** into the wizard (Terminal: `grep WPDEV_ADMIN docker/.env`). |
+
+On Mac, **`wp-dev up`** and **`wp-dev status`** print an **`open "http://localhost:…/admin/"`** command you can paste into Terminal.
 
 ---
 
@@ -24,20 +40,30 @@
 
 **Goal:** clone → install → start Docker → set **`wp-dev.config.json`** → open WordPress in the browser.
 
+**macOS (simplest path):**
+
+```bash
+git clone https://github.com/zebrastribe/WP-dev.git
+cd WP-dev
+npm run quickstart       # checks Docker Desktop + ssh/rsync, builds, starts stack, opens wizard
+```
+
+**Linux / manual:**
+
 ```bash
 git clone https://github.com/zebrastribe/WP-dev.git
 cd WP-dev
 npm run setup          # Docker check, npm install, build CLI + admin UI into wordpress/admin/
 ```
 
-1. **`wp-dev up`** — starts MySQL + WordPress + WP-CLI service.  
+1. **`wp-dev up`** (or use **`npm run quickstart`** on Mac — runs **`up`** for you).  
    - On first run, ensure `docker/.env` has these required values:
      - `WPDEV_ADMIN_SAVE_TOKEN` (required for browser save actions)
      - `WPDEV_TERMINAL_AUTH` (terminal username/password in `user:password` format)
      - `WPDEV_TERMINAL_RUNNER_TOKEN` (required for one-click terminal actions)
      - `WPDEV_TERMINAL_RUNNER_ORIGIN` (usually `http://localhost:<WP_PORT>`)
 2. **Configure** — either:
-   - **Browser:** open **`http://localhost:<WP_PORT>/admin/`** (default port **`8888`** — set **`WP_PORT`** in **`docker/.env`**, copy from **`docker/.env.example`**). Use the host-agnostic **wp-dev** wizard (Welcome / Production Host / Staging Host / Save / Links) → **Save** writes **`wp-dev.config.json`** and then shows quick links. The UI also has **Generate token** + **Save to docker/.env** for the runner token field.  
+   - **Browser:** open **`http://localhost:<WP_PORT>/admin/`** (default port **`8888`** — set **`WP_PORT`** in **`docker/.env`**, copy from **`docker/.env.example`**). Use the setup wizard (**Start → SSH server → Save & sync → Done**) → **Save** writes **`wp-dev.config.json`**. Admin and runner tokens are separate secrets in **`docker/.env`** (auto-generated on first **`wp-dev up`**).
    - **Terminal:** **`wp-dev init`** (interactive).  
 3. **Open the site** — URL is **`local.url`** in **`wp-dev.config.json`** (example: **`http://localhost:8888`**). Finish the WordPress installer if this is a new DB.
 
@@ -70,7 +96,7 @@ npm run wp-dev -- up
 - Allowed versions: `7.4`, `8.0`, `8.1`, `8.2`, `8.3`, `8.4`.
 - Value is saved in `docker/.env` as `WPDEV_PHP_VERSION`.
 
-**`npm run setup` does not run `pull`.** It only prepares the tool and the admin build.
+**`npm run setup`** and **`npm run quickstart`** do not run **`pull`**. They only prepare the tool and the admin build.
 
 **After you change admin UI code** under **`docs/admin/`**, rebuild: **`npm run admin:build:wp`** (or **`npm run setup`** again).
 
@@ -197,14 +223,18 @@ npm run wp-dev -- up
 
 | Command | Purpose |
 |---------|---------|
-| **`npm run check`** | Docker + Compose available |
+| **`npm run check`** | Docker, Compose, **ssh**, and **rsync** (Mac-aware hints) |
 | **`npm run setup`** | check → install → build (CLI + admin) |
+| **`npm run quickstart`** | setup + **`wp-dev quickstart`** — best first run on **macOS** |
+| **`wp-dev quickstart`** | Start stack, print wizard steps, run **`status`** |
 | **`wp-dev init`** | Interactive **`wp-dev.config.json`** |
 | **`wp-dev up`** / **`down`** | Local stack; **`down`** frees **`WP_PORT`** for this clone. Optional **`down --remove-orphans`** cleans leftover containers. After **`up`**, the CLI prints **browser URLs** using **`docker/.env` `WP_PORT`** when it differs from **`local.url`**. |
 | **`wp-dev fix-permissions`** | Fix **`wordpress/`** ownership for rsync (host vs `www-data`) |
-| **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`** = pull dry-run only |
-| **`wp-dev pull`** / **`push`** | Sync; **`--dry-run`**, **`pull --no-backup-local`** |
-| **`wp-dev backup`** / **`restore`** | DB only |
+| **`wp-dev status`** | Local stack health, WP install state, URL check, recent backups |
+| **`wp-dev validate`** | Config + Docker prereqs; **`--remote staging|production`** for SSH/WP check |
+| **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`**, **`--http`** |
+| **`wp-dev pull`** / **`push`** | Sync with pre-backup, URL verify, DB rollback on failure; **`push staging`** requires typing SSH host |
+| **`wp-dev backup`** / **`restore`** | DB by default; **`backup --files`** = DB + **`wp-content`** tarball; **`restore`** always creates pre-restore DB backup |
 | **`wp-dev logs`** | Tail **`logs/wp-dev.log`** |
 | **`wp-dev simply test`** | Simply API check |
 | **`wp-dev simply setup-staging-dns [apex]`** | Staging DNS + config hints ([details](#simplycom-staging-dns-api)) |
@@ -234,13 +264,24 @@ Then `push staging` can seed files, create remote `wp-config.php`, import DB, an
 
 ---
 
+## Sync failure recovery
+
+If **`pull`** or **`push`** fails mid-way:
+
+- **Database:** wp-dev rolls back the target DB from the automatic pre-pull / pre-push backup when possible. Paths are printed in the CLI output under **`~/.wp-dev/backups/<project>/`**.
+- **Files:** rsync may have partially updated files. Re-run sync after fixing the error, or restore from **`wp-dev backup <env> --files`** (full tarball).
+- **Verify:** run **`wp-dev status`** locally or **`wp-dev validate --remote production`** before retrying.
+
+---
+
 ## SSH keypair (not created by wp-dev)
 
 1. **`ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "you@host"`**  
-2. **VPS:** append **`~/.ssh/id_ed25519.pub`** to **`~/.ssh/authorized_keys`** for that user.  
-3. **Shared hosting:** upload the public key in the **control panel** (SSH / SFTP section).  
-4. Test: **`ssh -i ~/.ssh/id_ed25519 user@host`** with the same **host** and **user** as in config.  
-5. In **`wp-dev init`**, set **`identityFile`** if not using the default key.
+2. **macOS:** **`ssh-add --apple-use-keychain ~/.ssh/id_ed25519`** so the key loads after reboot.  
+3. **VPS:** append **`~/.ssh/id_ed25519.pub`** to **`~/.ssh/authorized_keys`** for that user.  
+4. **Shared hosting:** upload the public key in the **control panel** (SSH / SFTP section).  
+5. Test: **`ssh -i ~/.ssh/id_ed25519 user@host`** with the same **host** and **user** as in config.  
+6. In **`wp-dev init`**, set **`identityFile`** if not using the default key.
 
 **Key reuse:** SSH keys are normally machine/user-level identity and can be reused across multiple projects and hosts. Upload the same public key to each host account that should trust this machine. Only upload **`.pub`** (never the private key).
 
@@ -310,6 +351,8 @@ Docker often creates files as **`www-data` (uid 33)** while host **`rsync`** run
 
 | Problem | What to try |
 |---------|-------------|
+| **Docker not running (Mac)** | Open **Docker Desktop**, wait until **Running**, then **`wp-dev up`**. |
+| **Bind mount fails (Mac)** | Move the project under **`~/…`**; avoid **`/Volumes/…`** or system folders Docker Desktop blocks. |
 | **`npx wp-dev` Permission denied** | **`chmod +x dist/cli.js`** or **`npm run build`** (postbuild fixes execute bit). |
 | **Port 8888 in use** | **`docker/.env`** → **`WP_PORT`**, and match **`local.url`**. |
 | **No `wp-dev.config.json`** | **`npm install`** (postinstall copies example) or copy **`wp-dev.config.example.json`**. |

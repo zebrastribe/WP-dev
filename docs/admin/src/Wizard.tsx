@@ -32,6 +32,11 @@ function guessSiteUrlFromSshHost(host: string): string {
   return `https://${h}`;
 }
 
+function isMacBrowser(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Mac/i.test(navigator.platform || navigator.userAgent);
+}
+
 function skipStagingWizardStep(workflow: SetupWorkflow, hasStagingServer: boolean): boolean {
   return workflow === "pull" && !hasStagingServer;
 }
@@ -1002,6 +1007,14 @@ export function Wizard() {
                 <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
                   WordPress file permissions look wrong (plugins may fail to update). Run:{" "}
                   <code className="rounded bg-white/80 px-1 dark:bg-slate-900">npm run wp-dev -- up</code>
+                </p>
+              )}
+              {isMacBrowser() && (
+                <p className="mt-2 text-xs text-brand-800 dark:text-brand-200">
+                  macOS: from the repo folder run{" "}
+                  <code className="rounded bg-white/80 px-1 dark:bg-slate-900">npm run quickstart</code>{" "}
+                  — checks Docker Desktop, starts the stack, and opens this wizard. Keep the project under your home
+                  folder so Docker can bind-mount <code className="rounded bg-white/80 px-1 dark:bg-slate-900">wordpress/</code>.
                 </p>
               )}
             </div>
@@ -2008,6 +2021,15 @@ export function Wizard() {
           <p className="text-sm text-slate-600 dark:text-slate-400">
             Save token is required. Set <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code> in{" "}
             <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>, then paste the same value here.
+            {isMacBrowser() && (
+              <>
+                {" "}
+                On Mac, find it with{" "}
+                <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">grep WPDEV_ADMIN docker/.env</code> in
+                Terminal, or open the <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker</code> folder
+                in Finder.
+              </>
+            )}
           </p>
           <label className="block">
             <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Save token *</span>

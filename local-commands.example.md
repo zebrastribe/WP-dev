@@ -1,5 +1,22 @@
 # Common Commands
 
+## macOS first run
+
+```bash
+git clone https://github.com/zebrastribe/WP-dev.git
+cd WP-dev
+npm run quickstart
+# wizard opens at http://localhost:8888/admin/ — choose "Sync from my server (SSH only)"
+```
+
+SSH key (one-time on Mac):
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+# upload ~/.ssh/id_ed25519.pub to your host
+```
+
 ## Full refresh
 
 ```bash

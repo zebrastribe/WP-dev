@@ -4,6 +4,7 @@ import { compose } from "../services/docker-compose.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
 import { logInfo } from "../utils/logger.js";
 import { getPublishedLocalAccess } from "../utils/published-local-urls.js";
+import { openBrowserCommand } from "../utils/platform-hints.js";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
@@ -105,19 +106,18 @@ function ensureSecurityEnvDefaults(envPath: string): void {
 
   const needsAdminToken = !adminToken || adminToken.includes("change-me");
   const needsRunnerToken = !runnerToken || runnerToken.includes("change-me");
-  const sharedToken = needsAdminToken || needsRunnerToken ? makeToken() : "";
 
   let next = current;
   let changed = false;
   const changedKeys: string[] = [];
 
   if (needsAdminToken) {
-    next = setEnvValueInContent(next, "WPDEV_ADMIN_SAVE_TOKEN", sharedToken);
+    next = setEnvValueInContent(next, "WPDEV_ADMIN_SAVE_TOKEN", makeToken());
     changed = true;
     changedKeys.push("WPDEV_ADMIN_SAVE_TOKEN");
   }
   if (needsRunnerToken) {
-    next = setEnvValueInContent(next, "WPDEV_TERMINAL_RUNNER_TOKEN", sharedToken || makeToken());
+    next = setEnvValueInContent(next, "WPDEV_TERMINAL_RUNNER_TOKEN", makeToken());
     changed = true;
     changedKeys.push("WPDEV_TERMINAL_RUNNER_TOKEN");
   }
@@ -349,6 +349,10 @@ function printPublishedAccessUrls(loaded: LoadedConfig, wpInstalled?: boolean): 
   } else {
     console.error(`\nLocal WordPress: ${site}`);
     console.error(`Browser admin:   ${admin}`);
+  }
+  const openCmd = openBrowserCommand(wpInstalled === false ? admin : admin);
+  if (openCmd) {
+    console.error(`Open in browser: ${openCmd}`);
   }
   console.error(
     `\nTo stop this stack and free the published port: npm run wp-dev -- down`,
