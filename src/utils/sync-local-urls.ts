@@ -5,6 +5,7 @@ import {
   wpLocalForceSiteUrls,
   wpLocalRaw,
   wpLocalSearchReplace,
+  wpLocalSearchReplaceRegex,
 } from "../services/wpcli.js";
 import { getLocalUrlPortMismatch, getPublishedLocalAccess } from "./published-local-urls.js";
 import { getUrlVariants } from "./url-variants.js";
@@ -82,6 +83,17 @@ export function getLoopbackReplaceCandidates(url: string): string[] {
   return [...out];
 }
 
+/** Regex patterns for stale loopback URLs embedded in post content, menus, etc. */
+export function loopbackContentRegexPatterns(expectedUrl: string): Array<{ pattern: string; replacement: string }> {
+  const base = normalizeSiteUrl(expectedUrl);
+  return [
+    { pattern: "http://localhost:[0-9]+", replacement: base },
+    { pattern: "https://localhost:[0-9]+", replacement: base },
+    { pattern: "http://127\\.0\\.0\\.1:[0-9]+", replacement: base },
+    { pattern: "https://127\\.0\\.0\\.1:[0-9]+", replacement: base },
+  ];
+}
+
 /** True when a redirect target is loopback but uses a different port than expected. */
 export function loopbackRedirectUsesWrongPort(
   expectedUrl: string,
@@ -101,13 +113,15 @@ export type SyncLocalUrlsResult = {
   skipped: boolean;
   skipReason?: "not_installed" | "not_loopback";
   synced: boolean;
+  urlsOk: boolean;
   expectedUrl: string;
   previousHome?: string | null;
   previousSiteurl?: string | null;
   replacedFrom?: string[];
+  contentReplacements?: number;
 };
 
-/** Align wp-dev.config.json local.url with docker/.env WP_PORT when loopback ports drift. */
+/** Align wp-dev.config.json local.url loopback port with WP_PORT. */
 export function alignLocalUrlConfigToPublishedPort(loaded: LoadedConfig): boolean {
   const mismatch = getLocalUrlPortMismatch(loaded);
   if (!mismatch) return false;
@@ -129,62 +143,94 @@ async function wpLocalCacheFlushBestEffort(
   }
 }
 
+async function sweepStaleLoopbackContentInDb(
+  configDir: string,
+  config: LoadedConfig["config"],
+  expectedUrl: string,
+): Promise<number> {
+  let total = 0;
+  for (const { pattern, replacement } of loopbackContentRegexPatterns(expectedUrl)) {
+    logInfo(`sync-local-urls: regex search-replace /${pattern}/ -> ${replacement}`);
+    const n = await wpLocalSearchReplaceRegex(configDir, config, pattern, replacement);
+    total += n;
+  }
+  return total;
+}
+
 export async function syncLocalWordPressUrls(loaded: LoadedConfig): Promise<SyncLocalUrlsResult> {
   alignLocalUrlConfigToPublishedPort(loaded);
 
   const { site: expectedUrl } = getPublishedLocalAccess(loaded);
   const expectedParsed = tryParseUrl(expectedUrl);
   if (!expectedParsed || !isLoopbackHostname(expectedParsed.hostname)) {
-    return { skipped: true, skipReason: "not_loopback", synced: false, expectedUrl };
+    return {
+      skipped: true,
+      skipReason: "not_loopback",
+      synced: false,
+      urlsOk: false,
+      expectedUrl,
+    };
   }
 
   const { configDir, config } = loaded;
   const installed = await isLocalWpInstalled(configDir, config);
   if (!installed) {
-    return { skipped: true, skipReason: "not_installed", synced: false, expectedUrl };
+    return {
+      skipped: true,
+      skipReason: "not_installed",
+      synced: false,
+      urlsOk: false,
+      expectedUrl,
+    };
   }
 
   const before = await verifyLocalSiteUrls(configDir, config, expectedUrl);
-  if (before.ok) {
-    return { skipped: false, synced: false, expectedUrl };
-  }
-
   const previousHome = before.home;
   const previousSiteurl = before.siteurl;
-  const staleUrls = collectStaleLoopbackUrls(previousHome, previousSiteurl, expectedUrl);
   const replacedFrom: string[] = [];
 
-  for (const stale of staleUrls) {
-    const candidates = getLoopbackReplaceCandidates(stale).filter(
-      (c) => normalizeSiteUrl(c) !== normalizeSiteUrl(expectedUrl),
-    );
-    for (const fromUrl of candidates) {
-      logInfo(`sync-local-urls: search-replace ${fromUrl} -> ${expectedUrl}`);
-      await wpLocalSearchReplace(configDir, config, fromUrl, expectedUrl);
-      replacedFrom.push(fromUrl);
+  if (!before.ok) {
+    const staleUrls = collectStaleLoopbackUrls(previousHome, previousSiteurl, expectedUrl);
+    for (const stale of staleUrls) {
+      const candidates = getLoopbackReplaceCandidates(stale).filter(
+        (c) => normalizeSiteUrl(c) !== normalizeSiteUrl(expectedUrl),
+      );
+      for (const fromUrl of candidates) {
+        logInfo(`sync-local-urls: search-replace ${fromUrl} -> ${expectedUrl}`);
+        await wpLocalSearchReplace(configDir, config, fromUrl, expectedUrl);
+        replacedFrom.push(fromUrl);
+      }
     }
   }
+
+  const contentReplacements = await sweepStaleLoopbackContentInDb(configDir, config, expectedUrl);
 
   logInfo(`sync-local-urls: force option home/siteurl -> ${expectedUrl}`);
   await wpLocalForceSiteUrls(configDir, config, expectedUrl);
 
-  try {
-    await wpLocalCacheFlushBestEffort(configDir, config);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logInfo(`sync-local-urls: cache flush skipped (${msg})`);
+  if (!before.ok || contentReplacements > 0) {
+    try {
+      await wpLocalCacheFlushBestEffort(configDir, config);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logInfo(`sync-local-urls: cache flush skipped (${msg})`);
+    }
   }
 
   const afterHome = await wpLocalGetOption(configDir, config, "home");
   const afterSiteurl = await wpLocalGetOption(configDir, config, "siteurl");
-  const ok = siteUrlsMatchExpected(afterHome, afterSiteurl, expectedUrl);
+  const urlsOk = siteUrlsMatchExpected(afterHome, afterSiteurl, expectedUrl);
+  const synced =
+    !before.ok || contentReplacements > 0 || replacedFrom.length > 0;
 
   return {
     skipped: false,
-    synced: ok,
+    synced,
+    urlsOk,
     expectedUrl,
     previousHome,
     previousSiteurl,
     replacedFrom: replacedFrom.length > 0 ? [...new Set(replacedFrom)] : undefined,
+    contentReplacements,
   };
 }

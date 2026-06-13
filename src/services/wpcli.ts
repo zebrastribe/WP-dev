@@ -450,14 +450,46 @@ export async function wpLocalSearchReplace(
   from: string,
   to: string,
 ): Promise<void> {
-  const r = await wpLocalRaw(configDir, config, [
-    "search-replace",
-    from,
-    to,
-    "--skip-columns=guid",
-    "--precise",
-  ]);
+  const r = await wpLocalSearchReplaceRaw(configDir, config, from, to, false);
   if (r.exitCode !== 0) {
     throw new Error(`Local wp search-replace failed: ${r.stderr || r.stdout}`);
   }
+}
+
+export function parseSearchReplaceReplacementCount(stdout: string): number {
+  const m = (stdout || "").match(/Made (\d+) replacements?/i);
+  if (!m) return 0;
+  const n = Number.parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function wpLocalSearchReplaceRaw(
+  configDir: string,
+  config: WpDevConfig,
+  from: string,
+  to: string,
+  regex: boolean,
+): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  const args = ["search-replace", from, to, "--skip-columns=guid", "--precise"];
+  if (regex) args.push("--regex");
+  const r = await wpLocalRaw(configDir, config, args);
+  return {
+    exitCode: r.exitCode,
+    stdout: r.stdout || "",
+    stderr: r.stderr || "",
+  };
+}
+
+/** Regex search-replace in the local DB; returns WP-CLI replacement count. */
+export async function wpLocalSearchReplaceRegex(
+  configDir: string,
+  config: WpDevConfig,
+  pattern: string,
+  replacement: string,
+): Promise<number> {
+  const r = await wpLocalSearchReplaceRaw(configDir, config, pattern, replacement, true);
+  if (r.exitCode !== 0) {
+    throw new Error(`Local wp search-replace (regex) failed: ${r.stderr || r.stdout}`);
+  }
+  return parseSearchReplaceReplacementCount(r.stdout);
 }

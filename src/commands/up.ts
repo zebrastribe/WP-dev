@@ -6,6 +6,10 @@ import { logInfo } from "../utils/logger.js";
 import { getPublishedLocalAccess } from "../utils/published-local-urls.js";
 import { openBrowserCommand } from "../utils/platform-hints.js";
 import { syncLocalWordPressUrls } from "../utils/sync-local-urls.js";
+import {
+  getComposePublishedHostPorts,
+  isPortOwnedByComposeProject,
+} from "../utils/compose-published-ports.js";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
@@ -130,7 +134,7 @@ function ensureSecurityEnvDefaults(envPath: string): void {
   const shouldResetOrigin =
     !runnerOrigin ||
     runnerOrigin.includes("change-me") ||
-    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(runnerOrigin);
+    runnerOriginPortMismatch(runnerOrigin, Number.parseInt(currentWpPort, 10));
   if (shouldResetOrigin) {
     next = setEnvValueInContent(
       next,
@@ -199,11 +203,21 @@ async function findFreePort(startAt: number): Promise<number> {
   throw new Error(`Could not find a free local TCP port from ${startAt}..65535`);
 }
 
-function maybeUpdateLocalUrlPort(
-  loaded: LoadedConfig,
-  oldPort: number,
-  newPort: number,
-): void {
+function runnerOriginPortMismatch(runnerOrigin: string, wpPort: number): boolean {
+  let u: URL;
+  try {
+    u = new URL(runnerOrigin);
+  } catch {
+    return true;
+  }
+  const host = u.hostname.toLowerCase();
+  if (host !== "localhost" && host !== "127.0.0.1") return false;
+  const currentPort =
+    u.port.length > 0 ? Number.parseInt(u.port, 10) : u.protocol === "https:" ? 443 : 80;
+  return currentPort !== wpPort;
+}
+
+function maybeUpdateLocalUrlPort(loaded: LoadedConfig, newPort: number): void {
   const raw = loaded.config.local.url;
   let u: URL;
   try {
@@ -213,14 +227,14 @@ function maybeUpdateLocalUrlPort(
   }
   const host = u.hostname.toLowerCase();
   const currentPort = u.port.length > 0 ? Number.parseInt(u.port, 10) : u.protocol === "https:" ? 443 : 80;
-  if ((host === "localhost" || host === "127.0.0.1") && currentPort === oldPort) {
+  if ((host === "localhost" || host === "127.0.0.1") && currentPort !== newPort) {
     u.port = String(newPort);
     loaded.config.local.url = u.toString().replace(/\/$/, "");
     writeWpDevConfig(loaded.configDir, loaded.config);
   }
 }
 
-function maybeUpdateRunnerOriginPort(envPath: string, oldPort: number, newPort: number): void {
+function maybeUpdateRunnerOriginPort(envPath: string, newPort: number): void {
   const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const runnerOrigin = readEnvValue(current, "WPDEV_TERMINAL_RUNNER_ORIGIN");
   if (!runnerOrigin) return;
@@ -233,7 +247,7 @@ function maybeUpdateRunnerOriginPort(envPath: string, oldPort: number, newPort: 
   const host = u.hostname.toLowerCase();
   const currentPort =
     u.port.length > 0 ? Number.parseInt(u.port, 10) : u.protocol === "https:" ? 443 : 80;
-  if ((host === "localhost" || host === "127.0.0.1") && currentPort === oldPort) {
+  if ((host === "localhost" || host === "127.0.0.1") && currentPort !== newPort) {
     u.port = String(newPort);
     const next = setEnvValueInContent(
       current,
@@ -274,13 +288,20 @@ async function ensureNonConflictingPublishedPorts(
       Number.isFinite(currentHostRunnerPort) && currentHostRunnerPort > 0 ? currentHostRunnerPort : 7683,
   };
 
+  const projectPorts = await getComposePublishedHostPorts(loaded.configDir, loaded.config);
+
   const used = new Set<number>();
   let changed = false;
+
+  const portAvailable = async (candidate: number): Promise<boolean> => {
+    if (isPortOwnedByComposeProject(candidate, projectPorts)) return true;
+    return isPortFree(candidate);
+  };
 
   const allocate = async (key: keyof typeof current, startAt: number): Promise<number> => {
     let candidate = startAt;
     while (candidate <= 65535) {
-      if (!used.has(candidate) && (await isPortFree(candidate))) {
+      if (!used.has(candidate) && (await portAvailable(candidate))) {
         used.add(candidate);
         return candidate;
       }
@@ -292,8 +313,8 @@ async function ensureNonConflictingPublishedPorts(
   const nextWpPort = await allocate("WP_PORT", current.WP_PORT);
   if (nextWpPort !== current.WP_PORT) {
     setPortInEnvFile(envPath, "WP_PORT", nextWpPort);
-    maybeUpdateLocalUrlPort(loaded, current.WP_PORT, nextWpPort);
-    maybeUpdateRunnerOriginPort(envPath, current.WP_PORT, nextWpPort);
+    maybeUpdateLocalUrlPort(loaded, nextWpPort);
+    maybeUpdateRunnerOriginPort(envPath, nextWpPort);
     changed = true;
   }
   const nextHttpsPort = await allocate("WP_HTTPS_PORT", current.WP_HTTPS_PORT);
@@ -478,8 +499,8 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
     const nextPort = await findFreePort(conflictPort + 1);
     setPortInEnvFile(envPath, key, nextPort);
     if (key === "WP_PORT") {
-      maybeUpdateLocalUrlPort(loaded, wpPort, nextPort);
-      maybeUpdateRunnerOriginPort(envPath, wpPort, nextPort);
+      maybeUpdateLocalUrlPort(loaded, nextPort);
+      maybeUpdateRunnerOriginPort(envPath, nextPort);
     }
     ensureSecurityEnvDefaults(envPath);
 
@@ -514,15 +535,19 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   try {
     const sync = await syncLocalWordPressUrls(loaded);
     if (sync.synced) {
-      const from =
-        sync.replacedFrom && sync.replacedFrom.length > 0
-          ? ` (search-replace: ${sync.replacedFrom.join(", ")})`
-          : "";
+      const parts: string[] = [];
+      if (sync.replacedFrom && sync.replacedFrom.length > 0) {
+        parts.push(`options: ${sync.replacedFrom.join(", ")}`);
+      }
+      if ((sync.contentReplacements ?? 0) > 0) {
+        parts.push(`${sync.contentReplacements} content URL replacement(s)`);
+      }
+      const detail = parts.length > 0 ? ` (${parts.join("; ")})` : "";
       console.error(
-        `Synced WordPress home/siteurl to ${sync.expectedUrl}${from}. ` +
+        `Synced WordPress URLs to ${sync.expectedUrl}${detail}. ` +
           `Previous: home=${sync.previousHome ?? "?"} siteurl=${sync.previousSiteurl ?? "?"}`,
       );
-    } else if (!sync.skipped && !sync.synced) {
+    } else if (!sync.skipped && !sync.urlsOk) {
       console.error(
         `Warning: WordPress URLs may still differ from ${sync.expectedUrl}. ` +
           `home=${sync.previousHome ?? "?"} siteurl=${sync.previousSiteurl ?? "?"}. ` +
