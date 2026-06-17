@@ -15,9 +15,51 @@ export type FixRuntimeWritePermissionsOptions = {
   quiet?: boolean;
 };
 
+/** Apache / wpcli user in official wordpress:* images. */
+export const WWW_DATA_UID = 33;
+export const WWW_DATA_GID = 33;
+
+/**
+ * Paths under /var/www/html owned by www-data so wp-admin updates, uploads, and cache work.
+ * Themes are intentionally excluded so the host user can edit wp-content/themes/.
+ */
+export const RUNTIME_WRITE_PATHS = [
+  "wp-content/upgrade",
+  "wp-content/plugins",
+  "wp-content/uploads",
+  "wp-content/cache",
+  "wp-content/languages",
+  "wp-content/mu-plugins",
+] as const;
+
+function shellQuote(path: string): string {
+  return `'${path.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Shell script run inside the wordpress container (root) to fix runtime write ownership. */
+export function buildRuntimeWritePermissionsShell(
+  htmlRoot = "/var/www/html",
+): string {
+  const runtimeAbs = RUNTIME_WRITE_PATHS.map((rel) => `${htmlRoot}/${rel}`);
+  const mkdirTargets = [
+    ...runtimeAbs,
+    `${htmlRoot}/wp-content/themes`,
+  ];
+  const mkdirCmd = mkdirTargets
+    .map((p) => `mkdir -p ${shellQuote(p)}`)
+    .join(" && ");
+  const chownCmd = runtimeAbs
+    .map(
+      (p) =>
+        `chown -R ${WWW_DATA_UID}:${WWW_DATA_GID} ${shellQuote(p)} && find ${shellQuote(p)} -type d -exec chmod 775 {} + && find ${shellQuote(p)} -type f -exec chmod 664 {} +`,
+    )
+    .join(" && ");
+  return `${mkdirCmd} && ${chownCmd}`;
+}
+
 /**
  * chown bind-mounted wordpress/ to the host user so host rsync can write after Docker
- * created files as www-data.
+ * created files as www-data, then restore www-data ownership on runtime-only paths.
  *
  * Uses `--entrypoint chown` so the WordPress image entrypoint does not reset ownership
  * to www-data before our command runs. Uses `--no-deps` so MySQL does not need to be up.
@@ -47,9 +89,11 @@ export async function cmdFixPermissions(
     `${uid}:${gid}`,
     "/var/www/html",
   ]);
+  await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
   if (!options.quiet) {
     console.error(
-      "Updated ownership of wordpress/ for your host user. If Apache cannot write uploads, chown back to www-data inside the container — see README.",
+      "Updated ownership of wordpress/ for your host user (themes, core). " +
+        "Runtime paths (upgrade, plugins, uploads, cache) are www-data for wp-admin updates.",
     );
   }
 }
@@ -64,7 +108,7 @@ export async function cmdFixRuntimeWritePermissions(
   options: FixRuntimeWritePermissionsOptions = {},
 ): Promise<void> {
   assertDockerReady();
-  logInfo("fix-runtime-write-permissions: chown/chmod wp-content for www-data");
+  logInfo("fix-runtime-write-permissions: chown/chmod runtime wp-content paths for www-data");
   await compose(
     loaded.configDir,
     loaded.config,
@@ -78,21 +122,14 @@ export async function cmdFixRuntimeWritePermissions(
       "sh",
       "wordpress",
       "-lc",
-      [
-        "mkdir -p /var/www/html/wp-content/mu-plugins",
-        "mkdir -p /var/www/html/wp-content/uploads /var/www/html/wp-content/upgrade",
-        "mkdir -p /var/www/html/wp-content/plugins /var/www/html/wp-content/themes",
-        "mkdir -p /var/www/html/wp-content/cache",
-        "chown -R 33:33 /var/www/html/wp-content",
-        "find /var/www/html/wp-content -type d -exec chmod 775 {} +",
-        "find /var/www/html/wp-content -type f -exec chmod 664 {} +",
-      ].join(" && "),
+      buildRuntimeWritePermissionsShell(),
     ],
     { stdio: "pipe" },
   );
   if (!options.quiet) {
     console.error(
-      "Updated wp-content ownership/permissions for WordPress runtime writes (uploads/plugins/cache).",
+      "Updated wp-content runtime paths for WordPress writes (upgrade, plugins, uploads, cache). " +
+        "Themes remain host-owned for local editing.",
     );
   }
 }

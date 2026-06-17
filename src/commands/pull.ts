@@ -158,7 +158,7 @@ export async function cmdPull(
         const msg = e instanceof Error ? e.message : String(e);
         logInfo(`pull ${env}: runtime write permissions step failed (${msg})`);
         console.error(
-          "Warning: wp-content runtime write permissions could not be applied. If plugins cannot write files, run: npm run wp-dev -- up",
+          "Warning: wp-content runtime write permissions could not be applied. If plugin updates fail, run: npm run wp-dev -- fix-runtime-permissions",
         );
       }
     } finally {

@@ -128,7 +128,12 @@ export const Commands: FC = () => (
               "Import DB (destructive)",
               "npm run wp-dev -- restore staging ~/.wp-dev/backups/my-site/staging/db-2026-05-05-14-00-00.sql",
             ],
-            ["fix-permissions", "chown wordpress/ for rsync", "npm run wp-dev -- fix-permissions"],
+            ["fix-permissions", "chown wordpress/ for rsync + restore runtime paths", "npm run wp-dev -- fix-permissions"],
+            [
+              "fix-runtime-permissions",
+              "www-data on upgrade/plugins/uploads (wp-admin updates)",
+              "npm run wp-dev -- fix-runtime-permissions",
+            ],
             ["logs", "Tail project log file", "npm run wp-dev -- logs --lines 200"],
           ].map(([cmd, desc, example], i) => (
             <tr key={`${i}-${cmd}`} className="border-b border-slate-100 dark:border-slate-800/80">

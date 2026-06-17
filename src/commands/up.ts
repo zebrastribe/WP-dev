@@ -464,7 +464,7 @@ async function applyRuntimeWritePermissionsWithRetry(
   console.error(
     "Warning: could not apply runtime write permissions for wp-content. Plugin updates may fail.",
   );
-  console.error("Try: npm run wp-dev -- up   (retry)");
+  console.error("Try: npm run wp-dev -- fix-runtime-permissions");
 }
 
 async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {

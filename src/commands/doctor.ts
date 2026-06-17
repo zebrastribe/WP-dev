@@ -15,6 +15,7 @@ import { loopbackRedirectUsesWrongPort } from "../utils/sync-local-urls.js";
 import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
 import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
 import { logInfo } from "../utils/logger.js";
+import { compose } from "../services/docker-compose.js";
 
 export type DoctorOptions = {
   env?: RemoteEnvName;
@@ -56,12 +57,52 @@ async function tryDns(host: string): Promise<{ ok: true } | { ok: false; err: st
   }
 }
 
+async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fail"> {
+  const marker = `wp-dev-doctor-${process.pid}`;
+  const script = [
+    `d=/var/www/html/wp-content/upgrade/${marker}`,
+    `mkdir -p "$d" && touch "$d/.write-test" && rm -rf "$d"`,
+  ].join(" && ");
+  try {
+    await compose(
+      loaded.configDir,
+      loaded.config,
+      [
+        "run",
+        "--rm",
+        "--no-deps",
+        "--user",
+        "33:33",
+        "--entrypoint",
+        "sh",
+        "wordpress",
+        "-lc",
+        script,
+      ],
+      { stdio: "pipe" },
+    );
+    console.error("Local runtime write: OK (www-data can write wp-content/upgrade)");
+    return "ok";
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("Local runtime write: FAIL — www-data cannot write wp-content/upgrade");
+    console.error(
+      "Fix: npm run wp-dev -- fix-runtime-permissions (or fix-permissions, which restores runtime paths automatically)",
+    );
+    logInfo(`doctor: local runtime write check failed (${msg})`);
+    return "fail";
+  }
+}
+
 async function checkLocalSite(
   loaded: LoadedConfig,
   localHttpCheck: boolean,
 ): Promise<"ok" | "fail" | "skip"> {
   const { site } = getPublishedLocalAccess(loaded);
   console.error(`\n--- local (${site}) ---`);
+
+  const runtimeWrite = await checkLocalRuntimeWrite(loaded);
+  if (runtimeWrite === "fail") return "fail";
 
   let installed = false;
   try {
