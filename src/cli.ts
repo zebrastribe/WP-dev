@@ -15,7 +15,10 @@ import { cmdStatus } from "./commands/status.js";
 import { cmdValidate } from "./commands/validate.js";
 import { cmdQuickstart } from "./commands/quickstart.js";
 import { cmdSimplySetupStagingDns, cmdSimplyTest } from "./commands/simply.js";
-import { cmdFixPermissions } from "./commands/fix-permissions.js";
+import {
+  cmdFixPermissions,
+  cmdFixRuntimeWritePermissions,
+} from "./commands/fix-permissions.js";
 import { cmdDoctor } from "./commands/doctor.js";
 import { cmdSslDisable, cmdSslEnable } from "./commands/ssl.js";
 import { cmdPhpSet, cmdPhpShow, cmdPhpValidate } from "./commands/php.js";
@@ -238,6 +241,15 @@ async function main(): Promise<void> {
     )
     .action(async () => {
       await runWithConfig("fix-permissions", cmdFixPermissions);
+    });
+
+  program
+    .command("fix-runtime-permissions")
+    .description(
+      "Chown wp-content runtime paths (upgrade, plugins, uploads, cache) to www-data for wp-admin updates",
+    )
+    .action(async () => {
+      await runWithConfig("fix-runtime-permissions", cmdFixRuntimeWritePermissions);
     });
 
   program
