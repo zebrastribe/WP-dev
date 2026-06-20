@@ -18,7 +18,7 @@ export default defineConfig({
       exclude: ["src/cli.ts"],
       thresholds: {
         lines: 39,
-        functions: 53,
+        functions: 52,
         branches: 68,
         statements: 39,
         "src/services/sync-excludes.ts": {

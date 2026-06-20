@@ -198,6 +198,25 @@ Each **`wp-dev up`** / **`down`** uses **`docker compose -p <id>`** where **`<id
 
 ## Updating this tool in your clone
 
+Use the **Update** tab in `/admin/` (after `wp-dev up`) or run:
+
+```bash
+npm run wp-dev -- update
+```
+
+This pulls the latest wp-dev from git, rebuilds the CLI and admin UI, and optionally restarts the local stack. **Your WordPress site in `wordpress/` is not replaced** — themes, plugins, uploads, and the local database stay as they are. Only `wordpress/admin/` is refreshed when admin rebuild runs (plus an optional setup mu-plugin via `up`).
+
+Options:
+
+| Flag | Effect |
+|------|--------|
+| `--dry-run` | Print steps without running |
+| `--no-admin` | Skip rebuilding `/admin/` |
+| `--no-restart` | Skip `wp-dev down && up` |
+| `--skip-pull` | Rebuild only (no `git pull`) |
+
+Manual equivalent:
+
 ```bash
 cd /path/to/WP-dev
 git pull --rebase --autostash
@@ -209,6 +228,12 @@ npm ci --prefix docs/admin && npm run build:wp --prefix docs/admin   # admin, if
 **`npm run setup`** is a safe full refresh after **`git pull --rebase --autostash`**. Ignored data (**`wp-dev.config.json`**, **`docker/.env`**, **`wordpress/`**, log files) stays on disk.
 
 Quick full refresh (recommended when you use the browser admin and local stack):
+
+```bash
+npm run wp-dev -- update
+```
+
+Or:
 
 ```bash
 git pull --rebase --autostash
@@ -224,6 +249,7 @@ npm run wp-dev -- up
 
 | Command | Purpose |
 |---------|---------|
+| **`wp-dev update`** | Safe tool update from git (preserves **`wordpress/`** site files) |
 | **`npm run check`** | Docker, Compose, **ssh**, and **rsync** (Mac-aware hints) |
 | **`npm run setup`** | check → install → build (CLI + admin) |
 | **`npm run quickstart`** | setup + **`wp-dev quickstart`** — best first run on **macOS** |

@@ -141,6 +141,11 @@ export const Commands: FC = () => (
               "npm run wp-dev -- sync-preview push staging",
             ],
             ["sync-rules", "Show effective push/pull excludes", "npm run wp-dev -- sync-rules"],
+            [
+              "update [--dry-run] [--no-admin] [--no-restart]",
+              "Update wp-dev from git (does not overwrite wordpress/ site)",
+              "npm run wp-dev -- update",
+            ],
             ["logs", "Tail project log file", "npm run wp-dev -- logs --lines 200"],
           ].map(([cmd, desc, example], i) => (
             <tr key={`${i}-${cmd}`} className="border-b border-slate-100 dark:border-slate-800/80">
@@ -238,11 +243,21 @@ export const SimplyDns: FC = () => (
 export const Updating: FC = () => (
   <Prose>
     <p>
-      From the project clone root: <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">git pull</code>, then{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm install</code> and{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run build</code> (or{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run setup</code>). Ignored paths (config,{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wordpress/</code>, <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>) are not touched by git.
+      Use the <strong>Update</strong> tab in{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">/admin/</code> to pull the latest wp-dev tool,
+      rebuild the CLI and admin UI, and restart the local stack. Your WordPress site in{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wordpress/</code> is{" "}
+      <strong>not</strong> replaced (only <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wordpress/admin/</code>{" "}
+      is refreshed when admin rebuild is enabled).
+    </p>
+    <p>
+      CLI: <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run wp-dev -- update</code> — same safe
+      flow as <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">git pull --rebase --autostash</code>,{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm install</code>,{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run build</code>, optional admin rebuild, optional{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">down && up</code>. Ignored paths (config,{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wordpress/</code>,{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>) are not touched by git.
     </p>
   </Prose>
 );

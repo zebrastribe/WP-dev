@@ -616,6 +616,7 @@ export type TerminalAction =
   | "wpdev_push_dry"
   | "wpdev_sync_preview"
   | "wpdev_sync_scan"
+  | "wpdev_update"
   | "backup_create"
   | "backup_list"
   | "restore_env"

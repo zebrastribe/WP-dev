@@ -5,12 +5,13 @@ import { BackupRestore } from "./BackupRestore";
 import { HistoryRollback } from "./HistoryRollback";
 import { TerminalTab } from "./Terminal";
 import { SyncTab } from "./SyncTab";
+import { UpdateTab } from "./UpdateTab";
 import { Wizard } from "./Wizard";
 import { NAV_ITEMS, type NavId } from "./guideSections";
 
 const NOTES_PREFIX = "wpdev-admin-notes-";
 
-type MainTab = "wizard" | "sync" | "terminal" | "backup" | "history" | "docs";
+type MainTab = "wizard" | "sync" | "update" | "terminal" | "backup" | "history" | "docs";
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
@@ -89,6 +90,19 @@ export default function App() {
               }`}
             >
               Sync
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMainTab("update");
+              }}
+              className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                mainTab === "update"
+                  ? "bg-white text-brand-700 shadow dark:bg-slate-900 dark:text-brand-400"
+                  : "text-slate-600 dark:text-slate-400"
+              }`}
+            >
+              Update
             </button>
             <button
               type="button"
@@ -174,6 +188,15 @@ export default function App() {
         <div className="flex flex-1 justify-center bg-slate-50 p-6 dark:bg-slate-950">
           <div className="w-full max-w-5xl rounded-xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
             <SyncTab />
+            <div className="mt-8">
+              <ActivityLog />
+            </div>
+          </div>
+        </div>
+      ) : mainTab === "update" ? (
+        <div className="flex flex-1 justify-center bg-slate-50 p-6 dark:bg-slate-950">
+          <div className="w-full max-w-4xl rounded-xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+            <UpdateTab />
             <div className="mt-8">
               <ActivityLog />
             </div>

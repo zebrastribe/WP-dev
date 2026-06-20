@@ -17,6 +17,7 @@ describe("CLI smoke", () => {
     expect(r.stdout).toContain("sync-preview");
     expect(r.stdout).toContain("sync-scan");
     expect(r.stdout).toContain("fix-runtime-permissions");
+    expect(r.stdout).toContain(" update");
   });
 
   it("wp-dev sync-rules exits 0 with project config", async () => {
@@ -44,5 +45,6 @@ describe("runner smoke", () => {
     expect(src).toContain("wpdev_sync_preview");
     expect(src).toContain("wpdev_sync_scan");
     expect(src).toContain("wpdev_push_dry");
+    expect(src).toContain("wpdev_update");
   });
 });

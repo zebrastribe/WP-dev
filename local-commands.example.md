@@ -19,13 +19,27 @@ ssh-add --apple-use-keychain ~/.ssh/id_ed25519
 
 ## Update wp-dev (after git pull)
 
+Safe update — **does not overwrite your `wordpress/` site** (themes, plugins, uploads, DB):
+
+```bash
+npm run wp-dev -- update
+```
+
+Or from `/admin/` → **Update** tab.
+
+Preview steps only:
+
+```bash
+npm run wp-dev -- update --dry-run
+```
+
+Manual equivalent:
+
 ```bash
 git pull --rebase --autostash &&
 npm run build &&
 npm run wp-dev -- up
 ```
-
-Fixes stale localhost URLs in WordPress (menus/content) and keeps `WP_PORT` stable on re-run.
 
 Verify:
 
