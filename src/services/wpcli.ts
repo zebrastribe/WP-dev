@@ -459,3 +459,24 @@ export async function wpLocalSearchReplace(
     throw new Error(`Local wp search-replace failed: ${r.stderr || r.stdout}`);
   }
 }
+
+/** Run wp search-replace with --regex; returns replacement count from WP-CLI output. */
+export async function wpLocalSearchReplaceRegex(
+  configDir: string,
+  config: WpDevConfig,
+  pattern: string,
+  replacement: string,
+): Promise<number> {
+  const r = await wpLocalRaw(configDir, config, [
+    "search-replace",
+    pattern,
+    replacement,
+    "--regex",
+    "--skip-columns=guid",
+  ]);
+  if (r.exitCode !== 0) {
+    throw new Error(`Local wp search-replace (regex) failed: ${r.stderr || r.stdout}`);
+  }
+  const m = (r.stdout || "").match(/Made (\d+) replacements?/);
+  return m ? Number.parseInt(m[1], 10) : 0;
+}

@@ -7,7 +7,9 @@ export const EXAMPLE_WP_DEV_CONFIG = {
     "path": "./docker",
     "composeFile": "docker-compose.yml",
     "composeService": "wpcli",
-    "wpRoot": "./wordpress"
+    "wpRoot": "./wordpress",
+    "themePath": "./wordpress/wp-content/themes/agency-starter",
+    "themeSlug": "agency-starter"
   },
   "staging": {
     "host": "staging.example.invalid",

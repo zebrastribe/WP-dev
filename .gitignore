@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 docker/.env
+import.auth.env
 wp-dev.config.json
 wordpress/*
 !wordpress/.gitkeep

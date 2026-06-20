@@ -2,6 +2,7 @@ import { lookup } from "node:dns/promises";
 import type { LoadedConfig } from "../config/load.js";
 import { resolveFromConfigDir } from "../config/load.js";
 import { getRemoteEnv, type RemoteEnvName } from "../config/schema.js";
+import { compose } from "../services/docker-compose.js";
 import { connectSsh } from "../services/ssh.js";
 import { rsyncPull } from "../services/rsync.js";
 import { assertRemoteWpInstalled } from "../services/wpcli.js";
@@ -10,6 +11,10 @@ import { inferApexFromConfig } from "../services/simply-staging.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
 import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
 import { logInfo } from "../utils/logger.js";
+import {
+  checkThemeBuildArtifacts,
+  resolveThemePaths,
+} from "../services/theme-path.js";
 
 export type DoctorOptions = {
   env?: RemoteEnvName;
@@ -183,6 +188,67 @@ async function checkOneRemote(
   return "ok";
 }
 
+async function checkLocalRuntimeWritePermissions(loaded: LoadedConfig): Promise<"ok" | "fail"> {
+  console.error("\n--- local (wp-content runtime writes) ---");
+  try {
+    await compose(
+      loaded.configDir,
+      loaded.config,
+      [
+        "run",
+        "--rm",
+        "--no-deps",
+        "--user",
+        "33:33",
+        "--entrypoint",
+        "sh",
+        "wordpress",
+        "-lc",
+        "test -w /var/www/html/wp-content/upgrade && touch /var/www/html/wp-content/upgrade/.wp-dev-write-test && rm -f /var/www/html/wp-content/upgrade/.wp-dev-write-test",
+      ],
+      { stdio: "pipe" },
+    );
+    console.error(
+      "Local runtime writes: OK (www-data can write wp-content/upgrade — plugin updates should work)",
+    );
+    return "ok";
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(
+      `Local runtime writes: FAIL — www-data cannot write wp-content/upgrade (${msg})`,
+    );
+    console.error(
+      "Fix: from WP-dev repo root run `npm run wp-dev -- fix-runtime-permissions` (or `fix-permissions`, which restores runtime paths automatically).",
+    );
+    return "fail";
+  }
+}
+
+function checkLocalTheme(loaded: LoadedConfig): "ok" | "warn" | "skip" {
+  try {
+    const { themeSourcePath, deployDir, slug } = resolveThemePaths(loaded);
+    const check = checkThemeBuildArtifacts(deployDir);
+    console.error(`\n--- local theme (${slug}) ---`);
+    console.error(`source: ${themeSourcePath}`);
+    console.error(`deploy: ${deployDir}`);
+    if (check.ok) {
+      console.error(`Theme build: OK (${check.styleBytes} bytes style.css)`);
+      return "ok";
+    }
+    console.error("Theme build: WARN — production deploy may fail or ship dev assets:");
+    for (const issue of check.issues) {
+      console.error(`  - ${issue}`);
+    }
+    console.error("Fix: `npm run wp-dev -- theme build` before `push theme production`.");
+    return "warn";
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`\n--- local theme ---`);
+    console.error(`SKIP: ${msg}`);
+    return "skip";
+  }
+}
+
 export async function cmdDoctor(loaded: LoadedConfig, options: DoctorOptions): Promise<void> {
   assertDockerReady();
   const { config } = loaded;
@@ -193,11 +259,20 @@ export async function cmdDoctor(loaded: LoadedConfig, options: DoctorOptions): P
     "\nLocal stack: run `wp-dev up` then open local.url. This command does not start Docker.\n",
   );
 
+  let failed = 0;
+  if ((await checkLocalRuntimeWritePermissions(loaded)) === "fail") {
+    failed += 1;
+  }
+  const themeResult = checkLocalTheme(loaded);
+  if (themeResult === "warn") {
+    // Non-fatal — theme may not exist on every wp-dev project
+    logInfo("doctor: local theme build check warned");
+  }
+
   const targets: RemoteEnvName[] = options.env
     ? [options.env]
     : ["staging", "production"];
 
-  let failed = 0;
   let skipped = 0;
   const skippedEnvs: RemoteEnvName[] = [];
   for (const env of targets) {
@@ -211,8 +286,8 @@ export async function cmdDoctor(loaded: LoadedConfig, options: DoctorOptions): P
 
   console.error("");
   if (failed > 0) {
-    console.error(`doctor finished with ${failed} failure(s). Fix SSH/WP-CLI above, then retry.`);
-    throw new Error(`wp-dev doctor: ${failed} remote check(s) failed`);
+    console.error(`doctor finished with ${failed} failure(s). Fix issues above, then retry.`);
+    throw new Error(`wp-dev doctor: ${failed} check(s) failed`);
   }
   if (skipped > 0) {
     const skippedList = skippedEnvs.join(", ");

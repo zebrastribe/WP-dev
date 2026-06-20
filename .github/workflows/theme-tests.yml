@@ -1,0 +1,58 @@
+name: Theme Tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "wordpress/wp-content/themes/agency-starter/**"
+      - ".github/workflows/theme-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "wordpress/wp-content/themes/agency-starter/**"
+      - ".github/workflows/theme-tests.yml"
+
+jobs:
+  agency-starter-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wordpress/wp-content/themes/agency-starter
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: wordpress/wp-content/themes/agency-starter/package-lock.json
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: phpunit
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Production build
+        run: npm run production
+
+      - name: Run JS unit tests
+        run: npm run test:unit
+
+      - name: Run PHP contract tests
+        run: phpunit -c phpunit.xml.dist
+
+      - name: Asset size budgets
+        run: npm run test:budget
+
+      - name: Accessibility contracts (PHPUnit)
+        run: phpunit --filter A11y
+
+      - name: PHPCS (theme PHP)
+        run: composer run php:lint:inc
