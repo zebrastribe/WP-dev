@@ -9,15 +9,19 @@ import {
   loadSimplyStatus,
   loadLocalStatus,
   loadWpDevConfig,
+  readStoredAdminSaveToken,
   runTerminalAction,
   saveDockerEnvSecrets,
   saveWpDevConfig,
   type TerminalAction,
   type LocalStatus,
   verifySimplyApi,
+  writeStoredAdminSaveToken,
+  formatTerminalRunnerSecretsError,
 } from "./api";
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
+import { TerminalEmbed } from "./TerminalEmbed";
 
 const STEP_LABELS = ["Start", "SSH server", "Staging (optional)", "Save & sync", "Done"] as const;
 /** Wizard step index for staging — skipped when syncing from one remote only. */
@@ -216,7 +220,11 @@ export function Wizard() {
   const [data, setData] = useState<WizardData>(defaults);
   const [hasStagingServer, setHasStagingServer] = useState(false);
   const [useProviderIntegration, setUseProviderIntegration] = useState(false);
-  const [saveToken, setSaveToken] = useState("");
+  const [saveToken, setSaveToken] = useState(readStoredAdminSaveToken);
+  const persistSaveToken = useCallback((value: string) => {
+    setSaveToken(value);
+    writeStoredAdminSaveToken(value);
+  }, []);
   const [terminalAuth, setTerminalAuth] = useState("");
   const [terminalWorkdir, setTerminalWorkdir] = useState("/workspace");
   const [terminalSettingsBusy, setTerminalSettingsBusy] = useState(false);
@@ -245,10 +253,8 @@ export function Wizard() {
   const [showTerminal, setShowTerminal] = useState(true);
   const [terminalPort, setTerminalPort] = useState(7681);
   const [runnerToken, setRunnerToken] = useState("");
-  const terminalUrl = (() => {
-    const base = new URL(`${window.location.protocol}//127.0.0.1:${terminalPort}/`);
-    return base.toString();
-  })();
+  const [terminalSecretsReady, setTerminalSecretsReady] = useState(false);
+  const [terminalSecretsError, setTerminalSecretsError] = useState("");
 
   const goStep = useCallback((n: number) => {
     const i = Math.max(0, Math.min(STEP_LABELS.length - 1, n));
@@ -448,12 +454,18 @@ export function Wizard() {
     let cancelled = false;
     (async () => {
       const s = await loadTerminalRunnerSecrets(saveToken.trim() || undefined);
-      if (cancelled || !s.ok) {
-        if (!cancelled && !s.ok) setRunnerToken("");
+      if (cancelled) return;
+      if (!s.ok) {
+        setTerminalSecretsReady(false);
+        setTerminalSecretsError(formatTerminalRunnerSecretsError(s));
+        setRunnerToken("");
         return;
       }
       setTerminalPort(s.terminalPort);
       setRunnerToken(s.runnerToken);
+      setTerminalAuth(s.terminalAuth);
+      setTerminalSecretsReady(true);
+      setTerminalSecretsError("");
     })();
     return () => {
       cancelled = true;
@@ -895,40 +907,14 @@ export function Wizard() {
       );
     })();
   const terminalPanel = (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Browser terminal</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Use this for SSH tests and wp-dev commands in this step.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setShowTerminal((v) => !v)}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs dark:border-slate-700"
-          >
-            {showTerminal ? "Hide terminal" : "Show terminal"}
-          </button>
-          <a
-            href={terminalUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs dark:border-slate-700"
-          >
-            Open in new tab
-          </a>
-        </div>
-      </div>
-      {showTerminal ? (
-        <iframe
-          title="wp-dev terminal"
-          src={terminalUrl}
-          className="h-[360px] w-full rounded-lg border border-slate-200 dark:border-slate-700"
-        />
-      ) : null}
-    </div>
+    <TerminalEmbed
+      terminalPort={terminalPort}
+      terminalAuth={terminalAuth}
+      secretsReady={terminalSecretsReady}
+      secretsError={terminalSecretsError}
+      showTerminal={showTerminal}
+      onToggleShow={() => setShowTerminal((v) => !v)}
+    />
   );
 
   return (
@@ -1136,7 +1122,7 @@ export function Wizard() {
                   type="password"
                   autoComplete="off"
                   value={saveToken}
-                  onChange={(e) => setSaveToken(e.target.value)}
+                  onChange={(e) => persistSaveToken(e.target.value)}
                   placeholder="Required for secure command execution"
                 />
               </label>
@@ -2038,7 +2024,7 @@ export function Wizard() {
               type="password"
               autoComplete="off"
               value={saveToken}
-              onChange={(e) => setSaveToken(e.target.value)}
+              onChange={(e) => persistSaveToken(e.target.value)}
               placeholder="Required"
             />
           </label>

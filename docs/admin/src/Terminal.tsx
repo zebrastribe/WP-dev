@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  formatTerminalRunnerSecretsError,
   getTerminalJobStatus,
   loadTerminalRunnerSecrets,
   readStoredAdminSaveToken,
   runTerminalAction,
   writeStoredAdminSaveToken,
 } from "./api";
+import { AdminSaveTokenField } from "./AdminSaveTokenField";
+import { TerminalEmbed } from "./TerminalEmbed";
 
 type EnvName = "local" | "staging" | "production";
 
@@ -32,20 +35,8 @@ export function TerminalTab() {
       const res = await loadTerminalRunnerSecrets(adminSaveToken.trim() || undefined);
       if (cancelled) return;
       if (!res.ok) {
-        const forbiddenHint =
-          res.error === "forbidden"
-            ? " Enter the same value as WPDEV_ADMIN_SAVE_TOKEN (docker/.env) below and it will be stored in this browser for these tabs."
-            : "";
-        const startupHint =
-          res.error === "not_found"
-            ? "This admin API is outdated. Run: npm run admin:build:wp && npm run wp-dev -- down && npm run wp-dev -- up (in the same clone)."
-            : res.error === "forbidden"
-              ? ""
-              : "Run: npm run wp-dev -- up";
         setRunnerReady(false);
-        setRunnerMessage(
-          `Runner credentials are not initialized yet (${res.error}${res.detail ? `: ${res.detail}` : ""}).${forbiddenHint} ${startupHint}`.trim(),
-        );
+        setRunnerMessage(formatTerminalRunnerSecretsError(res));
         return;
       }
       setTerminalAuth(res.terminalAuth);
@@ -58,11 +49,6 @@ export function TerminalTab() {
       cancelled = true;
     };
   }, [adminSaveToken]);
-
-  const terminalUrl = useMemo(() => {
-    const base = new URL(`${window.location.protocol}//127.0.0.1:${terminalPort}/`);
-    return base.toString();
-  }, [terminalPort]);
 
   const run = async (
     action:
@@ -124,6 +110,14 @@ export function TerminalTab() {
         Use the action buttons below; command output always appears in the lower output window.
       </p>
 
+      <AdminSaveTokenField
+        value={adminSaveToken}
+        onChange={(v) => {
+          setAdminSaveToken(v);
+          writeStoredAdminSaveToken(v);
+        }}
+      />
+
       <div
         className={`rounded border px-3 py-2 text-xs ${
           runnerReady
@@ -134,58 +128,17 @@ export function TerminalTab() {
         {runnerMessage || "Loading terminal settings..."}
       </div>
 
-      <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/40">
-        <label className="block font-medium text-slate-700 dark:text-slate-300">
-          Admin save token (only if WPDEV_ADMIN_SAVE_TOKEN is set in docker/.env)
-        </label>
-        <input
-          type="password"
-          autoComplete="off"
-          value={adminSaveToken}
-          onChange={(e) => {
-            const v = e.target.value;
-            setAdminSaveToken(v);
-            writeStoredAdminSaveToken(v);
-          }}
-          className="mt-1 w-full max-w-md rounded border border-slate-300 bg-white px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
-          placeholder="Paste token to load runner secrets from the API"
-        />
-      </div>
-
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Interactive shell (optional)</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Hidden by default. Open only when you need manual commands; quick actions run below either way.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setShowTerminal((v) => !v)}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs dark:border-slate-700"
-            >
-              {showTerminal ? "Hide terminal" : "Show terminal"}
-            </button>
-            <a
-              href={terminalUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs dark:border-slate-700"
-            >
-              Open in new tab
-            </a>
-          </div>
-        </div>
-        {showTerminal ? (
-          <iframe
-            title="wp-dev terminal"
-            src={terminalUrl}
-            className="h-[420px] w-full rounded-lg border border-slate-200 dark:border-slate-700"
-          />
-        ) : null}
-      </div>
+      <TerminalEmbed
+        terminalPort={terminalPort}
+        terminalAuth={terminalAuth}
+        secretsReady={runnerReady}
+        secretsError={runnerReady ? undefined : runnerMessage}
+        showTerminal={showTerminal}
+        onToggleShow={() => setShowTerminal((v) => !v)}
+        iframeClassName="h-[420px]"
+        title="Interactive shell (optional)"
+        subtitle="Hidden by default. Open only when you need manual commands; quick actions run below either way."
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         {(["local", "staging", "production"] as const).map((x) => (

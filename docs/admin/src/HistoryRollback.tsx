@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  formatTerminalRunnerSecretsError,
   getTerminalJobStatus,
   loadTerminalRunnerSecrets,
   readStoredAdminSaveToken,
   runTerminalAction,
   writeStoredAdminSaveToken,
 } from "./api";
+import { AdminSaveTokenField } from "./AdminSaveTokenField";
 
 type EnvName = "local" | "staging" | "production";
 type BackupKind = "full" | "db";
@@ -36,20 +38,8 @@ export function HistoryRollback() {
       const res = await loadTerminalRunnerSecrets(adminSaveToken.trim() || undefined);
       if (cancelled) return;
       if (!res.ok) {
-        const forbiddenHint =
-          res.error === "forbidden"
-            ? " Enter WPDEV_ADMIN_SAVE_TOKEN below (stored in this browser for Terminal / Backup tabs)."
-            : "";
-        const startupHint =
-          res.error === "not_found"
-            ? "This admin API is outdated. Run: npm run admin:build:wp && npm run wp-dev -- down && npm run wp-dev -- up (in the same clone)."
-            : res.error === "forbidden"
-              ? ""
-              : "Run: npm run wp-dev -- up";
         setRunnerReady(false);
-        setRunnerMessage(
-          `Runner credentials are not initialized yet (${res.error}${res.detail ? `: ${res.detail}` : ""}).${forbiddenHint} ${startupHint}`.trim(),
-        );
+        setRunnerMessage(formatTerminalRunnerSecretsError(res));
         return;
       }
       setTerminalAuth(res.terminalAuth);
@@ -177,6 +167,14 @@ export function HistoryRollback() {
         Roll back WordPress site state by restoring database/file snapshots for local, staging, or production.
       </p>
 
+      <AdminSaveTokenField
+        value={adminSaveToken}
+        onChange={(v) => {
+          setAdminSaveToken(v);
+          writeStoredAdminSaveToken(v);
+        }}
+      />
+
       <div
         className={`rounded border px-3 py-2 text-xs ${
           runnerReady
@@ -185,24 +183,6 @@ export function HistoryRollback() {
         }`}
       >
         {runnerMessage || "Loading runner security settings..."}
-      </div>
-
-      <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/40">
-        <label className="block font-medium text-slate-700 dark:text-slate-300">
-          Admin save token (only if WPDEV_ADMIN_SAVE_TOKEN is set in docker/.env)
-        </label>
-        <input
-          type="password"
-          autoComplete="off"
-          value={adminSaveToken}
-          onChange={(e) => {
-            const v = e.target.value;
-            setAdminSaveToken(v);
-            writeStoredAdminSaveToken(v);
-          }}
-          className="mt-1 w-full max-w-md rounded border border-slate-300 bg-white px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
-          placeholder="Paste token to load runner secrets from the API"
-        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

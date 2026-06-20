@@ -88,6 +88,28 @@ export type TerminalRunnerSecretsResponse =
     }
   | { ok: false; error: string; detail?: string };
 
+/** User-facing message when terminal-runner-secrets cannot load (auth, stack, or API). */
+export function formatTerminalRunnerSecretsError(
+  res: Extract<TerminalRunnerSecretsResponse, { ok: false }>,
+  options?: { prefix?: string },
+): string {
+  const prefix = options?.prefix ?? "Runner credentials are not initialized yet";
+  const core = `${prefix} (${res.error}${res.detail ? `: ${res.detail}` : ""})`;
+  if (res.error === "forbidden") {
+    return `${core}. Paste the same value as WPDEV_ADMIN_SAVE_TOKEN from docker/.env into the Admin save token field below (stored in this browser).`;
+  }
+  if (res.error === "not_found") {
+    return `${core}. Rebuild admin: npm run admin:build:wp && npm run wp-dev -- down && npm run wp-dev -- up.`;
+  }
+  if (res.error === "token_not_configured") {
+    return `${core}. Set WPDEV_ADMIN_SAVE_TOKEN in docker/.env and restart the stack.`;
+  }
+  if (res.error === "runner_secrets_unavailable") {
+    return `${core}. Run npm run wp-dev -- up in this clone.`;
+  }
+  return `${core}. Run npm run wp-dev -- up in this clone.`;
+}
+
 let terminalRunnerPort = 7682;
 let syncRunnerPort = 7683;
 
@@ -587,10 +609,26 @@ export async function checkStagingDomain(payload?: {
   }
 }
 
+/** ttyd on loopback is always plain HTTP, regardless of admin page protocol. */
+export function buildTerminalEmbedUrl(terminalPort: number, terminalAuth?: string): string {
+  const port = Number.isFinite(terminalPort) && terminalPort > 0 ? terminalPort : 7681;
+  const auth = terminalAuth?.trim();
+  if (!auth || !auth.includes(":")) {
+    return `http://127.0.0.1:${port}/`;
+  }
+  const colon = auth.indexOf(":");
+  const user = auth.slice(0, colon);
+  const pass = auth.slice(colon + 1);
+  return `http://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@127.0.0.1:${port}/`;
+}
+
+export function terminalIframeBlockedByHttpsAdmin(): boolean {
+  return typeof window !== "undefined" && window.location.protocol === "https:";
+}
+
 function terminalRunnerBaseUrl(kind: "terminal" | "sync" = "terminal"): string {
-  const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
   const port = kind === "sync" ? syncRunnerPort : terminalRunnerPort;
-  return `${protocol}//127.0.0.1:${port}`;
+  return `http://127.0.0.1:${port}`;
 }
 
 function basicAuthHeader(auth: string): string {
