@@ -7,6 +7,30 @@ import {
   writeStoredAdminSaveToken,
 } from "./api";
 
+type UpdatePreflightJson = {
+  preflight: {
+    isGitRepo: boolean;
+    upstream: string | null;
+    dirtyCount: number;
+    untrackedCount: number;
+    commitsAhead: number | null;
+    commitsBehind: number | null;
+    forkWorkflowRecommended: boolean;
+    warnings: string[];
+  };
+  wordpressSafe: boolean;
+};
+
+function parsePreflightJson(output: string): UpdatePreflightJson | null {
+  const start = output.indexOf("{");
+  if (start < 0) return null;
+  try {
+    return JSON.parse(output.slice(start)) as UpdatePreflightJson;
+  } catch {
+    return null;
+  }
+}
+
 export function UpdateTab() {
   const [terminalAuth, setTerminalAuth] = useState("");
   const [runnerToken, setRunnerToken] = useState("");
@@ -17,6 +41,7 @@ export function UpdateTab() {
   const [restartStack, setRestartStack] = useState(true);
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
+  const [preflight, setPreflight] = useState<UpdatePreflightJson["preflight"] | null>(null);
 
   const canRun = useMemo(
     () => Boolean(runnerReady && terminalAuth.trim() && runnerToken.trim()),
@@ -44,6 +69,38 @@ export function UpdateTab() {
       cancelled = true;
     };
   }, [adminSaveToken]);
+
+  const refreshPreflight = useCallback(async () => {
+    if (!canRun) return;
+    const started = await runTerminalAction(
+      terminalAuth.trim(),
+      runnerToken.trim(),
+      "wpdev_update_preflight",
+      {},
+      "sync",
+    );
+    if (!started.ok) return;
+    for (let i = 0; i < 60; i += 1) {
+      const st = await getTerminalJobStatus(
+        terminalAuth.trim(),
+        runnerToken.trim(),
+        started.jobId,
+        "sync",
+      );
+      if (!st.ok || st.status === "done") {
+        if (st.ok && st.output) {
+          const parsed = parsePreflightJson(st.output);
+          if (parsed?.preflight) setPreflight(parsed.preflight);
+        }
+        return;
+      }
+      await new Promise((r) => window.setTimeout(r, 500));
+    }
+  }, [canRun, runnerToken, terminalAuth]);
+
+  useEffect(() => {
+    if (canRun) void refreshPreflight();
+  }, [canRun, refreshPreflight]);
 
   const runUpdate = useCallback(
     async (dryRun: boolean) => {
@@ -122,6 +179,45 @@ export function UpdateTab() {
       >
         {runnerMessage || "Loading runner…"}
       </div>
+
+      {preflight ? (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            preflight.forkWorkflowRecommended
+              ? "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+              : "border-slate-200 bg-slate-50 text-slate-800 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200"
+          }`}
+        >
+          <p className="font-semibold">Pre-flight check</p>
+          <ul className="mt-2 list-inside list-disc space-y-1 text-xs">
+            <li>Upstream: {preflight.upstream ?? "(none)"}</li>
+            {preflight.commitsBehind != null ? (
+              <li>Behind upstream: {preflight.commitsBehind} commit(s)</li>
+            ) : null}
+            {preflight.commitsAhead != null ? (
+              <li>Ahead of upstream: {preflight.commitsAhead} commit(s)</li>
+            ) : null}
+            <li>Dirty tracked files: {preflight.dirtyCount}</li>
+            <li>Untracked files: {preflight.untrackedCount}</li>
+          </ul>
+          {preflight.forkWorkflowRecommended ? (
+            <p className="mt-2 text-xs">
+              <strong>Fork detected:</strong> create a safety branch and merge upstream manually (see README
+              “Fork updates”). Do not rely on Update alone. Never run <code>git clean -fd</code> mid-merge.
+            </p>
+          ) : null}
+          {preflight.warnings.length > 0 ? (
+            <ul className="mt-2 list-inside list-disc space-y-1 text-xs">
+              {preflight.warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          ) : null}
+          <p className="mt-2 text-xs">
+            Back up gitignored config: wp-dev.config.json, docker/.env, and any project-specific secret files.
+          </p>
+        </div>
+      ) : null}
 
       <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/40">
         <label className="block font-medium text-slate-700 dark:text-slate-300">

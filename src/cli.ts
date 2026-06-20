@@ -295,16 +295,29 @@ async function main(): Promise<void> {
     .option("--no-admin", "Skip rebuilding wordpress/admin/ UI")
     .option("--no-restart", "Skip wp-dev down && up after build")
     .option("--skip-pull", "Skip git pull (rebuild only)")
-    .action(async (opts: { dryRun?: boolean; noAdmin?: boolean; noRestart?: boolean; skipPull?: boolean }) => {
-      await runWithConfig("update", (loaded) =>
-        cmdUpdate(loaded, {
-          dryRun: Boolean(opts.dryRun),
-          noAdmin: Boolean(opts.noAdmin),
-          noRestart: Boolean(opts.noRestart),
-          skipPull: Boolean(opts.skipPull),
-        }),
-      );
-    });
+    .option("--preflight", "Run pre-flight checks only (git dirty/ahead/behind)")
+    .option("--json", "JSON output (with --preflight or --dry-run)")
+    .action(
+      async (opts: {
+        dryRun?: boolean;
+        noAdmin?: boolean;
+        noRestart?: boolean;
+        skipPull?: boolean;
+        preflight?: boolean;
+        json?: boolean;
+      }) => {
+        await runWithConfig("update", (loaded) =>
+          cmdUpdate(loaded, {
+            dryRun: Boolean(opts.dryRun),
+            noAdmin: Boolean(opts.noAdmin),
+            noRestart: Boolean(opts.noRestart),
+            skipPull: Boolean(opts.skipPull),
+            preflightOnly: Boolean(opts.preflight),
+            json: Boolean(opts.json),
+          }),
+        );
+      },
+    );
 
   program
     .command("quickstart")

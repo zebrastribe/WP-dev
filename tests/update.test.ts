@@ -47,6 +47,7 @@ describe("wp-dev update", () => {
       expect(out).toContain("Dry run");
       expect(out).toContain("git");
       expect(out).toContain(UPDATE_WORDPRESS_SAFETY);
+      expect(out).toContain("Pre-flight check");
     } finally {
       stderrSpy.mockRestore();
       rmSync(configDir, { recursive: true, force: true });

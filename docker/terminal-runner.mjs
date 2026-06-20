@@ -134,6 +134,9 @@ function commandForAction(action, args) {
     if (dryRun === "1") flags.push("--dry-run");
     return `npm run wp-dev -- update${flags.length ? ` ${flags.join(" ")}` : ""}`;
   }
+  if (action === "wpdev_update_preflight") {
+    return `npm run wp-dev -- update --preflight --json`;
+  }
   if (action === "backup_create") {
     const env = safeArg(args?.env);
     const kindRaw = safeArg(args?.kind);
