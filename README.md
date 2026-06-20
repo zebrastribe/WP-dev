@@ -238,6 +238,30 @@ Options:
 | `--no-admin` | Skip rebuilding `/admin/` |
 | `--no-restart` | Skip `wp-dev down && up` |
 | `--skip-pull` | Rebuild only (no `git pull`) |
+| `--preflight` | Git pre-flight only (dirty/ahead/behind) |
+| `--json` | Machine-readable output (with `--preflight` or `--dry-run`) |
+
+### Fork updates (local commits on top of wp-dev)
+
+If your clone has **local commits** or **many modified tracked files** (theme deploy tooling, import workspace, etc.), **`wp-dev update` alone is not enough** — it pulls upstream and rebuilds; it does **not** merge your fork commits or resolve conflicts.
+
+Recommended workflow:
+
+```bash
+git checkout -b local/save-work-before-update
+git add … && git commit -m "snapshot local work"
+git checkout main
+git pull --rebase origin main          # or: npm run wp-dev -- update --dry-run first
+npm run wp-dev -- update --skip-pull    # rebuild after you already pulled
+git merge local/save-work-before-update
+# resolve conflicts → npm run generate:config-artifacts → npm run build → npm test
+```
+
+**Do not run `git clean -fd` during a merge** — it removes gitignored secrets (`docker/.env`, project `*.auth.env` files, etc.).
+
+**Before host-side git operations** on bind-mounted paths, run `wp-dev fix-permissions` if Docker created `www-data`-owned files.
+
+Keep fork-specific notes in `docs/` (not duplicate RFCs in `purpose/` — that folder tracks upstream design).
 
 Manual equivalent:
 

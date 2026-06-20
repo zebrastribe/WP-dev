@@ -255,9 +255,16 @@ export const Updating: FC = () => (
       flow as <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">git pull --rebase --autostash</code>,{" "}
       <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm install</code>,{" "}
       <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run build</code>, optional admin rebuild, optional{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">down && up</code>. Ignored paths (config,{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">down && up</code>. Run{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">update --preflight</code> first if you have local
+      commits (fork). Ignored paths (config,{" "}
       <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wordpress/</code>,{" "}
       <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>) are not touched by git.
+    </p>
+    <p>
+      <strong>Forks:</strong> if you are ahead of <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">origin/main</code>, use
+      a safety branch + merge (README “Fork updates”). Never <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">git clean -fd</code>{" "}
+      during an update.
     </p>
   </Prose>
 );
