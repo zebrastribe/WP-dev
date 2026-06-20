@@ -167,6 +167,30 @@ Each **`wp-dev up`** / **`down`** uses **`docker compose -p <id>`** where **`<id
 
 **Rollback:** bad local DB after **`pull`** → **`wp-dev restore local`** with the **`pre-pull-*.sql`** path from the command output (or older files in **`~/.wp-dev/backups/.../local/`**). Bad remote after **`push`** → **`restore`** with **`pre-push-*.sql`**. **Files** and **core** are not snapshotted by wp-dev — use Git and hosting backups.
 
+### Theme-only deploy (production-safe)
+
+For day-to-day theme work, **do not** use **`wp-dev push production`** — it syncs the full **`wordpress/`** tree and overwrites the remote database.
+
+| Goal | Command |
+|------|---------|
+| Build production CSS/JS locally | **`wp-dev theme build`** |
+| Deploy theme to production | **`wp-dev push theme production --build`** |
+| Preview rsync without uploading | **`wp-dev push theme production --dry-run`** |
+| Pull a hotfix from production | **`wp-dev pull theme production`** |
+
+Optional config in **`wp-dev.config.json`** → **`local`**:
+
+```json
+"themePath": "./wordpress/wp-content/themes/agency-starter",
+"themeSlug": "agency-starter"
+```
+
+If omitted, **`themePath`** defaults to **`<wpRoot>/wp-content/themes/agency-starter`**. **`themeSlug`** is read from **`style.css`** (`Text Domain`) or the source folder name.
+
+**`_tw`-style themes** (Agency Starter): source lives in the repo root; the synced folder is **`theme/`** inside that path (where **`style.css`** lives). **Flat themes** with **`style.css`** at the source root are supported too.
+
+See **`docs/theme-deploy-for-all-users.md`** for the full maintainer guide.
+
 ---
 
 ## Updating this tool in your clone
@@ -201,9 +225,12 @@ npm run wp-dev -- up
 | **`npm run setup`** | check → install → build (CLI + admin) |
 | **`wp-dev init`** | Interactive **`wp-dev.config.json`** |
 | **`wp-dev up`** / **`down`** | Local stack; **`down`** frees **`WP_PORT`** for this clone. Optional **`down --remove-orphans`** cleans leftover containers. After **`up`**, the CLI prints **browser URLs** using **`docker/.env` `WP_PORT`** when it differs from **`local.url`**. |
-| **`wp-dev fix-permissions`** | Fix **`wordpress/`** ownership for rsync (host vs `www-data`) |
-| **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`** = pull dry-run only |
-| **`wp-dev pull`** / **`push`** | Sync; **`--dry-run`**, **`pull --no-backup-local`** |
+| **`wp-dev fix-permissions`** | Chown **`wordpress/`** to your host user for rsync/theme editing; also restores **www-data** write access on **`plugins/`**, **`upgrade/`**, **`uploads/`** |
+| **`wp-dev fix-runtime-permissions`** | Restore **www-data** ownership on runtime **`wp-content`** paths only (fixes wp-admin plugin update “Kunne ikke oprette mappe” errors) |
+| **`wp-dev doctor`** | Local **`wp-content/upgrade`** write check + optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`** = pull dry-run only |
+| **`wp-dev pull`** / **`push`** | Sync; **`--dry-run`**, **`pull --no-backup-local`**. **`push`** overwrites remote DB — use **`push theme`** for theme-only deploys |
+| **`wp-dev theme build`** | Run **`npm run production`** in the configured theme source tree |
+| **`wp-dev push theme`** / **`pull theme`** | Sync **theme files only** (no database, no uploads). **`--build`** compiles before push |
 | **`wp-dev backup`** / **`restore`** | DB only |
 | **`wp-dev logs`** | Tail **`logs/wp-dev.log`** |
 | **`wp-dev simply test`** | Simply API check |
@@ -302,7 +329,9 @@ Rsync **excludes** **`wp-config.php`**. Set **`WORDPRESS_TABLE_PREFIX`** in **`d
 
 ### WordPress directory ownership vs `pull`
 
-Docker often creates files as **`www-data` (uid 33)** while host **`rsync`** runs as **you** → **`mkstemp` Permission denied`**. Run **`wp-dev fix-permissions`** to **`chown`** the bind-mounted tree to your uid on the host.
+Docker often creates files as **`www-data` (uid 33)** while host **`rsync`** runs as **you** → **`mkstemp` Permission denied`**. Run **`wp-dev fix-permissions`** to **`chown`** the bind-mounted tree to your uid on the host. That command also restores **www-data** write access on **`wp-content/plugins`**, **`upgrade`**, and **`uploads`** so wp-admin plugin updates keep working.
+
+If wp-admin reports **“Kunne ikke oprette mappe”** under **`wp-content/upgrade`**, run **`wp-dev fix-runtime-permissions`** (or **`wp-dev doctor`** to verify).
 
 ---
 
@@ -319,7 +348,9 @@ Docker often creates files as **`www-data` (uid 33)** while host **`rsync`** run
 | **rsync path errors** | Wrong **`path`** or unreadable tree — verify on server. |
 | **Empty SQL dump after `pull`** | WP-CLI / **`path`** / permissions — check **`logs/wp-dev.log`**. |
 | **Wrong links after `pull`** | Ensure **`local.url`** (including port) is correct. `pull` now rewrites common remote URL variants (`http/https`, `www/non-www`) and forces local `home/siteurl`; if needed run an extra **`wp search-replace`** — [Remote `url`](#remote-url-and-search-replace). |
+| **Redirects to wrong localhost port after `up`** | **`wp-dev up`** keeps ports stable when this clone already owns them, syncs **`home`** / **`siteurl`**, and rewrites stale **`http://localhost:<port>`** URLs across the DB. Run **`wp-dev -- down && wp-dev -- up`** after changing **`WP_PORT`**. |
 | **`mkstemp` under `wordpress/`** | **`wp-dev fix-permissions`**. |
+| **Plugin update: “Kunne ikke oprette mappe” / `wp-content/upgrade`** | **`wp-dev fix-runtime-permissions`** (often after **`fix-permissions`** or host theme edits). **`wp-dev doctor`** checks this. |
 | **`caching_sha2_password` on import** | Use shipped Compose **`mysql_native_password`**; fix old DB user or volume. |
 | **Can't connect to `db` right after `up`** | Wait for healthy **`db`** or retry **`pull`**. |
 

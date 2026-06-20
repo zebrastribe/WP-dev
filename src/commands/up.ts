@@ -10,6 +10,13 @@ import { join } from "node:path";
 import net from "node:net";
 import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
 import { startHostRunner, stopHostRunner } from "../services/host-runner.js";
+import { syncLocalWordPressUrls } from "../services/sync-local-urls.js";
+import {
+  composePortsMatchEnv,
+  getComposePublishedPorts,
+  isPortOwnedByCompose,
+  type EnvPublishedPorts,
+} from "../utils/compose-published-ports.js";
 
 function extractBoundPort(message: string): number | null {
   const m = message.match(/:(\d+)\s+failed:\s+port is already allocated/i);
@@ -125,10 +132,25 @@ function ensureSecurityEnvDefaults(envPath: string): void {
     changed = true;
     changedKeys.push("WPDEV_TERMINAL_AUTH");
   }
-  const shouldResetOrigin =
-    !runnerOrigin ||
-    runnerOrigin.includes("change-me") ||
-    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(runnerOrigin);
+  const shouldResetOrigin = (() => {
+    if (!runnerOrigin || runnerOrigin.includes("change-me")) return true;
+    try {
+      const u = new URL(runnerOrigin);
+      const host = u.hostname.toLowerCase();
+      const isLoopback =
+        host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+      if (!isLoopback) return false;
+      const port = u.port
+        ? Number.parseInt(u.port, 10)
+        : u.protocol === "https:"
+          ? 443
+          : 80;
+      const wpPort = Number.parseInt(currentWpPort, 10);
+      return !Number.isFinite(port) || port !== wpPort;
+    } catch {
+      return true;
+    }
+  })();
   if (shouldResetOrigin) {
     next = setEnvValueInContent(
       next,
@@ -211,7 +233,7 @@ function maybeUpdateLocalUrlPort(
   }
   const host = u.hostname.toLowerCase();
   const currentPort = u.port.length > 0 ? Number.parseInt(u.port, 10) : u.protocol === "https:" ? 443 : 80;
-  if ((host === "localhost" || host === "127.0.0.1") && currentPort === oldPort) {
+  if ((host === "localhost" || host === "127.0.0.1") && currentPort !== newPort) {
     u.port = String(newPort);
     loaded.config.local.url = u.toString().replace(/\/$/, "");
     writeWpDevConfig(loaded.configDir, loaded.config);
@@ -261,7 +283,7 @@ async function ensureNonConflictingPublishedPorts(
     readEnvValue(envContent, "WPDEV_HOST_RUNNER_PORT") || "7683",
     10,
   );
-  const current = {
+  const current: EnvPublishedPorts = {
     WP_PORT: Number.isFinite(currentWpPort) && currentWpPort > 0 ? currentWpPort : 8888,
     WP_HTTPS_PORT: Number.isFinite(currentHttpsPort) && currentHttpsPort > 0 ? currentHttpsPort : 8443,
     WPDEV_TERMINAL_PORT:
@@ -272,13 +294,27 @@ async function ensureNonConflictingPublishedPorts(
       Number.isFinite(currentHostRunnerPort) && currentHostRunnerPort > 0 ? currentHostRunnerPort : 7683,
   };
 
+  const owned = await getComposePublishedPorts(loaded);
+  if (composePortsMatchEnv(owned, current)) {
+    logInfo(
+      `Published ports unchanged (stack already bound): WP_PORT=${current.WP_PORT}, terminal=${current.WPDEV_TERMINAL_PORT}, runner=${current.WPDEV_TERMINAL_RUNNER_PORT}`,
+    );
+    return;
+  }
+
   const used = new Set<number>();
   let changed = false;
 
-  const allocate = async (key: keyof typeof current, startAt: number): Promise<number> => {
+  const portAvailable = async (port: number): Promise<boolean> => {
+    if (used.has(port)) return false;
+    if (isPortOwnedByCompose(port, owned)) return true;
+    return isPortFree(port);
+  };
+
+  const allocate = async (key: keyof EnvPublishedPorts, startAt: number): Promise<number> => {
     let candidate = startAt;
     while (candidate <= 65535) {
-      if (!used.has(candidate) && (await isPortFree(candidate))) {
+      if (await portAvailable(candidate)) {
         used.add(candidate);
         return candidate;
       }
@@ -460,5 +496,26 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
       "Warning: could not apply runtime write permissions for wp-content. Plugins may fail to write files.",
     );
   }
+
+  try {
+    const sync = await syncLocalWordPressUrls(loaded);
+    if (sync.changed) {
+      const parts = [`Synced local URLs to ${sync.to}`];
+      if (sync.from) parts.push(`options were ${sync.from}`);
+      if (sync.dbReplacements > 0) parts.push(`${sync.dbReplacements} content URL(s) updated in DB`);
+      console.error(parts.join(" · "));
+    } else if (sync.warnings.some((w) => w.includes("option update") || w.includes("search-replace"))) {
+      console.error(
+        "Warning: WordPress home/siteurl may not match the published port. Run:\n" +
+          "  docker compose -p <project> -f docker/docker-compose.yml run --rm wpcli wp option update siteurl '<published-url>' --allow-root\n" +
+          "  docker compose -p <project> -f docker/docker-compose.yml run --rm wpcli wp cache flush --allow-root",
+      );
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logInfo(`up: could not sync WordPress URLs (${msg})`);
+    console.error(`Warning: could not sync WordPress home/siteurl to published port (${msg}).`);
+  }
+
   printPublishedAccessUrls(loaded);
 }

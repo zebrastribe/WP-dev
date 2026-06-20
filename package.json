@@ -4,11 +4,11 @@
   "description": "Linux-first WordPress dev CLI: local Docker, pull/push staging & production",
   "type": "module",
   "bin": {
-    "wp-dev": "./dist/cli.js"
+    "wp-dev": "dist/cli.js"
   },
   "scripts": {
     "check": "node scripts/check-docker.mjs",
-    "setup": "node scripts/check-docker.mjs && npm install && npm run build && npm ci --prefix docs/admin && npm run build --prefix docs/admin && npm run build:wp --prefix docs/admin",
+    "setup": "node scripts/check-docker.mjs && npm install && npm run build && npm ci --prefix docs/admin && npm run build --prefix docs/admin && npm run wp-dev -- fix-permissions && npm run build:wp --prefix docs/admin",
     "generate:config-artifacts": "tsx scripts/generate-config-artifacts.ts",
     "build": "npm run generate:config-artifacts && tsc",
     "postbuild": "node scripts/chmod-cli.mjs",
@@ -20,7 +20,9 @@
     "postinstall": "node scripts/ensure-config.mjs",
     "admin:dev": "npm run dev --prefix docs/admin",
     "admin:build": "npm run build --prefix docs/admin",
-    "admin:build:wp": "npm run build:wp --prefix docs/admin"
+    "admin:build:wp": "npm run wp-dev -- fix-permissions && npm run build:wp --prefix docs/admin",
+    "import:build": "npm run build:wp --prefix content-recovery-workspace/app",
+    "import:build:wp": "npm run wp-dev -- fix-permissions && npm run import:build"
   },
   "engines": {
     "node": ">=20"
@@ -32,12 +34,22 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^22.10.5",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
-    "@types/node": "^22.10.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^3.0.5",
     "zod-to-json-schema": "^3.24.6"
-  }
+  },
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

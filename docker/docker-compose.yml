@@ -40,12 +40,15 @@ services:
       WORDPRESS_DB_NAME: ${MYSQL_DATABASE:-wordpress}
       WORDPRESS_TABLE_PREFIX: ${WORDPRESS_TABLE_PREFIX:-wp_}
       WPDEV_ADMIN_SAVE_TOKEN: ${WPDEV_ADMIN_SAVE_TOKEN:-}
+      WPDEV_IMPORT_TOKEN: ${WPDEV_IMPORT_TOKEN:-}
     volumes:
       - ../wordpress:/var/www/html
       # wp-dev admin: config + logs + docker/ (so api.php can upsert Simply API key into docker/.env).
       - ../wp-dev.config.json:/wp-dev-repo/wp-dev.config.json:rw
       - ../logs:/wp-dev-repo/logs:rw
       - ../docker:/wp-dev-repo/docker:rw
+      - ../content-recovery-workspace/storage:/import-storage:rw
+      - ../../knowledge-base:/workspace/knowledge-base:ro
     depends_on:
       db:
         condition: service_healthy

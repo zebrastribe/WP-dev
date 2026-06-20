@@ -12,10 +12,16 @@ import { cmdRestore, type RestoreTarget } from "./commands/restore.js";
 import { cmdLogs } from "./commands/logs.js";
 import { cmdInit } from "./commands/init.js";
 import { cmdSimplySetupStagingDns, cmdSimplyTest } from "./commands/simply.js";
-import { cmdFixPermissions } from "./commands/fix-permissions.js";
+import { cmdFixPermissions, cmdFixRuntimeWritePermissions } from "./commands/fix-permissions.js";
 import { cmdDoctor } from "./commands/doctor.js";
 import { cmdSslDisable, cmdSslEnable } from "./commands/ssl.js";
 import { cmdPhpSet, cmdPhpShow, cmdPhpValidate } from "./commands/php.js";
+import { cmdImportBuild } from "./commands/import/build.js";
+import { cmdImportIngest } from "./commands/import/ingest.js";
+import { cmdImportPush } from "./commands/import/push.js";
+import { cmdThemeBuild } from "./commands/theme-build.js";
+import { cmdPushTheme } from "./commands/push-theme.js";
+import { cmdPullTheme } from "./commands/pull-theme.js";
 import { ensureWpDevConfigJson } from "./config/load.js";
 import { hydrateSimplyApiKeyFromComposeEnv, hydrateStagingDbFromComposeEnv } from "./services/simply.js";
 import { initLogger, logError, logInfo } from "./utils/logger.js";
@@ -196,10 +202,25 @@ async function main(): Promise<void> {
   program
     .command("fix-permissions")
     .description(
-      "Chown bind-mounted wordpress/ to your host uid:gid (fixes rsync after Docker created files as www-data)",
+      "Chown bind-mounted wordpress/ to your host uid:gid, then restore www-data write access on plugins/upgrade/uploads (fixes rsync + wp-admin updates)",
+    )
+    .option(
+      "--no-runtime",
+      "Only chown to host user; skip restoring www-data write paths (not recommended)",
+    )
+    .action(async (opts: { noRuntime?: boolean }) => {
+      await runWithConfig("fix-permissions", (loaded) =>
+        cmdFixPermissions(loaded, { runtime: !opts.noRuntime }),
+      );
+    });
+
+  program
+    .command("fix-runtime-permissions")
+    .description(
+      "Restore www-data ownership on wp-content/plugins, upgrade, uploads, and cache (fixes wp-admin plugin updates)",
     )
     .action(async () => {
-      await runWithConfig("fix-permissions", cmdFixPermissions);
+      await runWithConfig("fix-runtime-permissions", cmdFixRuntimeWritePermissions);
     });
 
   program
@@ -228,10 +249,13 @@ async function main(): Promise<void> {
       );
     });
 
-  program
+  const pullCmd = program
     .command("pull")
+    .description("Pull database and files from staging or production");
+
+  pullCmd
+    .command("<env>")
     .description("Pull database and files from staging or production")
-    .argument("<env>", "staging | production")
     .option("--dry-run", "Show rsync dry-run only; skip database steps")
     .option(
       "--no-backup-local",
@@ -246,30 +270,105 @@ async function main(): Promise<void> {
         env: string,
         opts: { dryRun?: boolean; backupLocal?: boolean; skipSimplyStagingDns?: boolean },
       ) => {
+        const e = parseRemoteEnv(env);
+        const dry = Boolean(opts.dryRun);
+        const backupLocal = Boolean(opts.backupLocal);
+        const skipSimplyStagingDns = Boolean(opts.skipSimplyStagingDns);
+        const label = `pull ${e}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}`;
+        await runWithConfig(label, (loaded) =>
+          cmdPull(loaded, e, {
+            dryRun: dry,
+            backupLocal,
+            skipSimplyStagingDns,
+          }),
+        );
+      },
+    );
+
+  pullCmd
+    .command("theme <env>")
+    .description("Pull theme files from staging or production (no database)")
+    .option("--dry-run", "Show rsync dry-run only")
+    .action(async (env: string, opts: { dryRun?: boolean }) => {
       const e = parseRemoteEnv(env);
       const dry = Boolean(opts.dryRun);
-      const backupLocal = Boolean(opts.backupLocal);
-      const skipSimplyStagingDns = Boolean(opts.skipSimplyStagingDns);
-      const label = `pull ${e}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}`;
-      await runWithConfig(label, (loaded) =>
-        cmdPull(loaded, e, {
-          dryRun: dry,
-          backupLocal,
-          skipSimplyStagingDns,
-        }),
+      await runWithConfig(`pull theme ${e}${dry ? " --dry-run" : ""}`, (loaded) =>
+        cmdPullTheme(loaded, e, { dryRun: dry }),
       );
     });
 
-  program
+  const pushCmd = program
     .command("push")
-    .description("Push local database and files to staging or production")
-    .argument("<env>", "staging | production")
+    .description("Push to staging or production (full site or theme-only)");
+
+  pushCmd
+    .command("<env>")
+    .description("Push local database and files (full site — overwrites remote DB)")
     .option("--dry-run", "Show rsync dry-run only; skip database steps")
     .action(async (env: string, opts: { dryRun?: boolean }) => {
       const e = parseRemoteEnv(env);
       const dry = Boolean(opts.dryRun);
       await runWithConfig(`push ${e}${dry ? " --dry-run" : ""}`, (loaded) =>
         cmdPush(loaded, e, { dryRun: dry }),
+      );
+    });
+
+  pushCmd
+    .command("theme <env>")
+    .description("Push compiled theme files only (no database or uploads)")
+    .option("--dry-run", "Show rsync dry-run only")
+    .option("--build", "Run theme build (npm run production) before rsync")
+    .option("--skip-build-check", "Deploy even if style.css looks like a dev build")
+    .action(async (env: string, opts: { dryRun?: boolean; build?: boolean; skipBuildCheck?: boolean }) => {
+      const e = parseRemoteEnv(env);
+      const dry = Boolean(opts.dryRun);
+      const build = Boolean(opts.build);
+      const skipBuildCheck = Boolean(opts.skipBuildCheck);
+      const label = `push theme ${e}${dry ? " --dry-run" : ""}${build ? " --build" : ""}${skipBuildCheck ? " --skip-build-check" : ""}`;
+      await runWithConfig(label, (loaded) =>
+        cmdPushTheme(loaded, e, { dryRun: dry, build, skipBuildCheck }),
+      );
+    });
+
+  const themeCmd = program
+    .command("theme")
+    .description("Theme build and deploy helpers (files only — no database)");
+
+  themeCmd
+    .command("build")
+    .description("Run npm run production in the configured theme source tree")
+    .option("--skip-install", "Skip npm ci before build")
+    .action(async (opts: { skipInstall?: boolean }) => {
+      await runWithConfig(
+        `theme build${opts.skipInstall ? " --skip-install" : ""}`,
+        (loaded) => cmdThemeBuild(loaded, { skipInstall: Boolean(opts.skipInstall) }),
+      );
+    });
+
+  themeCmd
+    .command("push <env>")
+    .description("Alias for `wp-dev push theme <env>`")
+    .option("--dry-run", "Show rsync dry-run only")
+    .option("--build", "Run theme build before rsync")
+    .option("--skip-build-check", "Deploy even if style.css looks like a dev build")
+    .action(async (env: string, opts: { dryRun?: boolean; build?: boolean; skipBuildCheck?: boolean }) => {
+      const e = parseRemoteEnv(env);
+      const dry = Boolean(opts.dryRun);
+      const build = Boolean(opts.build);
+      const skipBuildCheck = Boolean(opts.skipBuildCheck);
+      await runWithConfig(`theme push ${e}`, (loaded) =>
+        cmdPushTheme(loaded, e, { dryRun: dry, build, skipBuildCheck }),
+      );
+    });
+
+  themeCmd
+    .command("pull <env>")
+    .description("Alias for `wp-dev pull theme <env>`")
+    .option("--dry-run", "Show rsync dry-run only")
+    .action(async (env: string, opts: { dryRun?: boolean }) => {
+      const e = parseRemoteEnv(env);
+      await runWithConfig(`theme pull ${e}`, (loaded) =>
+        cmdPullTheme(loaded, e, { dryRun: Boolean(opts.dryRun) }),
       );
     });
 
@@ -292,6 +391,36 @@ async function main(): Promise<void> {
       const t = parseRestoreTarget(env);
       await runWithConfig(`restore ${t}`, (loaded) =>
         cmdRestore(loaded, t, file, { yes: Boolean(opts.yes) }),
+      );
+    });
+
+  const importCmd = program
+    .command("import")
+    .description("Content Recovery Workspace at /import/ (ingest, build, push)");
+
+  importCmd
+    .command("build")
+    .description("Build React SPA + copy API to wordpress/import/")
+    .action(async () => {
+      await runWithConfig("import build", cmdImportBuild);
+    });
+
+  importCmd
+    .command("ingest")
+    .description("Import knowledge-base JSON into SQLite repository")
+    .action(async () => {
+      await runWithConfig("import ingest", cmdImportIngest);
+    });
+
+  importCmd
+    .command("push")
+    .description("Deploy wordpress/import/ and storage to staging or production")
+    .argument("<env>", "staging | production")
+    .option("--dry-run", "Show rsync dry-run only")
+    .action(async (env: string, opts: { dryRun?: boolean }) => {
+      const e = parseRemoteEnv(env);
+      await runWithConfig(`import push ${e}${opts.dryRun ? " --dry-run" : ""}`, (loaded) =>
+        cmdImportPush(loaded, e, { dryRun: Boolean(opts.dryRun) }),
       );
     });
 

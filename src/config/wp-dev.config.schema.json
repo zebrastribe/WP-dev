@@ -35,6 +35,14 @@
             "wpRoot": {
               "type": "string",
               "minLength": 1
+            },
+            "themePath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "themeSlug": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
@@ -189,6 +197,33 @@
           "required": [
             "account"
           ],
+          "additionalProperties": false
+        },
+        "importWorkspace": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "localUrl": {
+              "type": "string",
+              "format": "uri"
+            },
+            "storagePath": {
+              "type": "string"
+            },
+            "knowledgeBasePath": {
+              "type": "string"
+            },
+            "deployPath": {
+              "type": "string",
+              "default": "import"
+            },
+            "tokenEnvVar": {
+              "type": "string",
+              "default": "WPDEV_IMPORT_TOKEN"
+            }
+          },
           "additionalProperties": false
         }
       },
