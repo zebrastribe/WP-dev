@@ -77,6 +77,33 @@ describe("wpDevConfigSchema", () => {
     expect(parsed.simply?.account).toBe("UE12345");
   });
 
+  it("accepts optional local themePath and themeSlug", () => {
+    const parsed = wpDevConfigSchema.parse({
+      project: "x",
+      local: {
+        url: "http://localhost:8888",
+        path: "./docker",
+        wpRoot: "./wordpress",
+        themePath: "./wordpress/wp-content/themes/my-theme",
+        themeSlug: "my-theme",
+      },
+      staging: {
+        host: "s",
+        user: "u",
+        path: "/p",
+        url: "https://s",
+      },
+      production: {
+        host: "p",
+        user: "u",
+        path: "/p",
+        url: "https://p",
+      },
+    });
+    expect(parsed.local.themePath).toBe("./wordpress/wp-content/themes/my-theme");
+    expect(parsed.local.themeSlug).toBe("my-theme");
+  });
+
   it("rejects invalid local url", () => {
     expect(() =>
       wpDevConfigSchema.parse({

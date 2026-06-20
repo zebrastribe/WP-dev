@@ -3,6 +3,7 @@ dist/
 coverage/
 *.tsbuildinfo
 docker/.env
+import.auth.env
 wp-dev.config.json
 wordpress/*
 !wordpress/.gitkeep

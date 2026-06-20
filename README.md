@@ -194,6 +194,30 @@ Each **`wp-dev up`** / **`down`** uses **`docker compose -p <id>`** where **`<id
 
 **Rollback:** bad local DB after **`pull`** → **`wp-dev restore local`** with the **`pre-pull-*.sql`** path from the command output (or older files in **`~/.wp-dev/backups/.../local/`**). Bad remote after **`push`** → **`restore`** with **`pre-push-*.sql`**. **Files** and **core** are not snapshotted by wp-dev — use Git and hosting backups.
 
+### Theme-only deploy (production-safe)
+
+For day-to-day theme work, **do not** use **`wp-dev push production`** — it syncs the full **`wordpress/`** tree and overwrites the remote database.
+
+| Goal | Command |
+|------|---------|
+| Build production CSS/JS locally | **`wp-dev theme build`** |
+| Deploy theme to production | **`wp-dev push theme production --build`** |
+| Preview rsync without uploading | **`wp-dev push theme production --dry-run`** |
+| Pull a hotfix from production | **`wp-dev pull theme production`** |
+
+Optional config in **`wp-dev.config.json`** → **`local`**:
+
+```json
+"themePath": "./wordpress/wp-content/themes/agency-starter",
+"themeSlug": "agency-starter"
+```
+
+If omitted, **`themePath`** defaults to **`<wpRoot>/wp-content/themes/agency-starter`**. **`themeSlug`** is read from **`style.css`** (`Text Domain`) or the source folder name.
+
+**`_tw`-style themes** (Agency Starter): source lives in the repo root; the synced folder is **`theme/`** inside that path (where **`style.css`** lives). **Flat themes** with **`style.css`** at the source root are supported too.
+
+See **`docs/theme-deploy-for-all-users.md`** for the full maintainer guide.
+
 ---
 
 ## Updating this tool in your clone
@@ -261,7 +285,9 @@ npm run wp-dev -- up
 | **`wp-dev status`** | Local stack health, WP install state, URL check, recent backups |
 | **`wp-dev validate`** | Config + Docker prereqs; **`--remote staging|production`** for SSH/WP check |
 | **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`**, **`--http`**, **`--local-http`** (detect stale localhost port redirects) |
-| **`wp-dev pull`** / **`push`** | Sync with pre-backup, URL verify, DB rollback on failure; **`push staging`** requires typing SSH host |
+| **`wp-dev pull`** / **`push`** | Sync with pre-backup, URL verify, DB rollback on failure; **`push staging`** requires typing SSH host — use **`push theme`** for theme-only deploys |
+| **`wp-dev push theme`** / **`pull theme`** | Sync **theme files only** (no database, no uploads). **`--build`** compiles before push |
+| **`wp-dev theme build`** | Run **`npm run production`** in the configured theme source tree |
 | **`wp-dev sync-preview`** | Preview file diff before push/pull (**`--json`** for admin UI); shows will push / stays local |
 | **`wp-dev sync-scan`** | Scan plugins/themes, detect build themes, suggest deployment units (**`--json`**) |
 | **`wp-dev sync-rules`** | List effective push/pull exclusion rules |

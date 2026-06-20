@@ -25,6 +25,15 @@ const simplySchema = z.object({
     .regex(/^(S|UE)\d+$/, "Simply.com account must look like S123456 or UE12345"),
 });
 
+const importWorkspaceSchema = z.object({
+  enabled: z.boolean().optional(),
+  localUrl: z.string().url().optional(),
+  storagePath: z.string().optional(),
+  knowledgeBasePath: z.string().optional(),
+  deployPath: z.string().default("import"),
+  tokenEnvVar: z.string().default("WPDEV_IMPORT_TOKEN"),
+});
+
 const localSchema = z.object({
   url: z.string().url(),
   path: z.string().min(1),
@@ -35,6 +44,13 @@ const localSchema = z.object({
   composeService: z.string().default("wpcli"),
   /** Host folder for WordPress files (bind-mounted at /var/www/html in the container). */
   wpRoot: z.string().min(1),
+  /**
+   * Theme source directory (contains package.json and/or theme/ subfolder).
+   * Default: <wpRoot>/wp-content/themes/agency-starter
+   */
+  themePath: z.string().min(1).optional(),
+  /** WordPress theme slug (folder name under wp-content/themes). Default: from style.css Text Domain. */
+  themeSlug: z.string().min(1).optional(),
 });
 
 const themeUnitSchema = z.object({
@@ -69,6 +85,7 @@ export const wpDevConfigSchema = z.object({
   production: remoteEnvSchema,
   simply: simplySchema.optional(),
   sync: syncSchema,
+  importWorkspace: importWorkspaceSchema.optional(),
 });
 
 export type WpDevConfig = z.infer<typeof wpDevConfigSchema>;
