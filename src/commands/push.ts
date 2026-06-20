@@ -23,6 +23,7 @@ import { confirmRemoteTarget } from "../utils/confirm.js";
 import { logInfo } from "../utils/logger.js";
 import { getUrlVariants } from "../utils/url-variants.js";
 import { verifyRemoteSiteUrls } from "../utils/sync-verify.js";
+import { pushExcludePatterns } from "../services/sync-excludes.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
 
 export type PushOptions = {
@@ -81,7 +82,10 @@ export async function cmdPush(
     console.error(
       "[dry-run] Would: backup remote DB, rsync push, export local DB, import on remote, search-replace URLs.",
     );
-    await rsyncPush(remote, localWpRoot, { dryRun: true });
+    await rsyncPush(remote, localWpRoot, {
+      dryRun: true,
+      excludes: pushExcludePatterns(configDir, config, localWpRoot),
+    });
     return;
   }
 
@@ -118,7 +122,10 @@ export async function cmdPush(
     }
     if (shouldBootstrapStaging) {
       logInfo(`push ${env}: remote WP not installed yet — bootstrap files only`);
-      await rsyncPush(remote, localWpRoot, { dryRun: false });
+      await rsyncPush(remote, localWpRoot, {
+        dryRun: false,
+        excludes: pushExcludePatterns(configDir, config, localWpRoot),
+      });
       if (!remote.db) {
         console.error(
           `Seeded files to ${env}, but remote WordPress is not installed at ${remote.path} yet.\n` +
@@ -160,7 +167,10 @@ export async function cmdPush(
 
     logInfo(`push ${env}: rsync files -> remote`);
     try {
-      await rsyncPush(remote, localWpRoot, { dryRun: false });
+      await rsyncPush(remote, localWpRoot, {
+        dryRun: false,
+        excludes: pushExcludePatterns(configDir, config, localWpRoot),
+      });
 
       const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-push-"));
       const localDump = join(tmpDir, "local.sql");

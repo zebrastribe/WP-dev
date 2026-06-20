@@ -20,6 +20,7 @@ import {
   cmdFixRuntimeWritePermissions,
 } from "./commands/fix-permissions.js";
 import { cmdDoctor } from "./commands/doctor.js";
+import { cmdSyncPreview, cmdSyncRules, cmdSyncScan } from "./commands/sync-preview.js";
 import { cmdSslDisable, cmdSslEnable } from "./commands/ssl.js";
 import { cmdPhpSet, cmdPhpShow, cmdPhpValidate } from "./commands/php.js";
 import { ensureWpDevConfigJson } from "./config/load.js";
@@ -250,6 +251,38 @@ async function main(): Promise<void> {
     )
     .action(async () => {
       await runWithConfig("fix-runtime-permissions", cmdFixRuntimeWritePermissions);
+    });
+
+  program
+    .command("sync-rules")
+    .description("Show effective push/pull file exclusion rules for this project")
+    .action(async () => {
+      await runWithConfig("sync-rules", cmdSyncRules);
+    });
+
+  program
+    .command("sync-preview")
+    .description("Preview file changes for push or pull (rsync dry-run with itemized output)")
+    .argument("<direction>", "push | pull")
+    .argument("<env>", "staging | production")
+    .option("--json", "Print structured JSON (for admin UI)")
+    .action(async (direction: string, env: string, opts: { json?: boolean }) => {
+      const e = parseRemoteEnv(env);
+      const json = Boolean(opts.json);
+      await runWithConfig(`sync-preview ${direction} ${e}${json ? " --json" : ""}`, (loaded) =>
+        cmdSyncPreview(loaded, direction, e, { json }),
+      );
+    });
+
+  program
+    .command("sync-scan")
+    .description("Scan plugins/themes and suggest deployment units (for admin Sync tab)")
+    .option("--json", "Print structured JSON")
+    .action(async (opts: { json?: boolean }) => {
+      const json = Boolean(opts.json);
+      await runWithConfig(`sync-scan${json ? " --json" : ""}`, (loaded) =>
+        cmdSyncScan(loaded, { json }),
+      );
     });
 
   program

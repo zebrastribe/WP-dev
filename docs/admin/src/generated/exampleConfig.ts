@@ -20,5 +20,13 @@ export const EXAMPLE_WP_DEV_CONFIG = {
     "user": "deploy",
     "path": "/var/www/live",
     "url": "https://example.com"
+  },
+  "sync": {
+    "plugins": {
+      "query-monitor": "localOnly"
+    },
+    "themes": {},
+    "disabledRecommended": [],
+    "skipUploadsOnPush": false
   }
 } as const;

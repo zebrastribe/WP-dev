@@ -1,0 +1,5 @@
+# Optional advanced rsync exclude patterns (one per line).
+# The admin Sync tab and wp-dev.config.json sync section cover most cases.
+#
+# vendor/**
+# wp-content/uploads/wp-migrate-db/**

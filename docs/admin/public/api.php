@@ -478,6 +478,7 @@ function wpdev_local_status(): array
         'hasSyncedContent' => $hasSyncedContent,
         'hasSyncedPlugins' => $hasSyncedPlugins,
         'pluginCount' => count($pluginDirs),
+        'installedPlugins' => $pluginDirs,
         'needsSetup' => $needsSetup,
         'setupPhase' => $setupPhase,
         'writable' => $writable,

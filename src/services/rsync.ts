@@ -1,15 +1,6 @@
 import { execa } from "execa";
 import type { RemoteEnvConfig } from "../config/schema.js";
-
-const DEFAULT_EXCLUDES = [
-  "node_modules",
-  ".git",
-  "wp-content/cache",
-  "wp-content/uploads/cache",
-  ".DS_Store",
-  /** Keep environment-specific installs working (Docker DB vs remote DB). */
-  "wp-config.php",
-];
+import { SAFE_SYNC_EXCLUDES } from "./sync-excludes.js";
 
 function buildSshRsyncEnv(remote: RemoteEnvConfig): string {
   const parts = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"];
@@ -33,7 +24,7 @@ export async function rsyncPull(
   options: RsyncOptions,
 ): Promise<void> {
   const runPull = async (targetPath: string) => {
-    const excludes = [...DEFAULT_EXCLUDES, ...(options.excludes ?? [])];
+    const excludes = options.excludes ?? [...SAFE_SYNC_EXCLUDES];
     const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
     const remoteUrl = `${remote.user}@${remote.host}:${targetPath.replace(/\/$/, "")}/`;
     const args = [
@@ -107,7 +98,7 @@ export async function rsyncPush(
   options: RsyncOptions,
 ): Promise<void> {
   const runPush = async (targetPath: string) => {
-    const excludes = [...DEFAULT_EXCLUDES, ...(options.excludes ?? [])];
+    const excludes = options.excludes ?? [...SAFE_SYNC_EXCLUDES];
     const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
     const remoteUrl = `${remote.user}@${remote.host}:${targetPath.replace(/\/$/, "")}/`;
     const args = [

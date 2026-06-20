@@ -70,6 +70,7 @@ export function TerminalTab() {
       | "wpdev_doctor"
       | "wpdev_push"
       | "wpdev_pull"
+      | "wpdev_sync_preview"
       | "backup_create"
       | "backup_list"
       | "git_status"
@@ -202,6 +203,14 @@ export function TerminalTab() {
       </div>
 
       <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy || !canRun}
+          onClick={() => void run("wpdev_sync_preview", { env: "staging", direction: "push" }, "sync")}
+          className="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-800 dark:border-brand-800 dark:bg-brand-950/40 dark:text-brand-200"
+        >
+          Preview push → staging
+        </button>
         <button
           type="button"
           disabled={busy || !canRun}

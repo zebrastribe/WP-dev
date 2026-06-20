@@ -26,6 +26,7 @@ import { isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
 import { getUrlVariants } from "../utils/url-variants.js";
 import { getLocalUrlPortMismatch } from "../utils/published-local-urls.js";
 import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
+import { pushExcludePatterns, pullExcludePatterns } from "../services/sync-excludes.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
 
 export type PullOptions = {
@@ -56,7 +57,10 @@ export async function cmdPull(
   if (options.dryRun) {
     logInfo(`pull ${env} dry-run: rsync only`);
     console.error("[dry-run] Would: validate SSH, export remote DB, rsync files, import DB, search-replace URLs.");
-    await rsyncPull(remote, localWpRoot, { dryRun: true });
+    await rsyncPull(remote, localWpRoot, {
+      dryRun: true,
+      excludes: pullExcludePatterns(configDir, config),
+    });
     return;
   }
 
@@ -101,7 +105,10 @@ export async function cmdPull(
         );
       }
       try {
-        await rsyncPull(remote, localWpRoot, { dryRun: false });
+        await rsyncPull(remote, localWpRoot, {
+          dryRun: false,
+          excludes: pullExcludePatterns(configDir, config),
+        });
 
         const sql = readFileSync(localDump, "utf8");
         if (!/CREATE TABLE|INSERT INTO/i.test(sql)) {
