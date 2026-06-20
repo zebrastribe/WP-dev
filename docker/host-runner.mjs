@@ -9,7 +9,7 @@ const ALLOWED_ORIGIN = process.env.WPDEV_TERMINAL_RUNNER_ORIGIN || "";
 const WORKDIR = process.env.WPDEV_TERMINAL_WORKDIR || process.cwd();
 const MAX_OUTPUT = 64_000;
 const JOB_TTL_MS = 10 * 60 * 1000;
-const JOB_TIMEOUT_MS = 20 * 60 * 1000;
+const JOB_TIMEOUT_MS = 30 * 60 * 1000;
 
 if (!AUTH || AUTH === "wpdev:wpdev") {
   console.error("Refusing to start host runner: WPDEV_TERMINAL_AUTH is missing/insecure.");
@@ -114,6 +114,16 @@ function commandForAction(action, args) {
   }
   if (action === "wpdev_sync_scan") {
     return `npm run wp-dev -- sync-scan --json`;
+  }
+  if (action === "wpdev_update") {
+    const admin = safeArg(args?.admin);
+    const restart = safeArg(args?.restart);
+    const dryRun = safeArg(args?.dry_run);
+    const flags: string[] = [];
+    if (admin === "0") flags.push("--no-admin");
+    if (restart === "0") flags.push("--no-restart");
+    if (dryRun === "1") flags.push("--dry-run");
+    return `npm run wp-dev -- update${flags.length ? ` ${flags.join(" ")}` : ""}`;
   }
   return null;
 }

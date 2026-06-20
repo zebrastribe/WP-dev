@@ -21,6 +21,7 @@ import {
 } from "./commands/fix-permissions.js";
 import { cmdDoctor } from "./commands/doctor.js";
 import { cmdSyncPreview, cmdSyncRules, cmdSyncScan } from "./commands/sync-preview.js";
+import { cmdUpdate } from "./commands/update.js";
 import { cmdSslDisable, cmdSslEnable } from "./commands/ssl.js";
 import { cmdPhpSet, cmdPhpShow, cmdPhpValidate } from "./commands/php.js";
 import { ensureWpDevConfigJson } from "./config/load.js";
@@ -282,6 +283,26 @@ async function main(): Promise<void> {
       const json = Boolean(opts.json);
       await runWithConfig(`sync-scan${json ? " --json" : ""}`, (loaded) =>
         cmdSyncScan(loaded, { json }),
+      );
+    });
+
+  program
+    .command("update")
+    .description(
+      "Update wp-dev from git (rebuild CLI/admin; does not overwrite wordpress/ site files)",
+    )
+    .option("--dry-run", "Print planned steps without running them")
+    .option("--no-admin", "Skip rebuilding wordpress/admin/ UI")
+    .option("--no-restart", "Skip wp-dev down && up after build")
+    .option("--skip-pull", "Skip git pull (rebuild only)")
+    .action(async (opts: { dryRun?: boolean; noAdmin?: boolean; noRestart?: boolean; skipPull?: boolean }) => {
+      await runWithConfig("update", (loaded) =>
+        cmdUpdate(loaded, {
+          dryRun: Boolean(opts.dryRun),
+          noAdmin: Boolean(opts.noAdmin),
+          noRestart: Boolean(opts.noRestart),
+          skipPull: Boolean(opts.skipPull),
+        }),
       );
     });
 
