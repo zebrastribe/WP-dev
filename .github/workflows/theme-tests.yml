@@ -14,8 +14,6 @@ on:
 
 jobs:
   agency-starter-tests:
-    # Theme lives in gitignored wordpress/ — skip when not checked in (default wp-dev clone).
-    if: hashFiles('wordpress/wp-content/themes/agency-starter/package-lock.json') != ''
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -23,38 +21,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Detect theme in repo
+        id: theme
+        working-directory: .
+        run: |
+          if [ -f wordpress/wp-content/themes/agency-starter/package-lock.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "Theme not checked in — skipping (wordpress/ is gitignored in default wp-dev clones)."
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.theme.outputs.present == 'true'
         with:
           node-version: "22"
           cache: "npm"
           cache-dependency-path: wordpress/wp-content/themes/agency-starter/package-lock.json
 
       - uses: shivammathur/setup-php@v2
+        if: steps.theme.outputs.present == 'true'
         with:
           php-version: "8.2"
           tools: phpunit
           coverage: none
 
       - name: Install Composer dependencies
+        if: steps.theme.outputs.present == 'true'
         run: composer install --no-interaction --prefer-dist
 
       - name: Install npm dependencies
+        if: steps.theme.outputs.present == 'true'
         run: npm ci
 
       - name: Production build
+        if: steps.theme.outputs.present == 'true'
         run: npm run production
 
       - name: Run JS unit tests
+        if: steps.theme.outputs.present == 'true'
         run: npm run test:unit
 
       - name: Run PHP contract tests
+        if: steps.theme.outputs.present == 'true'
         run: phpunit -c phpunit.xml.dist
 
       - name: Asset size budgets
+        if: steps.theme.outputs.present == 'true'
         run: npm run test:budget
 
       - name: Accessibility contracts (PHPUnit)
+        if: steps.theme.outputs.present == 'true'
         run: phpunit --filter A11y
 
       - name: PHPCS (theme PHP)
+        if: steps.theme.outputs.present == 'true'
         run: composer run php:lint:inc
