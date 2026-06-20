@@ -92,6 +92,57 @@ export async function rsyncPull(
   }
 }
 
+export async function rsyncPushToPath(
+  remote: RemoteEnvConfig,
+  localDir: string,
+  remoteTargetPath: string,
+  options: RsyncOptions,
+): Promise<void> {
+  const runPush = async (targetPath: string) => {
+    const excludes = options.excludes ?? [...SAFE_SYNC_EXCLUDES];
+    const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
+    const remoteUrl = `${remote.user}@${remote.host}:${targetPath.replace(/\/$/, "")}/`;
+    const args = [
+      "-avz",
+      ...excludeArgs,
+      "--no-owner",
+      "--no-group",
+      "-e",
+      buildSshRsyncEnv(remote),
+      ...(options.dryRun ? ["--dry-run"] : []),
+      localDir.replace(/\/$/, "") + "/",
+      remoteUrl,
+    ];
+    return execa("rsync", args, {
+      reject: false,
+      stdout: "inherit",
+      stderr: "pipe",
+    });
+  };
+
+  const first = await runPush(remoteTargetPath);
+  if (first.stderr) process.stderr.write(first.stderr);
+  if (first.exitCode === 0) return;
+
+  const firstErr = first.stderr ?? "";
+  const canRetryRelative =
+    remoteTargetPath.startsWith("/") &&
+    /mkdir .* failed: Permission denied|recv_generator: mkdir .* failed: Permission denied/i.test(firstErr);
+  if (canRetryRelative) {
+    const relPath = remoteTargetPath.replace(/^\/+/, "");
+    const retry = await runPush(relPath);
+    if (retry.stderr) process.stderr.write(retry.stderr);
+    if (retry.exitCode === 0) {
+      process.stderr.write(
+        `\n[wp-dev] rsync retry succeeded using relative remote path "${relPath}".\n`,
+      );
+      return;
+    }
+    throw new Error(`rsync push failed with exit code ${retry.exitCode}`);
+  }
+  throw new Error(`rsync push failed with exit code ${first.exitCode}`);
+}
+
 export async function rsyncPush(
   remote: RemoteEnvConfig,
   localDir: string,
@@ -167,4 +218,64 @@ export async function rsyncPush(
     }
     throw new Error(`rsync push failed with exit code ${first.exitCode}${hint}`);
   }
+}
+
+/**
+ * Pull a subdirectory from the remote host (e.g. wp-content/themes/my-theme).
+ */
+export async function rsyncPullFromPath(
+  remote: RemoteEnvConfig,
+  remoteSourcePath: string,
+  localDir: string,
+  options: RsyncOptions,
+): Promise<void> {
+  const runPull = async (sourcePath: string) => {
+    const excludes = options.excludes ?? [...SAFE_SYNC_EXCLUDES];
+    const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
+    const remoteUrl = `${remote.user}@${remote.host}:${sourcePath.replace(/\/$/, "")}/`;
+    const args = [
+      "-avz",
+      ...excludeArgs,
+      "--no-owner",
+      "--no-group",
+      "-e",
+      buildSshRsyncEnv(remote),
+      ...(options.dryRun ? ["--dry-run"] : []),
+      remoteUrl,
+      localDir.replace(/\/$/, "") + "/",
+    ];
+    return execa("rsync", args, {
+      reject: false,
+      stdout: "inherit",
+      stderr: "pipe",
+    });
+  };
+
+  const first = await runPull(remoteSourcePath);
+  if (first.stderr) process.stderr.write(first.stderr);
+  if (first.exitCode === 0) return;
+
+  const firstErr = first.stderr ?? "";
+  const canRetryRelative =
+    remoteSourcePath.startsWith("/") &&
+    /No such file or directory|change_dir .* failed/i.test(firstErr);
+  if (canRetryRelative) {
+    const relPath = remoteSourcePath.replace(/^\/+/, "");
+    const retry = await runPull(relPath);
+    if (retry.stderr) process.stderr.write(retry.stderr);
+    if (retry.exitCode === 0) {
+      process.stderr.write(
+        `\n[wp-dev] pull retry succeeded using relative remote path "${relPath}".\n`,
+      );
+      return;
+    }
+    throw new Error(`rsync pull failed with exit code ${retry.exitCode}`);
+  }
+
+  let hint = "";
+  if (/Permission denied|mkstemp|Operation not permitted/i.test(firstErr)) {
+    hint =
+      "\n\nLikely fix: run `npm run wp-dev -- fix-permissions` then retry pull theme.";
+  }
+  throw new Error(`rsync pull failed with exit code ${first.exitCode}${hint}`);
 }
