@@ -236,7 +236,8 @@ If wp-dev maintainers cherry-pick or review for upstream:
 2. Add fork-update section to README referencing this note.  
 3. Fix or document **`DEFAULT_EXCLUDES` vs `SAFE_SYNC_EXCLUDES`** for path-scoped rsync.  
 4. Consider gitignoring **`content-recovery-workspace/storage/**/*.sqlite`**.  
-5. Extend **`wp-dev update` pre-flight** for dirty tree / unpushed commits.
+5. Extend **`wp-dev update` pre-flight** for dirty tree / unpushed commits.  
+6. Review **`purpose/note-admin-terminal-and-ci-june-2026.md`** — admin terminal iframe, admin save token UX, and CI fixes from the same deployment.
 
 ---
 
