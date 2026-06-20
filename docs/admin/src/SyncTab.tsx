@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { logAdmin } from "./adminLog";
 import {
+  formatTerminalRunnerSecretsError,
   getTerminalJobStatus,
   loadTerminalRunnerSecrets,
   loadWpDevConfig,
@@ -8,7 +9,9 @@ import {
   runTerminalAction,
   saveWpDevConfig,
   type TerminalAction,
+  writeStoredAdminSaveToken,
 } from "./api";
+import { AdminSaveTokenField } from "./AdminSaveTokenField";
 
 type RemoteEnv = "staging" | "production";
 type SyncDirection = "push" | "pull";
@@ -113,7 +116,7 @@ export function SyncTab() {
   const [runnerToken, setRunnerToken] = useState("");
   const [runnerReady, setRunnerReady] = useState(false);
   const [runnerMessage, setRunnerMessage] = useState("");
-  const [adminSaveToken] = useState(readStoredAdminSaveToken);
+  const [adminSaveToken, setAdminSaveToken] = useState(readStoredAdminSaveToken);
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const [scan, setScan] = useState<SyncScan | null>(null);
   const [pluginFilter, setPluginFilter] = useState("");
@@ -202,7 +205,7 @@ export function SyncTab() {
       if (cancelled) return;
       if (!res.ok) {
         setRunnerReady(false);
-        setRunnerMessage(`Runner not ready (${res.error}). Run npm run wp-dev -- up.`);
+        setRunnerMessage(formatTerminalRunnerSecretsError(res, { prefix: "Runner not ready" }));
         return;
       }
       setTerminalAuth(res.terminalAuth);
@@ -425,6 +428,14 @@ export function SyncTab() {
         </p>
       </div>
 
+      <AdminSaveTokenField
+        value={adminSaveToken}
+        onChange={(v) => {
+          setAdminSaveToken(v);
+          writeStoredAdminSaveToken(v);
+        }}
+      />
+
       <div
         className={`rounded border px-3 py-2 text-xs ${
           runnerReady
@@ -432,7 +443,7 @@ export function SyncTab() {
             : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40"
         }`}
       >
-        {runnerMessage}
+        {runnerMessage || "Loading runner…"}
       </div>
 
       {hasSuggestions ? (

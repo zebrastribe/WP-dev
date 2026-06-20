@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  formatTerminalRunnerSecretsError,
   getTerminalJobStatus,
   loadTerminalRunnerSecrets,
   readStoredAdminSaveToken,
   runTerminalAction,
   writeStoredAdminSaveToken,
 } from "./api";
+import { AdminSaveTokenField } from "./AdminSaveTokenField";
 
 export function UpdateTab() {
   const [terminalAuth, setTerminalAuth] = useState("");
@@ -30,9 +32,7 @@ export function UpdateTab() {
       if (cancelled) return;
       if (!res.ok) {
         setRunnerReady(false);
-        setRunnerMessage(
-          `Host runner not ready (${res.error}${res.detail ? `: ${res.detail}` : ""}). Run npm run wp-dev -- up in this clone.`,
-        );
+        setRunnerMessage(formatTerminalRunnerSecretsError(res, { prefix: "Host runner not ready" }));
         return;
       }
       setTerminalAuth(res.terminalAuth);
@@ -113,6 +113,14 @@ export function UpdateTab() {
         <code className="rounded bg-emerald-100/80 px-1 dark:bg-emerald-900/60">pull</code> from staging/production.
       </div>
 
+      <AdminSaveTokenField
+        value={adminSaveToken}
+        onChange={(v) => {
+          setAdminSaveToken(v);
+          writeStoredAdminSaveToken(v);
+        }}
+      />
+
       <div
         className={`rounded border px-3 py-2 text-xs ${
           runnerReady
@@ -121,24 +129,6 @@ export function UpdateTab() {
         }`}
       >
         {runnerMessage || "Loading runner…"}
-      </div>
-
-      <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/40">
-        <label className="block font-medium text-slate-700 dark:text-slate-300">
-          Admin save token (only if WPDEV_ADMIN_SAVE_TOKEN is set in docker/.env)
-        </label>
-        <input
-          type="password"
-          autoComplete="off"
-          value={adminSaveToken}
-          onChange={(e) => {
-            const v = e.target.value;
-            setAdminSaveToken(v);
-            writeStoredAdminSaveToken(v);
-          }}
-          className="mt-1 w-full max-w-md rounded border border-slate-300 bg-white px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
-          placeholder="Paste token to load runner secrets"
-        />
       </div>
 
       <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-800 dark:bg-slate-900/60">
