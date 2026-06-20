@@ -18,5 +18,13 @@
     "user": "deploy",
     "path": "/var/www/live",
     "url": "https://example.com"
+  },
+  "sync": {
+    "plugins": {
+      "query-monitor": "localOnly"
+    },
+    "themes": {},
+    "disabledRecommended": [],
+    "skipUploadsOnPush": false
   }
 }

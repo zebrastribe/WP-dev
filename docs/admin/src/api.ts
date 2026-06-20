@@ -66,6 +66,7 @@ export type LocalStatus = {
   hasSyncedContent: boolean;
   hasSyncedPlugins: boolean;
   pluginCount: number;
+  installedPlugins?: string[];
   needsSetup: boolean;
   setupPhase: "fresh" | "configured" | "installed-empty" | "ready";
   writable: { wpContent: boolean; plugins: boolean; upgrade: boolean };
@@ -610,7 +611,11 @@ export type TerminalAction =
   | "ssh_test"
   | "wpdev_doctor"
   | "wpdev_pull"
+  | "wpdev_pull_dry"
   | "wpdev_push"
+  | "wpdev_push_dry"
+  | "wpdev_sync_preview"
+  | "wpdev_sync_scan"
   | "backup_create"
   | "backup_list"
   | "restore_env"

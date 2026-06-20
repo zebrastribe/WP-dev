@@ -90,10 +90,30 @@ function commandForAction(action, args) {
     if (!["staging", "production"].includes(env)) return null;
     return `npm run wp-dev -- pull ${env}`;
   }
+  if (action === "wpdev_pull_dry") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- pull ${env} --dry-run`;
+  }
   if (action === "wpdev_push") {
     const env = safeArg(args?.env);
     if (!["staging", "production"].includes(env)) return null;
     return `npm run wp-dev -- push ${env}`;
+  }
+  if (action === "wpdev_push_dry") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- push ${env} --dry-run`;
+  }
+  if (action === "wpdev_sync_preview") {
+    const env = safeArg(args?.env);
+    const direction = safeArg(args?.direction);
+    if (!["staging", "production"].includes(env)) return null;
+    if (!["push", "pull"].includes(direction)) return null;
+    return `npm run wp-dev -- sync-preview ${direction} ${env} --json`;
+  }
+  if (action === "wpdev_sync_scan") {
+    return `npm run wp-dev -- sync-scan --json`;
   }
   return null;
 }

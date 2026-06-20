@@ -190,6 +190,90 @@
             "account"
           ],
           "additionalProperties": false
+        },
+        "sync": {
+          "type": "object",
+          "properties": {
+            "plugins": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "sync",
+                  "localOnly"
+                ]
+              }
+            },
+            "localOnlyPlugins": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "themes": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "all",
+                      "custom",
+                      "localOnly"
+                    ]
+                  },
+                  "excludeFolders": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "excludeFiles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "mode"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "disabledRecommended": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "extraPushExcludes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "extraPullExcludes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "skipUploadsOnPush": {
+              "type": "boolean"
+            },
+            "recommendationsDismissed": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [

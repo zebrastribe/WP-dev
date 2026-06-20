@@ -236,6 +236,9 @@ npm run wp-dev -- up
 | **`wp-dev validate`** | Config + Docker prereqs; **`--remote staging|production`** for SSH/WP check |
 | **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`**, **`--http`**, **`--local-http`** (detect stale localhost port redirects) |
 | **`wp-dev pull`** / **`push`** | Sync with pre-backup, URL verify, DB rollback on failure; **`push staging`** requires typing SSH host |
+| **`wp-dev sync-preview`** | Preview file diff before push/pull (**`--json`** for admin UI); shows will push / stays local |
+| **`wp-dev sync-scan`** | Scan plugins/themes, detect build themes, suggest deployment units (**`--json`**) |
+| **`wp-dev sync-rules`** | List effective push/pull exclusion rules |
 | **`wp-dev backup`** / **`restore`** | DB by default; **`backup --files`** = DB + **`wp-content`** tarball; **`restore`** always creates pre-restore DB backup |
 | **`wp-dev logs`** | Tail **`logs/wp-dev.log`** |
 | **`wp-dev simply test`** | Simply API check |
@@ -370,6 +373,7 @@ If plugin updates fail after theme work or a manual **`chown`**, run **`wp-dev f
 | **Every `up` bumps `WP_PORT` with no other clones** | Fixed in recent wp-dev: ports owned by this compose project are no longer treated as conflicts. **`git pull`**, **`npm run build`**, **`up`** again. |
 | **`mkstemp` under `wordpress/`** | **`wp-dev fix-permissions`**. |
 | **Plugin update: “Kunne ikke oprette mappe” / “Could not create directory” under `wp-content/upgrade`** | **`wp-dev fix-runtime-permissions`** or **`wp-dev fix-permissions`** (restores **www-data** on runtime paths). Verify with **`wp-dev doctor`**. |
+| **Pushed Query Monitor / theme `src/` to staging** | Open **`/admin/` → Sync** — set plugins to **Local only**, theme **Custom** with **`src/`** unchecked — **Save** — **`sync-preview push staging`** before next push. |
 | **`caching_sha2_password` on import** | Use shipped Compose **`mysql_native_password`**; fix old DB user or volume. |
 | **Can't connect to `db` right after `up`** | Wait for healthy **`db`** or retry **`pull`**. |
 

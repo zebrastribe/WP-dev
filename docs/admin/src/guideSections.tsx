@@ -134,6 +134,13 @@ export const Commands: FC = () => (
               "www-data on upgrade/plugins/uploads (wp-admin updates)",
               "npm run wp-dev -- fix-runtime-permissions",
             ],
+            ["sync-scan", "Scan plugins/themes (deployment UI)", "npm run wp-dev -- sync-scan"],
+            [
+              "sync-preview push|pull <env>",
+              "Preview file diff before sync",
+              "npm run wp-dev -- sync-preview push staging",
+            ],
+            ["sync-rules", "Show effective push/pull excludes", "npm run wp-dev -- sync-rules"],
             ["logs", "Tail project log file", "npm run wp-dev -- logs --lines 200"],
           ].map(([cmd, desc, example], i) => (
             <tr key={`${i}-${cmd}`} className="border-b border-slate-100 dark:border-slate-800/80">
@@ -150,7 +157,15 @@ export const Commands: FC = () => (
 
 export const PullPush: FC = () => (
   <Prose>
+    <p>
+      Use the <strong>Sync</strong> tab in <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">/admin/</code>{" "}
+      to choose what stays local on push (dev plugins, theme <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">src/</code> vs{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">dist/</code>), preview file changes, then run push or pull.
+    </p>
     <ul className="list-inside list-disc space-y-2">
+      <li>
+        <strong>sync-scan</strong> / <strong>sync-preview</strong> — CLI equivalents; admin Sync tab calls these via the host runner.
+      </li>
       <li>
         <strong>pull --dry-run</strong> — rsync preview only; no DB import.
       </li>

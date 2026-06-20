@@ -37,6 +37,30 @@ const localSchema = z.object({
   wpRoot: z.string().min(1),
 });
 
+const themeUnitSchema = z.object({
+  mode: z.enum(["all", "custom", "localOnly"]),
+  excludeFolders: z.array(z.string().min(1)).optional(),
+  excludeFiles: z.array(z.string().min(1)).optional(),
+});
+
+const syncSchema = z
+  .object({
+    /** Per-plugin push mode (slug → sync | localOnly). */
+    plugins: z.record(z.enum(["sync", "localOnly"])).optional(),
+    /** @deprecated use sync.plugins — migrated automatically when reading. */
+    localOnlyPlugins: z.array(z.string().min(1)).optional(),
+    /** Per-theme deployment units. */
+    themes: z.record(themeUnitSchema).optional(),
+    /** Keys from RECOMMENDED_PUSH_EXCLUDES the user turned off. */
+    disabledRecommended: z.array(z.string().min(1)).optional(),
+    extraPushExcludes: z.array(z.string().min(1)).optional(),
+    extraPullExcludes: z.array(z.string().min(1)).optional(),
+    /** When true, wp-content/uploads is excluded on push. */
+    skipUploadsOnPush: z.boolean().optional(),
+    recommendationsDismissed: z.boolean().optional(),
+  })
+  .optional();
+
 export const wpDevConfigSchema = z.object({
   /** Used for backup paths and (unless overridden) Docker Compose project isolation. */
   project: z.string().min(1),
@@ -44,6 +68,7 @@ export const wpDevConfigSchema = z.object({
   staging: remoteEnvSchema,
   production: remoteEnvSchema,
   simply: simplySchema.optional(),
+  sync: syncSchema,
 });
 
 export type WpDevConfig = z.infer<typeof wpDevConfigSchema>;

@@ -15,7 +15,7 @@ export type SiteUrlCheck = {
 export async function wpLocalGetOption(
   configDir: string,
   config: WpDevConfig,
-  key: "home" | "siteurl",
+  key: string,
 ): Promise<string | null> {
   const r = await wpLocalRaw(configDir, config, ["option", "get", key]);
   if (r.exitCode !== 0) return null;
