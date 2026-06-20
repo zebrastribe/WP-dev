@@ -14,6 +14,8 @@ on:
 
 jobs:
   agency-starter-tests:
+    # Theme lives in gitignored wordpress/ — skip when not checked in (default wp-dev clone).
+    if: hashFiles('wordpress/wp-content/themes/agency-starter/package-lock.json') != ''
     runs-on: ubuntu-latest
     defaults:
       run:
