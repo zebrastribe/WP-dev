@@ -22,7 +22,7 @@ export type SyncScanOptions = {
   json: boolean;
 };
 
-function parseDirection(raw: string): SyncDirection {
+export function parseSyncDirection(raw: string): SyncDirection {
   if (raw === "push" || raw === "pull") return raw;
   throw new Error(`Invalid direction "${raw}". Use push or pull.`);
 }
@@ -33,7 +33,7 @@ export async function cmdSyncPreview(
   env: RemoteEnvName,
   options: SyncPreviewOptions,
 ): Promise<void> {
-  const direction = parseDirection(directionRaw);
+  const direction = parseSyncDirection(directionRaw);
   assertHostSyncTools();
   logInfo(`sync-preview ${direction} ${env}`);
   const preview = await runSyncPreview(loaded, env, direction);

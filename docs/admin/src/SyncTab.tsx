@@ -7,7 +7,6 @@ import {
   readStoredAdminSaveToken,
   runTerminalAction,
   saveWpDevConfig,
-  writeStoredAdminSaveToken,
   type TerminalAction,
 } from "./api";
 
@@ -114,7 +113,7 @@ export function SyncTab() {
   const [runnerToken, setRunnerToken] = useState("");
   const [runnerReady, setRunnerReady] = useState(false);
   const [runnerMessage, setRunnerMessage] = useState("");
-  const [adminSaveToken, setAdminSaveToken] = useState(readStoredAdminSaveToken);
+  const [adminSaveToken] = useState(readStoredAdminSaveToken);
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const [scan, setScan] = useState<SyncScan | null>(null);
   const [pluginFilter, setPluginFilter] = useState("");

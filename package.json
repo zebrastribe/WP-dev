@@ -18,6 +18,9 @@
     "pretest": "npm run generate:config-artifacts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:smoke": "vitest run --config vitest.smoke.config.ts",
+    "test:all": "npm test && npm run build && npm run test:smoke",
     "postinstall": "node scripts/ensure-config.mjs",
     "admin:dev": "npm run dev --prefix docs/admin",
     "admin:build": "npm run build --prefix docs/admin",
@@ -33,9 +36,10 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@vitest/coverage-v8": "^3.2.6",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
-    "@types/node": "^22.10.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^3.0.5",
