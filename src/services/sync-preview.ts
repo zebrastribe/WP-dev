@@ -16,6 +16,7 @@ import {
   parseRsyncItemizeOutput,
   summarizeChangePaths,
 } from "./sync-preview-parse.js";
+import { buildSshRsyncEnv } from "../utils/rsync-ssh-env.js";
 
 export type SyncDirection = "push" | "pull";
 
@@ -33,17 +34,6 @@ export type SyncPreviewResult = {
   warnings: string[];
   safetyWarnings: string[];
 };
-
-function buildSshRsyncEnv(remote: RemoteEnvConfig): string {
-  const parts = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"];
-  if (remote.port != null) {
-    parts.push("-p", String(remote.port));
-  }
-  if (remote.identityFile) {
-    parts.push("-i", remote.identityFile);
-  }
-  return parts.join(" ");
-}
 
 type CaptureResult = {
   exitCode: number | null;

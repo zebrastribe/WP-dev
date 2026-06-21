@@ -17,10 +17,10 @@ export default defineConfig({
       ],
       exclude: ["src/cli.ts"],
       thresholds: {
-        lines: 39,
-        functions: 52,
+        lines: 50,
+        functions: 55,
         branches: 68,
-        statements: 39,
+        statements: 50,
         "src/services/sync-excludes.ts": {
           lines: 75,
           functions: 75,
