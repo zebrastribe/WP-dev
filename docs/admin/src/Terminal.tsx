@@ -1,54 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  formatTerminalRunnerSecretsError,
-  getTerminalJobStatus,
-  loadTerminalRunnerSecrets,
-  readStoredAdminSaveToken,
-  runTerminalAction,
-  writeStoredAdminSaveToken,
-} from "./api";
-import { AdminSaveTokenField } from "./AdminSaveTokenField";
+import { useState } from "react";
+import { getTerminalJobStatus, runTerminalAction } from "./api";
+import { useRunnerSecrets } from "./useRunnerSecrets";
 import { TerminalEmbed } from "./TerminalEmbed";
 
 type EnvName = "local" | "staging" | "production";
 
 export function TerminalTab() {
-  const [terminalAuth, setTerminalAuth] = useState("");
-  const [runnerToken, setRunnerToken] = useState("");
-  const [terminalPort, setTerminalPort] = useState(7681);
-  const [runnerReady, setRunnerReady] = useState(false);
-  const [runnerMessage, setRunnerMessage] = useState("");
+  const { terminalAuth, terminalPort, runnerReady, runnerMessage, canRun } = useRunnerSecrets();
   const [env, setEnv] = useState<EnvName>("staging");
   const [showTerminal, setShowTerminal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
-  const [adminSaveToken, setAdminSaveToken] = useState(readStoredAdminSaveToken);
-
-  const canRun = useMemo(
-    () => Boolean(runnerReady && terminalAuth.trim() && runnerToken.trim()),
-    [runnerReady, terminalAuth, runnerToken],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const res = await loadTerminalRunnerSecrets(adminSaveToken.trim() || undefined);
-      if (cancelled) return;
-      if (!res.ok) {
-        setRunnerReady(false);
-        setRunnerMessage(formatTerminalRunnerSecretsError(res));
-        return;
-      }
-      setTerminalAuth(res.terminalAuth);
-      setRunnerToken(res.runnerToken);
-      setTerminalPort(res.terminalPort);
-      setRunnerReady(true);
-      setRunnerMessage("Runner security is loaded automatically from backend.");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [adminSaveToken]);
 
   const run = async (
     action:
@@ -72,24 +34,13 @@ export function TerminalTab() {
     setBusy(true);
     setOutput("Starting command...\n");
     try {
-      const started = await runTerminalAction(
-        terminalAuth.trim(),
-        runnerToken.trim(),
-        action,
-        args,
-        runnerKind,
-      );
+      const started = await runTerminalAction(action, args, runnerKind);
       if (!started.ok) {
         setOutput(`Runner error: ${started.error}`);
         return;
       }
       for (let i = 0; i < 300; i += 1) {
-        const st = await getTerminalJobStatus(
-          terminalAuth.trim(),
-          runnerToken.trim(),
-          started.jobId,
-          runnerKind,
-        );
+        const st = await getTerminalJobStatus(started.jobId, runnerKind);
         if (!st.ok) {
           setOutput(`Status error: ${st.error}`);
           return;
@@ -109,14 +60,6 @@ export function TerminalTab() {
       <p className="text-sm text-slate-600 dark:text-slate-400">
         Use the action buttons below; command output always appears in the lower output window.
       </p>
-
-      <AdminSaveTokenField
-        value={adminSaveToken}
-        onChange={(v) => {
-          setAdminSaveToken(v);
-          writeStoredAdminSaveToken(v);
-        }}
-      />
 
       <div
         className={`rounded border px-3 py-2 text-xs ${

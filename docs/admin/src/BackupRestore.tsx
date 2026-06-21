@@ -1,74 +1,38 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  formatTerminalRunnerSecretsError,
-  getTerminalJobStatus,
-  loadTerminalRunnerSecrets,
-  readStoredAdminSaveToken,
-  runTerminalAction,
-  writeStoredAdminSaveToken,
-} from "./api";
-import { AdminSaveTokenField } from "./AdminSaveTokenField";
+import { useState } from "react";
+import { getTerminalJobStatus, runTerminalAction } from "./api";
+import { useRunnerSecrets } from "./useRunnerSecrets";
 
 type EnvName = "local" | "staging" | "production";
 type BackupKind = "db" | "full";
 
 export function BackupRestore() {
-  const [terminalAuth, setTerminalAuth] = useState("");
-  const [runnerToken, setRunnerToken] = useState("");
+  const { terminalAuth, runnerToken, runnerReady, runnerMessage, canRun } = useRunnerSecrets();
   const [env, setEnv] = useState<EnvName>("local");
   const [backupKind, setBackupKind] = useState<BackupKind>("full");
   const [restoreFile, setRestoreFile] = useState("");
   const [productionConfirm, setProductionConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
-  const [runnerReady, setRunnerReady] = useState(false);
-  const [runnerMessage, setRunnerMessage] = useState<string>("");
-  const [adminSaveToken, setAdminSaveToken] = useState(readStoredAdminSaveToken);
-
-  const canRun = useMemo(
-    () => Boolean(terminalAuth.trim() && runnerToken.trim()),
-    [terminalAuth, runnerToken],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const res = await loadTerminalRunnerSecrets(adminSaveToken.trim() || undefined);
-      if (cancelled) return;
-      if (!res.ok) {
-        setRunnerReady(false);
-        setRunnerMessage(formatTerminalRunnerSecretsError(res));
-        return;
-      }
-      setTerminalAuth(res.terminalAuth);
-      setRunnerToken(res.runnerToken);
-      setRunnerReady(true);
-      setRunnerMessage("Runner security is loaded automatically from backend.");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [adminSaveToken]);
 
   const runAction = async (action: "backup_create" | "backup_list" | "restore_env", args: Record<string, string>) => {
     if (!canRun) {
-      setOutput("Set terminal auth and runner token first.");
+      setOutput("Unlock admin and wait for runner to be ready.");
       return;
     }
     setBusy(true);
     setOutput("Starting command...\n");
     try {
-      const started = await runTerminalAction(terminalAuth.trim(), runnerToken.trim(), action, args);
+      const started = await runTerminalAction(action, args);
       if (!started.ok) {
         setOutput(
-          started.error === "missing_runner_token"
+          started.error === "runner_secrets_unavailable"
             ? "Runner credentials are missing on backend. Run: npm run wp-dev -- up"
             : `Runner error: ${started.error}`,
         );
         return;
       }
       for (let i = 0; i < 300; i += 1) {
-        const st = await getTerminalJobStatus(terminalAuth.trim(), runnerToken.trim(), started.jobId);
+        const st = await getTerminalJobStatus(started.jobId);
         if (!st.ok) {
           setOutput(`Status error: ${st.error}`);
           return;
@@ -112,14 +76,6 @@ export function BackupRestore() {
       <p className="text-xs text-slate-500 dark:text-slate-400">
         For staging/production full backup/restore, remote host must support SSH access and have WP-CLI + rsync available.
       </p>
-
-      <AdminSaveTokenField
-        value={adminSaveToken}
-        onChange={(v) => {
-          setAdminSaveToken(v);
-          writeStoredAdminSaveToken(v);
-        }}
-      />
 
       <div
         className={`rounded border px-3 py-2 text-xs ${

@@ -1,7 +1,8 @@
 import { logAdmin } from "./adminLog";
+import { buildAdminApiHeaders, setAdminNonce } from "./adminAuthState";
 import { validateWpDevConfigJson } from "./validateConfig";
 
-/** Optional browser persistence for `X-WP-DEV-Admin-Token` when loading secrets outside the wizard. */
+/** @deprecated Migrated to HttpOnly session — cleared after successful unlock. */
 export const WPDEV_ADMIN_TOKEN_LS_KEY = "wpdev-admin-save-token";
 
 export function readStoredAdminSaveToken(): string {
@@ -23,9 +24,95 @@ export function writeStoredAdminSaveToken(value: string): void {
   }
 }
 
-function adminSaveTokenHeaders(adminSaveToken?: string): HeadersInit {
-  const t = adminSaveToken?.trim();
-  return t ? { "X-WP-DEV-Admin-Token": t } : {};
+export type AdminAuthStatusResponse =
+  | { ok: true; tokenConfigured: boolean; authenticated: boolean; nonce?: string }
+  | { ok: false; error: string };
+
+export async function fetchAdminAuthStatus(): Promise<AdminAuthStatusResponse> {
+  try {
+    const res = await fetch(apiPhpUrl("auth-status"), {
+      method: "GET",
+      credentials: "same-origin",
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || data.ok !== true) {
+      setAdminNonce(null);
+      return { ok: false, error: String(data.error ?? `HTTP ${res.status}`) };
+    }
+    const authenticated = Boolean(data.authenticated);
+    const nonce = typeof data.nonce === "string" ? data.nonce : null;
+    setAdminNonce(authenticated ? nonce : null);
+    return {
+      ok: true,
+      tokenConfigured: Boolean(data.tokenConfigured),
+      authenticated,
+      nonce: nonce ?? undefined,
+    };
+  } catch (e) {
+    setAdminNonce(null);
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export async function bootstrapLocalAdminSession(): Promise<
+  { ok: true } | { ok: false; error: string }
+> {
+  try {
+    const res = await fetch(apiPhpUrl("auth-bootstrap"), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || data.ok !== true) {
+      const detail = typeof data.detail === "string" ? `: ${data.detail}` : "";
+      return { ok: false, error: `${String(data.error ?? `HTTP ${res.status}`)}${detail}` };
+    }
+    const nonce = typeof data.nonce === "string" ? data.nonce : null;
+    setAdminNonce(nonce);
+    logAdmin("info", "bootstrapLocalAdminSession: local session established");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export async function unlockAdminSession(
+  token: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(apiPhpUrl("auth"), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: token.trim() }),
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || data.ok !== true) {
+      const detail = typeof data.detail === "string" ? `: ${data.detail}` : "";
+      return { ok: false, error: `${String(data.error ?? `HTTP ${res.status}`)}${detail}` };
+    }
+    const nonce = typeof data.nonce === "string" ? data.nonce : null;
+    setAdminNonce(nonce);
+    logAdmin("info", "unlockAdminSession: session established");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export async function logoutAdminSession(): Promise<void> {
+  try {
+    await fetch(apiPhpUrl("logout"), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: buildAdminApiHeaders({ "Content-Type": "application/json" }),
+      body: "{}",
+    });
+  } finally {
+    setAdminNonce(null);
+  }
 }
 
 /** Same-origin /admin/api.php (Docker) or dev proxy to WP port. */
@@ -42,7 +129,14 @@ export function apiPhpUrl(
     | "staging-https-check"
     | "staging-domain-check"
     | "staging-db-check"
-    | "local-status",
+    | "local-status"
+    | "auth-status"
+    | "auth"
+    | "auth-bootstrap"
+    | "logout"
+    | "runner-health"
+    | "runner-run"
+    | "runner-status",
 ): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return `${origin}/admin/api.php?action=${action}`;
@@ -96,7 +190,7 @@ export function formatTerminalRunnerSecretsError(
   const prefix = options?.prefix ?? "Runner credentials are not initialized yet";
   const core = `${prefix} (${res.error}${res.detail ? `: ${res.detail}` : ""})`;
   if (res.error === "forbidden") {
-    return `${core}. Paste the same value as WPDEV_ADMIN_SAVE_TOKEN from docker/.env into the Admin save token field below (stored in this browser).`;
+    return `${core}. Click Unlock admin (top right) and paste WPDEV_ADMIN_SAVE_TOKEN from docker/.env once.`;
   }
   if (res.error === "not_found") {
     return `${core}. Rebuild admin: npm run admin:build:wp && npm run wp-dev -- down && npm run wp-dev -- up.`;
@@ -184,18 +278,17 @@ export async function loadLocalStatus(): Promise<LocalStatusResponse> {
 
 export async function saveWpDevConfig(
   body: Record<string, unknown>,
-  token?: string,
+  _legacyToken?: string,
 ): Promise<SaveResponse> {
   const t0 = performance.now();
   const project = typeof body.project === "string" ? body.project : "?";
-  logAdmin("info", "saveWpDevConfig: POST started", `project=${project} token=${token?.trim() ? "yes" : "no"}`);
+  logAdmin("info", "saveWpDevConfig: POST started", `project=${project}`);
   const localCheck = validateWpDevConfigJson(body);
   if (!localCheck.ok) {
     logAdmin("warn", "saveWpDevConfig: blocked — schema validation failed", localCheck.errors);
     return { ok: false, error: `config_invalid: ${localCheck.errors}` };
   }
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token?.trim()) headers["X-WP-DEV-Admin-Token"] = token.trim();
+  const headers = buildAdminApiHeaders({ "Content-Type": "application/json" });
   try {
     const res = await fetch(apiPhpUrl("save"), {
       method: "POST",
@@ -234,12 +327,11 @@ export async function saveWpDevConfig(
 /** Upsert secrets into host `docker/.env` (not wp-dev.config.json). Same auth as save when token is set. */
 export async function saveDockerEnvSecrets(
   body: Record<string, string>,
-  token?: string,
+  _legacyToken?: string,
 ): Promise<SaveResponse> {
   const t0 = performance.now();
   logAdmin("info", "saveDockerEnvSecrets: POST started", `keys=${Object.keys(body).join(",")}`);
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token?.trim()) headers["X-WP-DEV-Admin-Token"] = token.trim();
+  const headers = buildAdminApiHeaders({ "Content-Type": "application/json" });
   try {
     const res = await fetch(apiPhpUrl("save-docker-env"), {
       method: "POST",
@@ -322,14 +414,12 @@ export async function loadDockerEnvPublic(): Promise<DockerEnvPublicResponse> {
   }
 }
 
-export async function loadTerminalRunnerSecrets(
-  adminSaveToken?: string,
-): Promise<TerminalRunnerSecretsResponse> {
+export async function loadTerminalRunnerSecrets(): Promise<TerminalRunnerSecretsResponse> {
   try {
     const res = await fetch(apiPhpUrl("terminal-runner-secrets"), {
       method: "GET",
       credentials: "same-origin",
-      headers: adminSaveTokenHeaders(adminSaveToken),
+      headers: buildAdminApiHeaders(),
     });
     const data = (await res.json()) as unknown;
     if (!data || typeof data !== "object") {
@@ -371,12 +461,12 @@ export type StagingDbSecretsResponse =
   | { ok: true; host: string; name: string; user: string; password: string; prefix: string }
   | { ok: false; error: string; detail?: string };
 
-export async function loadStagingDbSecrets(adminSaveToken?: string): Promise<StagingDbSecretsResponse> {
+export async function loadStagingDbSecrets(): Promise<StagingDbSecretsResponse> {
   try {
     const res = await fetch(apiPhpUrl("staging-db-secrets"), {
       method: "GET",
       credentials: "same-origin",
-      headers: adminSaveTokenHeaders(adminSaveToken),
+      headers: buildAdminApiHeaders(),
     });
     const data = (await res.json()) as unknown;
     if (!data || typeof data !== "object") {
@@ -414,7 +504,7 @@ export async function verifySimplyApi(
   try {
     const res = await fetch(apiPhpUrl("simply-test"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildAdminApiHeaders({ "Content-Type": "application/json" }),
       credentials: "same-origin",
       body: JSON.stringify(payload ?? {}),
     });
@@ -456,7 +546,7 @@ export async function checkStagingHttps(payload?: {
   try {
     const res = await fetch(apiPhpUrl("staging-https-check"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildAdminApiHeaders({ "Content-Type": "application/json" }),
       credentials: "same-origin",
       body: JSON.stringify(payload ?? {}),
     });
@@ -508,7 +598,7 @@ export async function checkStagingDbConnection(payload: {
   try {
     const res = await fetch(apiPhpUrl("staging-db-check"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildAdminApiHeaders({ "Content-Type": "application/json" }),
       credentials: "same-origin",
       body: JSON.stringify(payload ?? {}),
     });
@@ -564,7 +654,7 @@ export async function checkStagingDomain(payload?: {
   try {
     const res = await fetch(apiPhpUrl("staging-domain-check"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildAdminApiHeaders({ "Content-Type": "application/json" }),
       credentials: "same-origin",
       body: JSON.stringify(payload ?? {}),
     });
@@ -673,29 +763,50 @@ export type TerminalJobStatus =
   | { ok: true; status: "running" | "done"; output: string; exitCode: number | null; command: string }
   | { ok: false; error: string };
 
-export async function runTerminalAction(
-  auth: string,
-  token: string,
-  action: TerminalAction,
-  args?: Record<string, string>,
-  runnerKind: "terminal" | "sync" = "terminal",
-): Promise<TerminalRunResponse> {
-  const secureHeaders = runnerSecurityHeaders(auth, token);
-  if (!secureHeaders.Authorization || !secureHeaders["X-WP-DEV-Terminal-Token"]) {
-    return { ok: false, error: "missing_runner_token" };
-  }
+export async function fetchRunnerHealth(): Promise<
+  | { ok: true; terminal: boolean; sync: boolean }
+  | { ok: false; error: string }
+> {
   try {
-    const res = await fetch(`${terminalRunnerBaseUrl(runnerKind)}/run`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...secureHeaders,
-      },
-      body: JSON.stringify({ action, args: args ?? {} }),
+    const res = await fetch(apiPhpUrl("runner-health"), {
+      method: "GET",
+      credentials: "same-origin",
+      headers: buildAdminApiHeaders(),
     });
     const data = (await res.json()) as Record<string, unknown>;
     if (!res.ok || data.ok !== true) {
       return { ok: false, error: String(data.error ?? `HTTP ${res.status}`) };
+    }
+    return {
+      ok: true,
+      terminal: Boolean(data.terminal),
+      sync: Boolean(data.sync),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export async function runTerminalAction(
+  action: TerminalAction,
+  args?: Record<string, string>,
+  runnerKind: "terminal" | "sync" = "terminal",
+): Promise<TerminalRunResponse> {
+  try {
+    const res = await fetch(apiPhpUrl("runner-run"), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        ...buildAdminApiHeaders(),
+      },
+      body: JSON.stringify({ kind: runnerKind, action, args: args ?? {} }),
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || data.ok !== true) {
+      const detail = typeof data.detail === "string" ? data.detail : "";
+      const err = String(data.error ?? `HTTP ${res.status}`);
+      return { ok: false, error: detail ? `${err}: ${detail}` : err };
     }
     return {
       ok: true,
@@ -708,23 +819,23 @@ export async function runTerminalAction(
 }
 
 export async function getTerminalJobStatus(
-  auth: string,
-  token: string,
   jobId: string,
   runnerKind: "terminal" | "sync" = "terminal",
 ): Promise<TerminalJobStatus> {
-  const secureHeaders = runnerSecurityHeaders(auth, token);
-  if (!secureHeaders.Authorization || !secureHeaders["X-WP-DEV-Terminal-Token"]) {
-    return { ok: false, error: "missing_runner_token" };
-  }
   try {
-    const res = await fetch(`${terminalRunnerBaseUrl(runnerKind)}/status/${encodeURIComponent(jobId)}`, {
-      method: "GET",
-      headers: secureHeaders,
-    });
+    const res = await fetch(
+      `${apiPhpUrl("runner-status")}&jobId=${encodeURIComponent(jobId)}&kind=${encodeURIComponent(runnerKind)}`,
+      {
+        method: "GET",
+        credentials: "same-origin",
+        headers: buildAdminApiHeaders(),
+      },
+    );
     const data = (await res.json()) as Record<string, unknown>;
     if (!res.ok || data.ok !== true) {
-      return { ok: false, error: String(data.error ?? `HTTP ${res.status}`) };
+      const detail = typeof data.detail === "string" ? data.detail : "";
+      const err = String(data.error ?? `HTTP ${res.status}`);
+      return { ok: false, error: detail ? `${err}: ${detail}` : err };
     }
     return {
       ok: true,

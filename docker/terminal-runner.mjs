@@ -128,7 +128,7 @@ function commandForAction(action, args) {
     const admin = safeArg(args?.admin);
     const restart = safeArg(args?.restart);
     const dryRun = safeArg(args?.dry_run);
-    const flags: string[] = [];
+    const flags = [];
     if (admin === "0") flags.push("--no-admin");
     if (restart === "0") flags.push("--no-restart");
     if (dryRun === "1") flags.push("--dry-run");
@@ -329,6 +329,10 @@ const server = http.createServer(async (req, res) => {
   pruneJobs();
 
   const url = new URL(req.url || "/", "http://localhost");
+  if (req.method === "GET" && url.pathname === "/health") {
+    json(req, res, 200, { ok: true, runner: "terminal" });
+    return;
+  }
   if (req.method === "POST" && url.pathname === "/run") {
     let body = "";
     req.on("data", (d) => {

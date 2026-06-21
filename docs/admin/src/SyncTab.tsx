@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { logAdmin } from "./adminLog";
 import {
-  formatTerminalRunnerSecretsError,
   getTerminalJobStatus,
-  loadTerminalRunnerSecrets,
   loadWpDevConfig,
-  readStoredAdminSaveToken,
   runTerminalAction,
   saveWpDevConfig,
   type TerminalAction,
-  writeStoredAdminSaveToken,
 } from "./api";
-import { AdminSaveTokenField } from "./AdminSaveTokenField";
+import { useAdminAuth } from "./AdminAuthProvider";
+import { useRunnerSecrets } from "./useRunnerSecrets";
 
 type RemoteEnv = "staging" | "production";
 type SyncDirection = "push" | "pull";
@@ -69,6 +66,75 @@ const RECOMMENDED_TOGGLES = [
   { key: "upgrade-temp", label: "upgrade temp", hint: "wp-content/upgrade" },
 ] as const;
 
+function SyncHelpPanel() {
+  return (
+    <details className="rounded-xl border border-slate-200 bg-slate-50 text-sm dark:border-slate-700 dark:bg-slate-900/60">
+      <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
+        What do Sync / Local only mean?
+      </summary>
+      <div className="space-y-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-700 dark:border-slate-700 dark:text-slate-300">
+        <p>
+          This tab sets rules for <strong>full site sync</strong> — files and database together
+          (Push localhost → production, or Pull production → localhost).
+        </p>
+        <div>
+          <p className="font-semibold text-slate-900 dark:text-slate-100">Plugins</p>
+          <ul className="mt-1 list-disc space-y-1 pl-4">
+            <li>
+              <strong>Deploy</strong> — plugin folder is included in push/pull.
+            </li>
+            <li>
+              <strong>Local only</strong> — plugin never leaves your laptop. Use for dev tools
+              (e.g. Query Monitor). Production keeps its own copy.
+            </li>
+          </ul>
+        </div>
+        <div>
+          <p className="font-semibold text-slate-900 dark:text-slate-100">Themes</p>
+          <ul className="mt-1 list-disc space-y-1 pl-4">
+            <li>
+              <strong>All files</strong> — entire theme folder syncs (including node_modules unless
+              excluded globally).
+            </li>
+            <li>
+              <strong>Partial</strong> — only checked folders/files sync; dev folders like{" "}
+              <code className="rounded bg-slate-200 px-1 dark:bg-slate-800">node_modules</code> stay
+              local. Recommended for build themes.
+            </li>
+            <li>
+              <strong>Never deploy</strong> — theme is skipped on push; production is unchanged.
+              Do <em>not</em> use this for your active theme if you want to update production.
+            </li>
+          </ul>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-600 dark:bg-slate-950">
+          <p className="font-semibold text-slate-900 dark:text-slate-100">
+            Agency Starter (build theme)
+          </p>
+          <p className="mt-1">
+            Localhost has the full source tree (Tailwind, npm,{" "}
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">theme/</code> compiled
+            output). Production only needs the compiled theme — not Node or source files.
+          </p>
+          <p className="mt-2">
+            For day-to-day theme work, prefer{" "}
+            <strong>theme-only deploy</strong> (does not touch the database):
+          </p>
+          <pre className="mt-2 overflow-x-auto rounded bg-slate-100 p-2 font-mono text-[11px] dark:bg-slate-900">
+            npm run wp-dev -- push theme production --build
+          </pre>
+          <p className="mt-2">
+            That runs <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run production</code>{" "}
+            in the theme folder, then rsyncs the compiled{" "}
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">theme/</code> directory to
+            production. Use full push here only when cloning an entire environment (files + DB).
+          </p>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 function parseJsonFromOutput<T>(output: string): T | null {
   const start = output.indexOf("{");
   if (start < 0) return null;
@@ -112,13 +178,13 @@ function SegmentedToggle<T extends string>({
 }
 
 export function SyncTab() {
-  const [terminalAuth, setTerminalAuth] = useState("");
-  const [runnerToken, setRunnerToken] = useState("");
-  const [runnerReady, setRunnerReady] = useState(false);
-  const [runnerMessage, setRunnerMessage] = useState("");
-  const [adminSaveToken, setAdminSaveToken] = useState(readStoredAdminSaveToken);
+  const { authenticated, requestUnlock } = useAdminAuth();
+  const { terminalAuth, runnerToken, runnerReady, runnerMessage, canRun } = useRunnerSecrets(
+    "Runner not ready",
+  );
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const [scan, setScan] = useState<SyncScan | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [pluginFilter, setPluginFilter] = useState("");
   const [expandedThemes, setExpandedThemes] = useState<Set<string>>(new Set());
   const [env, setEnv] = useState<RemoteEnv>("staging");
@@ -137,32 +203,16 @@ export function SyncTab() {
   const skipUploads = Boolean(sync.skipUploadsOnPush);
   const recommendationsDismissed = Boolean(sync.recommendationsDismissed);
 
-  const canRun = useMemo(
-    () => Boolean(runnerReady && terminalAuth.trim() && runnerToken.trim()),
-    [runnerReady, terminalAuth, runnerToken],
-  );
-
   const runJob = useCallback(
     async (
       action: TerminalAction,
       args?: Record<string, string>,
     ): Promise<{ ok: boolean; output: string }> => {
       if (!canRun) return { ok: false, output: "Runner not ready." };
-      const started = await runTerminalAction(
-        terminalAuth.trim(),
-        runnerToken.trim(),
-        action,
-        args,
-        "sync",
-      );
+      const started = await runTerminalAction(action, args, "sync");
       if (!started.ok) return { ok: false, output: started.error };
       for (let i = 0; i < 600; i += 1) {
-        const st = await getTerminalJobStatus(
-          terminalAuth.trim(),
-          runnerToken.trim(),
-          started.jobId,
-          "sync",
-        );
+        const st = await getTerminalJobStatus(started.jobId, "sync");
         if (!st.ok) return { ok: false, output: st.error };
         setRawOutput(st.output || "Running…");
         if (st.status === "done") {
@@ -172,20 +222,25 @@ export function SyncTab() {
       }
       return { ok: false, output: "Timed out." };
     },
-    [canRun, runnerToken, terminalAuth],
+    [canRun],
   );
 
   const refreshScan = useCallback(async () => {
     if (!canRun) return;
+    setScanError(null);
     const r = await runJob("wpdev_sync_scan");
-    if (r.ok) {
-      const parsed = parseJsonFromOutput<SyncScan>(r.output);
-      if (parsed) {
-        setScan(parsed);
-        if (parsed.activeTheme) {
-          setExpandedThemes(new Set([parsed.activeTheme]));
-        }
-      }
+    if (!r.ok) {
+      setScanError(r.error || "Could not scan plugins and themes. Is the host runner running?");
+      return;
+    }
+    const parsed = parseJsonFromOutput<SyncScan>(r.output);
+    if (!parsed) {
+      setScanError("Scan finished but returned invalid JSON. Check command output below.");
+      return;
+    }
+    setScan(parsed);
+    if (parsed.activeTheme) {
+      setExpandedThemes(new Set([parsed.activeTheme]));
     }
   }, [canRun, runJob]);
 
@@ -197,26 +252,6 @@ export function SyncTab() {
       }
     });
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const res = await loadTerminalRunnerSecrets(adminSaveToken.trim() || undefined);
-      if (cancelled) return;
-      if (!res.ok) {
-        setRunnerReady(false);
-        setRunnerMessage(formatTerminalRunnerSecretsError(res, { prefix: "Runner not ready" }));
-        return;
-      }
-      setTerminalAuth(res.terminalAuth);
-      setRunnerToken(res.runnerToken);
-      setRunnerReady(true);
-      setRunnerMessage("Ready — configure deployment units, preview, then push or pull.");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [adminSaveToken]);
 
   useEffect(() => {
     if (canRun) void refreshScan();
@@ -332,8 +367,13 @@ export function SyncTab() {
 
   const saveConfig = async (): Promise<boolean> => {
     if (!config) return false;
+    if (!authenticated) {
+      requestUnlock();
+      setSaveMsg("Unlock admin to save sync settings.");
+      return false;
+    }
     setSaveMsg("");
-    const res = await saveWpDevConfig(config, adminSaveToken.trim() || undefined);
+    const res = await saveWpDevConfig(config);
     if (!res.ok) {
       setSaveMsg(`Save failed: ${res.error}`);
       return false;
@@ -424,17 +464,12 @@ export function SyncTab() {
       <div>
         <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Sync & deployment</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Choose what leaves your laptop on push. Preview changes before sync.
+          Control what is included in <strong>full site</strong> push/pull (files + database). Preview
+          before syncing. Theme-only deploys use a separate terminal command — see help below.
         </p>
       </div>
 
-      <AdminSaveTokenField
-        value={adminSaveToken}
-        onChange={(v) => {
-          setAdminSaveToken(v);
-          writeStoredAdminSaveToken(v);
-        }}
-      />
+      <SyncHelpPanel />
 
       <div
         className={`rounded border px-3 py-2 text-xs ${
@@ -443,21 +478,28 @@ export function SyncTab() {
             : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40"
         }`}
       >
-        {runnerMessage || "Loading runner…"}
+        {runnerMessage ||
+          (runnerReady ? "Ready — configure deployment units, preview, then push or pull." : "Loading runner…")}
       </div>
 
       {hasSuggestions ? (
-        <div className="rounded-xl border border-brand-200 bg-brand-50 p-4 dark:border-brand-900 dark:bg-brand-950/30">
-          <p className="text-sm font-semibold text-brand-900 dark:text-brand-100">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
+          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
             We found development-only items
           </p>
-          <ul className="mt-2 text-xs text-brand-800 dark:text-brand-200">
+          <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+            These stay on localhost during full push — they are not removed from production.
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-slate-700 dark:text-slate-300">
             {(scan?.suggestions.devPlugins ?? []).map((s) => (
-              <li key={s}>Plugin: {s} → local only</li>
+              <li key={s}>
+                Plugin <strong>{s}</strong> → Local only (dev tool)
+              </li>
             ))}
             {(scan?.suggestions.buildThemes ?? []).map((t) => (
               <li key={t.slug}>
-                Theme {t.slug}: exclude {t.excludeFolders.join(", ") || "build folders"}
+                Theme <strong>{t.slug}</strong> → Partial deploy (exclude{" "}
+                {t.excludeFolders.join(", ") || "dev folders"})
               </li>
             ))}
           </ul>
@@ -472,7 +514,7 @@ export function SyncTab() {
             <button
               type="button"
               onClick={() => updateSync({ recommendationsDismissed: true })}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs dark:border-slate-600"
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 dark:border-slate-600 dark:text-slate-300"
             >
               Not now
             </button>
@@ -483,8 +525,12 @@ export function SyncTab() {
       <div className="grid gap-6 xl:grid-cols-5">
         <div className="space-y-4 xl:col-span-3">
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Plugins</h3>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Plugins</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              <strong>Deploy</strong> = included in full push/pull.{" "}
+              <strong>Local only</strong> = stays on your laptop (production unchanged).
+            </p>
+            <div className="mt-3 flex justify-end">
               <input
                 type="search"
                 placeholder="Search…"
@@ -494,10 +540,23 @@ export function SyncTab() {
               />
             </div>
             <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
-              {filteredPlugins.length === 0 ? (
+              {scanError ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+                  <p>{scanError}</p>
+                  <button
+                    type="button"
+                    onClick={() => void refreshScan()}
+                    className="mt-2 rounded border border-amber-300 px-2 py-1 font-semibold dark:border-amber-800"
+                  >
+                    Retry scan
+                  </button>
+                </div>
+              ) : null}
+              {!scanError && filteredPlugins.length === 0 ? (
                 <p className="text-xs text-slate-500">No plugins detected — run pull or install WordPress.</p>
-              ) : (
-                filteredPlugins.map((p) => {
+              ) : null}
+              {filteredPlugins.length > 0
+                ? filteredPlugins.map((p) => {
                   const mode = pluginsMap[p.slug] ?? p.mode;
                   return (
                     <div
@@ -518,7 +577,7 @@ export function SyncTab() {
                       <SegmentedToggle
                         value={mode}
                         options={[
-                          { value: "sync", label: "Sync" },
+                          { value: "sync", label: "Deploy" },
                           { value: "localOnly", label: "Local only" },
                         ]}
                         onChange={(v) => setPluginMode(p.slug, v)}
@@ -526,15 +585,25 @@ export function SyncTab() {
                     </div>
                   );
                 })
-              )}
+                : null}
             </div>
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Themes</h3>
             <p className="mt-1 text-xs text-slate-500">
-              Active theme: {activeThemeSlug ?? "unknown"} — expand to pick folders for build themes.
+              Rules for <strong>full site</strong> push/pull only. Active theme:{" "}
+              {activeThemeSlug ?? "unknown"}.
             </p>
+            {scan?.themes.some((t) => t.active && t.buildTheme) ? (
+              <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                <strong>{activeThemeSlug}</strong> is a build theme. For production CSS/JS updates
+                without touching the database, run:{" "}
+                <code className="rounded bg-slate-200 px-1 dark:bg-slate-800">
+                  npm run wp-dev -- push theme production --build
+                </code>
+              </p>
+            ) : null}
             <div className="mt-3 space-y-2">
               {(scan?.themes ?? []).map((t) => {
                 const cfg = getThemeConfig(t.slug);
@@ -586,15 +655,18 @@ export function SyncTab() {
                       <SegmentedToggle
                         value={cfg.mode === "localOnly" ? "localOnly" : cfg.mode === "custom" ? "custom" : "all"}
                         options={[
-                          { value: "all", label: "All" },
-                          { value: "custom", label: "Custom" },
-                          { value: "localOnly", label: "Local" },
+                          { value: "all", label: "All files" },
+                          { value: "custom", label: "Partial" },
+                          { value: "localOnly", label: "Never deploy" },
                         ]}
                         onChange={(v) => setThemeMode(t.slug, v)}
                       />
                     </div>
                     {expanded && cfg.mode === "custom" ? (
                       <div className="border-t border-slate-100 px-3 py-2 dark:border-slate-800">
+                        <p className="mb-2 text-[10px] text-slate-500">
+                          Checked items are included in full push/pull. Unchecked stay on localhost.
+                        </p>
                         {t.recommendedExcludeFolders.length > 0 ? (
                           <button
                             type="button"
@@ -681,6 +753,9 @@ export function SyncTab() {
         <div className="space-y-4 xl:col-span-2">
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Preview & sync</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Full site sync (files + database). Theme-only deploys are not run from here.
+            </p>
             <div className="mt-3 flex flex-wrap gap-2">
               {(["push", "pull"] as const).map((d) => (
                 <button
@@ -730,7 +805,7 @@ export function SyncTab() {
                 onClick={() => void runSync(false)}
                 className="rounded-lg border border-amber-400 bg-amber-50 py-2 text-xs font-semibold text-amber-900 dark:bg-amber-950/40"
               >
-                Run {direction} for real
+                {direction === "push" ? `Push localhost → ${env}` : `Pull ${env} → localhost`}
               </button>
             </div>
             {status ? <p className="mt-2 text-xs font-medium">{status}</p> : null}

@@ -2,7 +2,7 @@
 /**
  * wp-dev admin: load/save wp-dev.config.json from the browser (same origin as /admin/).
  * Config and logs are bind-mounted at /wp-dev-repo/ (see docker-compose.yml).
- * Optional: set WPDEV_ADMIN_SAVE_TOKEN in docker/.env — then send header X-WP-DEV-Admin-Token on POST and on GET actions that return secrets (staging-db-secrets, terminal-runner-secrets).
+ * Auth: unlock via POST action=auth (HttpOnly session + X-WP-DEV-Nonce on mutations), or legacy header X-WP-DEV-Admin-Token.
  * POST action=save-docker-env: JSON {"WPDEV_SIMPLY_API_KEY":"…"} → upserts into host docker/.env (requires ../docker mount).
  * Validation uses wp-dev.config.schema.json (generated from Zod via `npm run generate:schema`).
  * Appends one line per request to /wp-dev-repo/logs/wp-dev-admin-api.log (no request body logged).
@@ -10,6 +10,8 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/schema-validate.inc.php';
+require_once __DIR__ . '/auth-session.inc.php';
+require_once __DIR__ . '/runner-proxy.inc.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -19,7 +21,6 @@ $dockerEnvPath = $dockerDir . '/.env';
 $dockerEnvExamplePath = $dockerDir . '/.env.example';
 $logDir = '/wp-dev-repo/logs';
 $logFile = $logDir . '/wp-dev-admin-api.log';
-$token = getenv('WPDEV_ADMIN_SAVE_TOKEN') ?: '';
 $schemaPath = __DIR__ . '/wp-dev.config.schema.json';
 
 /**
@@ -88,6 +89,18 @@ function wpdev_dotenv_value(string $path, string $key): ?string
     return $v === '' ? null : $v;
 }
 
+function wpdev_resolve_admin_save_token(string $envPath): string
+{
+    $fromEnv = getenv('WPDEV_ADMIN_SAVE_TOKEN');
+    if (is_string($fromEnv) && trim($fromEnv) !== '') {
+        return trim($fromEnv);
+    }
+    $fromFile = wpdev_dotenv_value($envPath, 'WPDEV_ADMIN_SAVE_TOKEN');
+    return is_string($fromFile) && $fromFile !== '' ? $fromFile : '';
+}
+
+$token = wpdev_resolve_admin_save_token($dockerEnvPath);
+
 function wpdev_simply_api_key(): ?string
 {
     global $dockerEnvPath;
@@ -149,12 +162,12 @@ function wpdev_require_mutation_token(string $token, string $action): void
         wpdev_admin_api_log("POST {$action} 503 token_not_configured");
         exit;
     }
-    $provided = $_SERVER['HTTP_X_WP_DEV_ADMIN_TOKEN'] ?? '';
-    if (!is_string($provided) || !hash_equals($token, $provided)) {
-        wpdev_json_error(403, 'forbidden', 'Missing or invalid admin token.');
-        wpdev_admin_api_log("POST {$action} 403 forbidden");
-        exit;
+    if (wpdev_admin_auth_ok($token, true)) {
+        return;
     }
+    wpdev_json_error(403, 'forbidden', 'Unlock admin in the browser or send a valid admin token and nonce.');
+    wpdev_admin_api_log("POST {$action} 403 forbidden");
+    exit;
 }
 
 /** Require admin token for sensitive GET/POST actions (503 when token not configured). */
@@ -165,12 +178,12 @@ function wpdev_require_admin_token(string $token, string $action): void
         wpdev_admin_api_log("{$action} 503 token_not_configured");
         exit;
     }
-    $provided = $_SERVER['HTTP_X_WP_DEV_ADMIN_TOKEN'] ?? '';
-    if (!is_string($provided) || !hash_equals($token, $provided)) {
-        wpdev_json_error(403, 'forbidden', 'Missing or invalid admin token.');
-        wpdev_admin_api_log("{$action} 403 forbidden");
-        exit;
+    if (wpdev_admin_auth_ok($token, false)) {
+        return;
     }
+    wpdev_json_error(403, 'forbidden', 'Unlock admin in the browser or send a valid admin token.');
+    wpdev_admin_api_log("{$action} 403 forbidden");
+    exit;
 }
 
 /** @deprecated alias — always requires token now */
@@ -491,6 +504,74 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $action = $_GET['action'] ?? '';
 wpdev_admin_api_log("request method={$method} action={$action}");
 
+if ($method === 'GET' && $action === 'auth-status') {
+    wpdev_session_start();
+    $authenticated = wpdev_admin_session_valid();
+    $payload = [
+        'ok' => true,
+        'tokenConfigured' => $token !== '',
+        'authenticated' => $authenticated,
+    ];
+    if ($authenticated) {
+        $payload['nonce'] = wpdev_admin_session_nonce();
+    }
+    wpdev_admin_api_log('GET auth-status 200 authenticated=' . ($authenticated ? '1' : '0'));
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+if ($method === 'POST' && $action === 'auth-bootstrap') {
+    if (!wpdev_is_local_admin_request()) {
+        wpdev_json_error(403, 'forbidden', 'Auto unlock is only available on localhost.');
+        wpdev_admin_api_log('POST auth-bootstrap 403 not_local');
+        exit;
+    }
+    $resolved = $token;
+    if ($resolved === '') {
+        $resolved = wpdev_generate_admin_save_token();
+        try {
+            wpdev_upsert_dotenv_file($dockerEnvPath, ['WPDEV_ADMIN_SAVE_TOKEN' => $resolved]);
+            $token = $resolved;
+            wpdev_admin_api_log('POST auth-bootstrap created WPDEV_ADMIN_SAVE_TOKEN in docker/.env');
+        } catch (Throwable $e) {
+            wpdev_json_error(500, 'token_create_failed', $e->getMessage());
+            wpdev_admin_api_log('POST auth-bootstrap 500 token_create_failed');
+            exit;
+        }
+    }
+    $nonce = wpdev_admin_session_establish();
+    wpdev_admin_api_log('POST auth-bootstrap 200 session established (local)');
+    echo json_encode(['ok' => true, 'nonce' => $nonce, 'bootstrapped' => true], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+if ($method === 'POST' && $action === 'auth') {
+    if ($token === '') {
+        wpdev_json_error(503, 'token_not_configured', 'Set WPDEV_ADMIN_SAVE_TOKEN in docker/.env and restart.');
+        wpdev_admin_api_log('POST auth 503 token_not_configured');
+        exit;
+    }
+    $body = file_get_contents('php://input');
+    $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
+    $provided = is_array($in) && isset($in['token']) && is_string($in['token']) ? trim($in['token']) : '';
+    if ($provided === '' || !hash_equals($token, $provided)) {
+        wpdev_json_error(403, 'forbidden', 'Invalid admin token.');
+        wpdev_admin_api_log('POST auth 403 forbidden');
+        exit;
+    }
+    $nonce = wpdev_admin_session_establish();
+    wpdev_admin_api_log('POST auth 200 session established');
+    echo json_encode(['ok' => true, 'nonce' => $nonce], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+if ($method === 'POST' && $action === 'logout') {
+    wpdev_admin_session_destroy();
+    wpdev_admin_api_log('POST logout 200');
+    echo json_encode(['ok' => true], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 if ($method === 'GET' && $action === 'load') {
     if (!is_file($configPath) || !is_readable($configPath)) {
         http_response_code(404);
@@ -581,8 +662,10 @@ if ($method === 'GET' && $action === 'terminal-runner-secrets') {
     $runnerOrigin = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_ORIGIN');
     $terminalPortRaw = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_PORT');
     $runnerPortRaw = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_PORT');
+    $syncRunnerPortRaw = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_HOST_RUNNER_PORT');
     $terminalPort = is_string($terminalPortRaw) && ctype_digit($terminalPortRaw) ? (int) $terminalPortRaw : 7681;
     $runnerPort = is_string($runnerPortRaw) && ctype_digit($runnerPortRaw) ? (int) $runnerPortRaw : 7682;
+    $syncRunnerPort = is_string($syncRunnerPortRaw) && ctype_digit($syncRunnerPortRaw) ? (int) $syncRunnerPortRaw : 7683;
     if (!is_string($auth) || trim($auth) === '' || !is_string($runnerToken) || trim($runnerToken) === '') {
         http_response_code(503);
         echo json_encode(
@@ -601,9 +684,81 @@ if ($method === 'GET' && $action === 'terminal-runner-secrets') {
             'runnerOrigin' => is_string($runnerOrigin) ? $runnerOrigin : null,
             'terminalPort' => $terminalPort,
             'runnerPort' => $runnerPort,
+            'syncRunnerPort' => $syncRunnerPort,
         ],
         JSON_UNESCAPED_SLASHES
     );
+    exit;
+}
+
+if ($method === 'GET' && $action === 'runner-health') {
+    wpdev_require_admin_token($token, 'GET runner-health');
+    $health = wpdev_runner_health($dockerEnvPath);
+    wpdev_admin_api_log('GET runner-health 200 terminal=' . ($health['terminal'] ? '1' : '0') . ' sync=' . ($health['sync'] ? '1' : '0'));
+    echo json_encode($health, JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+if ($method === 'POST' && $action === 'runner-run') {
+    wpdev_require_admin_token($token, 'POST runner-run');
+    $body = file_get_contents('php://input');
+    $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
+    $input = is_array($in) ? $in : [];
+    $kindRaw = $input['kind'] ?? 'terminal';
+    $kind = $kindRaw === 'sync' ? 'sync' : 'terminal';
+    $runnerAction = $input['action'] ?? '';
+    if (!is_string($runnerAction) || trim($runnerAction) === '') {
+        wpdev_json_error(400, 'invalid_action', 'Missing runner action.');
+        wpdev_admin_api_log('POST runner-run 400 invalid_action');
+        exit;
+    }
+    $args = isset($input['args']) && is_array($input['args']) ? $input['args'] : [];
+    $payload = json_encode(['action' => $runnerAction, 'args' => $args], JSON_UNESCAPED_SLASHES);
+    $proxied = wpdev_runner_proxy_json($kind, $dockerEnvPath, 'POST', '/run', is_string($payload) ? $payload : '{}');
+    if ($proxied['ok'] !== true) {
+        http_response_code(503);
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => $proxied['error'],
+                'detail' => $proxied['detail'] ?? null,
+            ],
+            JSON_UNESCAPED_SLASHES
+        );
+        wpdev_admin_api_log('POST runner-run 503 ' . $proxied['error']);
+        exit;
+    }
+    wpdev_admin_api_log('POST runner-run 200 kind=' . $kind . ' action=' . $runnerAction);
+    echo json_encode($proxied['data'], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+if ($method === 'GET' && $action === 'runner-status') {
+    wpdev_require_admin_token($token, 'GET runner-status');
+    $kindRaw = $_GET['kind'] ?? 'terminal';
+    $kind = $kindRaw === 'sync' ? 'sync' : 'terminal';
+    $jobId = $_GET['jobId'] ?? '';
+    if (!is_string($jobId) || !preg_match('/^[a-f0-9-]{36}$/i', $jobId)) {
+        wpdev_json_error(400, 'invalid_job_id', 'Missing or invalid jobId.');
+        wpdev_admin_api_log('GET runner-status 400 invalid_job_id');
+        exit;
+    }
+    $proxied = wpdev_runner_proxy_json($kind, $dockerEnvPath, 'GET', '/status/' . $jobId, null);
+    if ($proxied['ok'] !== true) {
+        http_response_code(503);
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => $proxied['error'],
+                'detail' => $proxied['detail'] ?? null,
+            ],
+            JSON_UNESCAPED_SLASHES
+        );
+        wpdev_admin_api_log('GET runner-status 503 ' . $proxied['error']);
+        exit;
+    }
+    wpdev_admin_api_log('GET runner-status 200 kind=' . $kind);
+    echo json_encode($proxied['data'], JSON_UNESCAPED_SLASHES);
     exit;
 }
 

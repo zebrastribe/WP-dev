@@ -9,16 +9,15 @@ import {
   loadSimplyStatus,
   loadLocalStatus,
   loadWpDevConfig,
-  readStoredAdminSaveToken,
   runTerminalAction,
   saveDockerEnvSecrets,
   saveWpDevConfig,
   type TerminalAction,
   type LocalStatus,
   verifySimplyApi,
-  writeStoredAdminSaveToken,
   formatTerminalRunnerSecretsError,
 } from "./api";
+import { useAdminAuth } from "./AdminAuthProvider";
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 import { TerminalEmbed } from "./TerminalEmbed";
@@ -216,15 +215,11 @@ function alignLocalUrlToCurrentBrowser(url: string): { value: string; changed: b
 }
 
 export function Wizard() {
+  const { authenticated, authVersion, requestUnlock } = useAdminAuth();
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardData>(defaults);
   const [hasStagingServer, setHasStagingServer] = useState(false);
   const [useProviderIntegration, setUseProviderIntegration] = useState(false);
-  const [saveToken, setSaveToken] = useState(readStoredAdminSaveToken);
-  const persistSaveToken = useCallback((value: string) => {
-    setSaveToken(value);
-    writeStoredAdminSaveToken(value);
-  }, []);
   const [terminalAuth, setTerminalAuth] = useState("");
   const [terminalWorkdir, setTerminalWorkdir] = useState("/workspace");
   const [terminalSettingsBusy, setTerminalSettingsBusy] = useState(false);
@@ -395,9 +390,10 @@ export function Wizard() {
   }, []);
 
   useEffect(() => {
+    if (!authenticated) return;
     let cancelled = false;
     (async () => {
-      const secrets = await loadStagingDbSecrets(saveToken.trim() || undefined);
+      const secrets = await loadStagingDbSecrets();
       if (cancelled || !secrets.ok) return;
       if (
         !secrets.host.trim() &&
@@ -424,7 +420,7 @@ export function Wizard() {
     return () => {
       cancelled = true;
     };
-  }, [saveToken]);
+  }, [authenticated, authVersion]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -451,9 +447,15 @@ export function Wizard() {
   }, [refreshSimplyStatus]);
 
   useEffect(() => {
+    if (!authenticated) {
+      setTerminalSecretsReady(false);
+      setTerminalSecretsError("Unlock admin to load runner credentials.");
+      setRunnerToken("");
+      return;
+    }
     let cancelled = false;
     (async () => {
-      const s = await loadTerminalRunnerSecrets(saveToken.trim() || undefined);
+      const s = await loadTerminalRunnerSecrets();
       if (cancelled) return;
       if (!s.ok) {
         setTerminalSecretsReady(false);
@@ -470,7 +472,7 @@ export function Wizard() {
     return () => {
       cancelled = true;
     };
-  }, [saveToken]);
+  }, [authenticated, authVersion]);
 
   const patch = useCallback(<K extends keyof WizardData>(key: K, val: WizardData[K]) => {
     setData((d) => ({ ...d, [key]: val }));
@@ -521,14 +523,11 @@ export function Wizard() {
   const saveSimplyKeyNow = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
     const key = providerApiKey.trim();
     if (!key) return { ok: false, error: "Enter a Simply API key first." };
-    const r = await saveDockerEnvSecrets(
-      { WPDEV_SIMPLY_API_KEY: key },
-      saveToken.trim() || undefined,
-    );
+    const r = await saveDockerEnvSecrets({ WPDEV_SIMPLY_API_KEY: key });
     if (!r.ok) return { ok: false, error: "error" in r ? r.error : "unknown_error" };
     await refreshSimplyStatus();
     return { ok: true };
-  }, [providerApiKey, saveToken, refreshSimplyStatus]);
+  }, [providerApiKey, refreshSimplyStatus]);
 
   const saveStagingDbSecretsNow = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
     const dbHost = data.staging.db?.host?.trim() || "";
@@ -538,8 +537,7 @@ export function Wizard() {
     if (!dbHost || !dbName || !dbUser || !dbPass) {
       return { ok: false, error: "Fill staging.db host/name/user/password first." };
     }
-    const r = await saveDockerEnvSecrets(
-      {
+    const r = await saveDockerEnvSecrets({
         WPDEV_STAGING_DB_HOST: dbHost,
         WPDEV_STAGING_DB_NAME: dbName,
         WPDEV_STAGING_DB_USER: dbUser,
@@ -547,12 +545,10 @@ export function Wizard() {
         ...(data.staging.db?.prefix?.trim()
           ? { WPDEV_STAGING_DB_PREFIX: data.staging.db.prefix.trim() }
           : {}),
-      },
-      saveToken.trim() || undefined,
-    );
+      });
     if (!r.ok) return { ok: false, error: "error" in r ? r.error : "unknown_error" };
     return { ok: true };
-  }, [data.staging.db, saveToken]);
+  }, [data.staging.db]);
 
   const saveTerminalSettingsNow = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
     const auth = terminalAuth.trim();
@@ -563,10 +559,10 @@ export function Wizard() {
     if (!Object.keys(payload).length) {
       return { ok: false, error: "Set terminal auth and/or working directory first." };
     }
-    const r = await saveDockerEnvSecrets(payload, saveToken.trim() || undefined);
+    const r = await saveDockerEnvSecrets(payload);
     if (!r.ok) return { ok: false, error: "error" in r ? r.error : "unknown_error" };
     return { ok: true };
-  }, [terminalAuth, terminalWorkdir, saveToken]);
+  }, [terminalAuth, terminalWorkdir]);
 
   const runTerminalCommand = async (
     cmd: string,
@@ -577,10 +573,10 @@ export function Wizard() {
     let copied = false;
     if (action) {
       setTerminalRun({ running: true, output: "Starting command...\n" });
-      const started = await runTerminalAction(terminalAuth.trim(), runnerToken.trim(), action, args);
+      const started = await runTerminalAction(action, args);
       if (started.ok) {
         for (let i = 0; i < 240; i += 1) {
-          const status = await getTerminalJobStatus(terminalAuth.trim(), runnerToken.trim(), started.jobId);
+          const status = await getTerminalJobStatus(started.jobId);
           if (!status.ok) {
             setTerminalRun({
               running: false,
@@ -674,10 +670,11 @@ export function Wizard() {
     setAlert(null);
     logAdmin("info", "Wizard: save clicked", `project=${data.project.trim()}`);
     try {
-      if (!saveToken.trim()) {
+      if (!authenticated) {
+        requestUnlock();
         setAlert({
           tone: "error",
-          text: "Save token is required. Set WPDEV_ADMIN_SAVE_TOKEN in docker/.env and paste the same value here.",
+          text: "Unlock admin first (top right). Paste WPDEV_ADMIN_SAVE_TOKEN from docker/.env once per browser session.",
         });
         return;
       }
@@ -710,7 +707,7 @@ export function Wizard() {
         ? data.staging
         : { ...STAGING_PLACEHOLDER, user: production.user || data.staging.user || "deploy" };
       const payload = toJson({ ...data, staging, production });
-      const res = await saveWpDevConfig(payload, saveToken.trim() || undefined);
+      const res = await saveWpDevConfig(payload);
       if (!res.ok) {
         const err = "error" in res ? res.error : "unknown";
         setAlert({
@@ -718,16 +715,15 @@ export function Wizard() {
           text:
             err.includes("write_config_failed")
               ? "Save failed: write_config_failed. The host file may not be writable by the container. Run: chmod u+rw wp-dev.config.json and then save again."
-              : `Save failed: ${err}. Check Activity log and logs/wp-dev-admin-api.log. If forbidden, set the save token in docker/.env to match the wizard field.`,
+              : `Save failed: ${err}. Check Activity log and logs/wp-dev-admin-api.log. If forbidden, unlock admin again.`,
         });
         return;
       }
       let extra = "";
       if (useProviderIntegration && data.simply?.account && providerApiKey.trim()) {
-        const keyRes = await saveDockerEnvSecrets(
-          { WPDEV_SIMPLY_API_KEY: providerApiKey.trim() },
-          saveToken.trim() || undefined,
-        );
+        const keyRes = await saveDockerEnvSecrets({
+          WPDEV_SIMPLY_API_KEY: providerApiKey.trim(),
+        });
         setProviderApiKey("");
         if (!keyRes.ok) {
           extra = `\n\nSimply API key was NOT saved to docker/.env: ${"error" in keyRes ? keyRes.error : "unknown"}. Config JSON did save. Fix permissions/mount or save token, then save again with the key.`;
@@ -746,8 +742,7 @@ export function Wizard() {
         data.staging.db?.user?.trim() &&
         data.staging.db?.password?.trim()
       ) {
-        const dbSecretRes = await saveDockerEnvSecrets(
-          {
+        const dbSecretRes = await saveDockerEnvSecrets({
             WPDEV_STAGING_DB_HOST: data.staging.db.host.trim(),
             WPDEV_STAGING_DB_NAME: data.staging.db.name.trim(),
             WPDEV_STAGING_DB_USER: data.staging.db.user.trim(),
@@ -755,9 +750,7 @@ export function Wizard() {
             ...(data.staging.db.prefix?.trim()
               ? { WPDEV_STAGING_DB_PREFIX: data.staging.db.prefix.trim() }
               : {}),
-          },
-          saveToken.trim() || undefined,
-        );
+          });
         if (!dbSecretRes.ok) {
           extra += `\n\nStaging DB secrets were NOT saved to docker/.env: ${"error" in dbSecretRes ? dbSecretRes.error : "unknown"}.`;
         } else {
@@ -1111,19 +1104,6 @@ export function Wizard() {
                   value={terminalWorkdir}
                   onChange={(e) => setTerminalWorkdir(e.target.value)}
                   placeholder="/workspace"
-                />
-              </label>
-              <label className="block md:col-span-2">
-                <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                  Runner token (same as WPDEV_ADMIN_SAVE_TOKEN) *
-                </span>
-                <input
-                  className={input}
-                  type="password"
-                  autoComplete="off"
-                  value={saveToken}
-                  onChange={(e) => persistSaveToken(e.target.value)}
-                  placeholder="Required for secure command execution"
                 />
               </label>
             </div>
@@ -1993,41 +1973,22 @@ export function Wizard() {
                 onClick={() => void runTerminalCommand("npm run wp-dev -- push staging", "push")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Run: push staging from localhost
+                Run: push localhost to staging
               </button>
               <button
                 type="button"
                 onClick={() => void runTerminalCommand("npm run wp-dev -- push production", "push")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Run: push production from localhost
+                Run: push localhost to production
               </button>
             </div>
           </div>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Save token is required. Set <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code> in{" "}
-            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>, then paste the same value here.
-            {isMacBrowser() && (
-              <>
-                {" "}
-                On Mac, find it with{" "}
-                <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">grep WPDEV_ADMIN docker/.env</code> in
-                Terminal, or open the <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker</code> folder
-                in Finder.
-              </>
-            )}
+            Use <strong>Unlock admin</strong> (top right) once per session before save. Token lives in{" "}
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> as{" "}
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code>.
           </p>
-          <label className="block">
-            <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Save token *</span>
-            <input
-              className={input}
-              type="password"
-              autoComplete="off"
-              value={saveToken}
-              onChange={(e) => persistSaveToken(e.target.value)}
-              placeholder="Required"
-            />
-          </label>
           <pre className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
             {JSON.stringify(
               toJson({
