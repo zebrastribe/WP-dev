@@ -1,4 +1,4 @@
-import { buildTerminalEmbedUrl, terminalIframeBlockedByHttpsAdmin } from "./api";
+import { buildTerminalEmbedUrl, terminalIframeBaseUrl, terminalIframeBlockedByHttpsAdmin } from "./api";
 
 type TerminalEmbedProps = {
   terminalPort: number;
@@ -24,6 +24,7 @@ export function TerminalEmbed({
   subtitle = "Use this for SSH tests and wp-dev commands in this step.",
 }: TerminalEmbedProps) {
   const embedUrl = buildTerminalEmbedUrl(terminalPort, terminalAuth);
+  const iframeUrl = terminalIframeBaseUrl(terminalPort);
   const httpsBlocked = terminalIframeBlockedByHttpsAdmin();
   const canEmbed = secretsReady && terminalAuth.includes(":") && !httpsBlocked;
 
@@ -70,11 +71,19 @@ export function TerminalEmbed({
       )}
 
       {showTerminal && canEmbed ? (
-        <iframe
-          title="wp-dev terminal"
-          src={embedUrl}
-          className={`${iframeClassName} w-full rounded-lg border border-slate-200 dark:border-slate-700`}
-        />
+        <>
+          <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+            Your browser will ask for terminal login — use the same user:password as in{" "}
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> (
+            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_TERMINAL_AUTH</code>
+            ), or use <strong>Open in new tab</strong>.
+          </p>
+          <iframe
+            title="wp-dev terminal"
+            src={iframeUrl}
+            className={`${iframeClassName} w-full rounded-lg border border-slate-200 dark:border-slate-700`}
+          />
+        </>
       ) : showTerminal && secretsReady && !httpsBlocked && !terminalAuth.includes(":") ? (
         <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-6 text-center text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
           Loading terminal credentials…

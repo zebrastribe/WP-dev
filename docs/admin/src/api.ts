@@ -700,6 +700,12 @@ export async function checkStagingDomain(payload?: {
 }
 
 /** ttyd on loopback is always plain HTTP, regardless of admin page protocol. */
+export function terminalIframeBaseUrl(terminalPort: number): string {
+  const port = Number.isFinite(terminalPort) && terminalPort > 0 ? terminalPort : 7681;
+  return `http://127.0.0.1:${port}/`;
+}
+
+/** For opening ttyd in a new tab (credentials in URL). Do not use in iframes — Chrome blocks that. */
 export function buildTerminalEmbedUrl(terminalPort: number, terminalAuth?: string): string {
   const port = Number.isFinite(terminalPort) && terminalPort > 0 ? terminalPort : 7681;
   const auth = terminalAuth?.trim();
