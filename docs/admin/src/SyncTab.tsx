@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { logAdmin } from "./adminLog";
 import {
-  getTerminalJobStatus,
   loadWpDevConfig,
-  runTerminalAction,
   saveWpDevConfig,
   type TerminalAction,
 } from "./api";
 import { useAdminAuth } from "./AdminAuthProvider";
+import { JobProgressPanel } from "./JobProgressPanel";
+import { SyncDeployPanel } from "./SyncDeployPanel";
+import { useRunnerJob } from "./useRunnerJob";
 import { useRunnerSecrets } from "./useRunnerSecrets";
 
 type RemoteEnv = "staging" | "production";
@@ -179,7 +180,7 @@ function SegmentedToggle<T extends string>({
 
 export function SyncTab() {
   const { authenticated, requestUnlock } = useAdminAuth();
-  const { terminalAuth, runnerToken, runnerReady, runnerMessage, canRun } = useRunnerSecrets(
+  const { runnerReady, runnerMessage, canRun } = useRunnerSecrets(
     "Runner not ready",
   );
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
@@ -192,9 +193,9 @@ export function SyncTab() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [preview, setPreview] = useState<SyncPreviewJson | null>(null);
-  const [rawOutput, setRawOutput] = useState("");
   const [saveMsg, setSaveMsg] = useState("");
   const [lastSavedJson, setLastSavedJson] = useState<string>("");
+  const { job, run, cancel, outputRef } = useRunnerJob("sync", canRun);
 
   const sync = (config?.sync as Record<string, unknown> | undefined) ?? {};
   const disabledRecommended = (sync.disabledRecommended as string[] | undefined) ?? [];
@@ -206,43 +207,30 @@ export function SyncTab() {
   const runJob = useCallback(
     async (
       action: TerminalAction,
-      args?: Record<string, string>,
-    ): Promise<{ ok: boolean; output: string }> => {
-      if (!canRun) return { ok: false, output: "Runner not ready." };
-      const started = await runTerminalAction(action, args, "sync");
-      if (!started.ok) return { ok: false, output: started.error };
-      for (let i = 0; i < 600; i += 1) {
-        const st = await getTerminalJobStatus(started.jobId, "sync");
-        if (!st.ok) return { ok: false, output: st.error };
-        setRawOutput(st.output || "Running…");
-        if (st.status === "done") {
-          return { ok: st.exitCode === 0, output: st.output };
-        }
-        await new Promise((r) => window.setTimeout(r, 1000));
-      }
-      return { ok: false, output: "Timed out." };
-    },
-    [canRun],
+      args: Record<string, string> | undefined,
+      label: string,
+    ): Promise<{ ok: boolean; output: string }> => run(action, args, label),
+    [run],
   );
 
   const refreshScan = useCallback(async () => {
     if (!canRun) return;
     setScanError(null);
-    const r = await runJob("wpdev_sync_scan");
+    const r = await run("wpdev_sync_scan", undefined, "Scan plugins & themes");
     if (!r.ok) {
-      setScanError(r.error || "Could not scan plugins and themes. Is the host runner running?");
+      setScanError("Could not scan plugins and themes. Is the host runner running?");
       return;
     }
     const parsed = parseJsonFromOutput<SyncScan>(r.output);
     if (!parsed) {
-      setScanError("Scan finished but returned invalid JSON. Check command output below.");
+      setScanError("Scan finished but returned invalid JSON. Check output below.");
       return;
     }
     setScan(parsed);
     if (parsed.activeTheme) {
       setExpandedThemes(new Set([parsed.activeTheme]));
     }
-  }, [canRun, runJob]);
+  }, [canRun, run]);
 
   useEffect(() => {
     void loadWpDevConfig().then((cfg) => {
@@ -398,7 +386,11 @@ export function SyncTab() {
           return;
         }
       }
-      const r = await runJob("wpdev_sync_preview", { env, direction });
+      const r = await runJob(
+        "wpdev_sync_preview",
+        { env, direction },
+        `Preview ${direction} → ${env}`,
+      );
       if (!r.ok) {
         setStatus("Preview failed.");
         return;
@@ -415,34 +407,12 @@ export function SyncTab() {
     }
   };
 
-  const runSync = async (dryRun: boolean) => {
-    if (!dryRun && direction === "push" && env === "production") {
-      if (!window.confirm("Push to PRODUCTION replaces remote files and database. Continue?")) return;
-    }
-    setBusy(true);
-    try {
-      if (configDirty) {
-        setStatus("Saving rules before sync…");
-        const saved = await saveConfig();
-        if (!saved) {
-          setStatus("Save failed.");
-          return;
-        }
-      }
-      setStatus(dryRun ? "Running dry-run…" : "Running sync…");
-      const action: TerminalAction =
-        direction === "push"
-          ? dryRun
-            ? "wpdev_push_dry"
-            : "wpdev_push"
-          : dryRun
-            ? "wpdev_pull_dry"
-            : "wpdev_pull";
-      const r = await runJob(action, { env });
-      setStatus(r.ok ? (dryRun ? "Dry-run done." : "Sync done.") : "Command failed.");
-    } finally {
-      setBusy(false);
-    }
+  const saveBeforeDeploy = async (): Promise<boolean> => {
+    if (!configDirty) return true;
+    setStatus("Saving deployment rules…");
+    const saved = await saveConfig();
+    if (!saved) setStatus("Save failed.");
+    return saved;
   };
 
   const filteredPlugins = useMemo(() => {
@@ -464,8 +434,8 @@ export function SyncTab() {
       <div>
         <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Sync & deployment</h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Control what is included in <strong>full site</strong> push/pull (files + database). Preview
-          before syncing. Theme-only deploys use a separate terminal command — see help below.
+          Configure deployment rules, preview changes, then push or pull with one click — live
+          progress, no terminal required.
         </p>
       </div>
 
@@ -520,6 +490,10 @@ export function SyncTab() {
             </button>
           </div>
         </div>
+      ) : null}
+
+      {job.phase !== "idle" ? (
+        <JobProgressPanel job={job} outputRef={outputRef} onStop={() => void cancel()} />
       ) : null}
 
       <div className="grid gap-6 xl:grid-cols-5">
@@ -752,9 +726,9 @@ export function SyncTab() {
 
         <div className="space-y-4 xl:col-span-2">
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Preview & sync</h3>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">File preview</h3>
             <p className="mt-1 text-xs text-slate-500">
-              Full site sync (files + database). Theme-only deploys are not run from here.
+              See which paths would change before a full push/pull.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               {(["push", "pull"] as const).map((d) => (
@@ -790,22 +764,14 @@ export function SyncTab() {
                 </button>
               ))}
             </div>
-            <div className="mt-4 flex flex-col gap-2">
+            <div className="mt-4">
               <button
                 type="button"
-                disabled={busy || !canRun}
+                disabled={busy || !canRun || job.phase === "running"}
                 onClick={() => void runPreview()}
-                className="rounded-lg bg-brand-600 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                className="w-full rounded-lg border border-brand-300 bg-brand-50 py-2 text-sm font-semibold text-brand-800 disabled:opacity-50 dark:border-brand-800 dark:bg-brand-950/40 dark:text-brand-200"
               >
-                Preview changes
-              </button>
-              <button
-                type="button"
-                disabled={busy || !canRun}
-                onClick={() => void runSync(false)}
-                className="rounded-lg border border-amber-400 bg-amber-50 py-2 text-xs font-semibold text-amber-900 dark:bg-amber-950/40"
-              >
-                {direction === "push" ? `Push localhost → ${env}` : `Pull ${env} → localhost`}
+                Preview file changes
               </button>
             </div>
             {status ? <p className="mt-2 text-xs font-medium">{status}</p> : null}
@@ -860,15 +826,16 @@ export function SyncTab() {
               </div>
             ) : null}
           </section>
+
+          <SyncDeployPanel
+            canRun={canRun}
+            runnerMessage={runnerMessage}
+            title="Push or pull"
+            onBeforeRun={saveBeforeDeploy}
+            hint="Full site sync: files and database together. First push to empty staging uploads files only — run push again after WordPress is installed on the server."
+          />
         </div>
       </div>
-
-      <details className="text-xs text-slate-500">
-        <summary className="cursor-pointer">Command output</summary>
-        <pre className="mt-2 max-h-40 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 font-mono text-[10px] dark:border-slate-700 dark:bg-slate-950">
-          {rawOutput || "—"}
-        </pre>
-      </details>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
 export const SAFE_SYNC_EXCLUDES = [
   "wp-config.php",
   ".git",
+  "admin",
   "wp-content/cache",
   "wp-content/uploads/cache",
   ".DS_Store",

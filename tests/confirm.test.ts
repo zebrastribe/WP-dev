@@ -23,6 +23,7 @@ describe("confirm", () => {
   });
 
   it("confirmRemoteTarget requires exact staging host", async () => {
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
     questionMock.mockResolvedValueOnce("staging.host");
     await expect(
       confirmRemoteTarget("staging", { host: "staging.host", url: "https://s.example" }, "push"),
@@ -30,20 +31,32 @@ describe("confirm", () => {
   });
 
   it("confirmRemoteTarget rejects wrong staging host", async () => {
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
     questionMock.mockResolvedValueOnce("wrong.host");
     await expect(
       confirmRemoteTarget("staging", { host: "staging.host", url: "https://s.example" }, "push"),
     ).resolves.toBe(false);
   });
 
-  it("confirmRemoteTarget uses yes for production", async () => {
-    questionMock.mockResolvedValueOnce("yes");
+  it("confirmRemoteTarget auto-approves staging without a TTY", async () => {
+    const isTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    await expect(
+      confirmRemoteTarget("staging", { host: "staging.host", url: "https://s.example" }, "push"),
+    ).resolves.toBe(true);
+    Object.defineProperty(process.stdin, "isTTY", { value: isTTY, configurable: true });
+  });
+
+  it("confirmRemoteTarget rejects production without a TTY", async () => {
+    const isTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
     await expect(
       confirmRemoteTarget(
         "production",
         { host: "prod.host", url: "https://prod.example" },
-        "restore",
+        "push",
       ),
-    ).resolves.toBe(true);
+    ).resolves.toBe(false);
+    Object.defineProperty(process.stdin, "isTTY", { value: isTTY, configurable: true });
   });
 });

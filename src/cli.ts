@@ -357,38 +357,6 @@ async function main(): Promise<void> {
     .description("Pull database and files from staging or production");
 
   pullCmd
-    .command("<env>")
-    .description("Pull database and files from staging or production")
-    .option("--dry-run", "Show rsync dry-run only; skip database steps")
-    .option(
-      "--no-backup-local",
-      "Skip exporting local DB to ~/.wp-dev/backups/<project>/local/ before overwriting it",
-    )
-    .option(
-      "--skip-simply-staging-dns",
-      "After pull production, skip auto simply setup-staging-dns when staging is still a placeholder",
-    )
-    .action(
-      async (
-        env: string,
-        opts: { dryRun?: boolean; backupLocal?: boolean; skipSimplyStagingDns?: boolean },
-      ) => {
-        const e = parseRemoteEnv(env);
-        const dry = Boolean(opts.dryRun);
-        const backupLocal = Boolean(opts.backupLocal);
-        const skipSimplyStagingDns = Boolean(opts.skipSimplyStagingDns);
-        const label = `pull ${e}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}`;
-        await runWithConfig(label, (loaded) =>
-          cmdPull(loaded, e, {
-            dryRun: dry,
-            backupLocal,
-            skipSimplyStagingDns,
-          }),
-        );
-      },
-    );
-
-  pullCmd
     .command("theme <env>")
     .description("Pull theme files from staging or production (no database)")
     .option("--dry-run", "Show rsync dry-run only")
@@ -400,21 +368,43 @@ async function main(): Promise<void> {
       );
     });
 
+  for (const envName of ["staging", "production"] as const) {
+    pullCmd
+      .command(envName)
+      .description(`Pull database and files from ${envName}`)
+      .option("--dry-run", "Show rsync dry-run only; skip database steps")
+      .option(
+        "--no-backup-local",
+        "Skip exporting local DB to ~/.wp-dev/backups/<project>/local/ before overwriting it",
+      )
+      .option(
+        "--skip-simply-staging-dns",
+        "After pull production, skip auto simply setup-staging-dns when staging is still a placeholder",
+      )
+      .action(
+        async (opts: {
+          dryRun?: boolean;
+          backupLocal?: boolean;
+          skipSimplyStagingDns?: boolean;
+        }) => {
+          const dry = Boolean(opts.dryRun);
+          const backupLocal = Boolean(opts.backupLocal);
+          const skipSimplyStagingDns = Boolean(opts.skipSimplyStagingDns);
+          const label = `pull ${envName}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}`;
+          await runWithConfig(label, (loaded) =>
+            cmdPull(loaded, envName, {
+              dryRun: dry,
+              backupLocal,
+              skipSimplyStagingDns,
+            }),
+          );
+        },
+      );
+  }
+
   const pushCmd = program
     .command("push")
     .description("Push to staging or production (full site or theme-only)");
-
-  pushCmd
-    .command("<env>")
-    .description("Push local database and files (full site — overwrites remote DB)")
-    .option("--dry-run", "Show rsync dry-run only; skip database steps")
-    .action(async (env: string, opts: { dryRun?: boolean }) => {
-      const e = parseRemoteEnv(env);
-      const dry = Boolean(opts.dryRun);
-      await runWithConfig(`push ${e}${dry ? " --dry-run" : ""}`, (loaded) =>
-        cmdPush(loaded, e, { dryRun: dry }),
-      );
-    });
 
   pushCmd
     .command("theme <env>")
@@ -432,6 +422,22 @@ async function main(): Promise<void> {
         cmdPushTheme(loaded, e, { dryRun: dry, build, skipBuildCheck }),
       );
     });
+
+  for (const envName of ["staging", "production"] as const) {
+    pushCmd
+      .command(envName)
+      .description(`Push local database and files to ${envName} (full site — overwrites remote DB)`)
+      .option("--dry-run", "Show rsync dry-run only; skip database steps")
+      .option("--yes", "Skip interactive confirmation (used by admin runner / CI)")
+      .action(async (opts: { dryRun?: boolean; yes?: boolean }) => {
+        const dry = Boolean(opts.dryRun);
+        const yes = Boolean(opts.yes);
+        await runWithConfig(
+          `push ${envName}${dry ? " --dry-run" : ""}${yes ? " --yes" : ""}`,
+          (loaded) => cmdPush(loaded, envName, { dryRun: dry, yes }),
+        );
+      });
+  }
 
   const themeCmd = program
     .command("theme")

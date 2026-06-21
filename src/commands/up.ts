@@ -23,7 +23,15 @@ import {
   setPortInEnvFile,
   type DockerEnvPortKey,
 } from "../utils/compose-env.js";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import net from "node:net";
@@ -330,28 +338,76 @@ async function applyRuntimeWritePermissionsWithRetry(
   console.error("Try: npm run wp-dev -- fix-runtime-permissions");
 }
 
-async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
+const ADMIN_SAVE_MOUNT_SHELL = [
+  "touch /wp-dev-repo/wp-dev.config.json",
+  "chmod 666 /wp-dev-repo/wp-dev.config.json",
+  "mkdir -p /wp-dev-repo/docker",
+  "touch /wp-dev-repo/docker/.env",
+  "chmod 777 /wp-dev-repo/docker",
+  "chmod 666 /wp-dev-repo/docker/.env",
+].join(" && ");
+
+function isPathWritable(path: string): boolean {
+  try {
+    accessSync(path, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Fix www-data-owned docker/.env before host CLI writes ports or security defaults. */
+async function ensureDockerEnvWritableBeforeUp(
+  loaded: LoadedConfig,
+  envPath: string,
+): Promise<void> {
+  if (isPathWritable(envPath)) return;
   try {
     await compose(
       loaded.configDir,
       loaded.config,
       [
-        "exec",
-        "-T",
+        "run",
+        "--rm",
+        "--no-deps",
         "-u",
         "0",
         "wordpress",
         "sh",
         "-lc",
         [
-          "touch /wp-dev-repo/wp-dev.config.json",
-          "chmod 666 /wp-dev-repo/wp-dev.config.json",
           "mkdir -p /wp-dev-repo/docker",
           "touch /wp-dev-repo/docker/.env",
           "chmod 777 /wp-dev-repo/docker",
           "chmod 666 /wp-dev-repo/docker/.env",
         ].join(" && "),
       ],
+      { stdio: "pipe" },
+    );
+    logInfo("up: restored writable docker/.env (was www-data-owned)");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `docker/.env is not writable (${msg}). Fix with:\n` +
+        `  docker compose -f docker/docker-compose.yml run --rm --no-deps -u 0 wordpress sh -lc "chmod 666 /wp-dev-repo/docker/.env"\n` +
+        `  or: sudo chown $(id -un):$(id -gn) docker/.env`,
+    );
+  }
+  if (!isPathWritable(envPath)) {
+    throw new Error(
+      "docker/.env is still not writable after permission fix. Run:\n" +
+        "  chmod u+rw docker/.env\n" +
+        "  or: sudo chown $(id -un):$(id -gn) docker/.env",
+    );
+  }
+}
+
+async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
+  try {
+    await compose(
+      loaded.configDir,
+      loaded.config,
+      ["exec", "-T", "-u", "0", "wordpress", "sh", "-lc", ADMIN_SAVE_MOUNT_SHELL],
       { stdio: "pipe" },
     );
     logInfo("admin save: ensured config and docker/.env mounts are writable");
@@ -370,6 +426,7 @@ export async function cmdUp(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
   const muPluginOnHost = ensureWordPressSetupAssetsOnHost(loaded);
   const envPath = ensureComposeEnvExists(loaded);
+  await ensureDockerEnvWritableBeforeUp(loaded, envPath);
   const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const sslEnabled = /^(1|true|yes)$/i.test(readEnvValue(envContent, "WPDEV_LOCAL_HTTPS"));
   await ensureNonConflictingPublishedPorts(loaded, envPath);

@@ -99,7 +99,7 @@ function commandForAction(action, args) {
   if (action === "wpdev_push") {
     const env = safeArg(args?.env);
     if (!["staging", "production"].includes(env)) return null;
-    return `npm run wp-dev -- push ${env}`;
+    return `npm run wp-dev -- push ${env} --yes`;
   }
   if (action === "wpdev_push_dry") {
     const env = safeArg(args?.env);
@@ -142,18 +142,27 @@ function startJob(command) {
     exitCode: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    child: null,
+    timeout: null,
   };
   jobs.set(id, job);
-  const child = spawn("bash", ["-lc", command], { cwd: WORKDIR });
+  const child = spawn("bash", ["-lc", command], {
+    cwd: WORKDIR,
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, WPDEV_ASSUME_YES: "1" },
+  });
+  job.child = child;
   const timeout = setTimeout(() => {
     if (job.status === "running") {
-      child.kill("SIGKILL");
+      killJobTree(job);
       job.output = `${job.output}\n[host-runner] job timeout exceeded\n`.slice(-MAX_OUTPUT);
       job.status = "done";
       job.exitCode = 124;
       job.updatedAt = Date.now();
     }
   }, JOB_TIMEOUT_MS);
+  job.timeout = timeout;
   const append = (chunk) => {
     const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
     job.output = (job.output + text).slice(-MAX_OUTPUT);
@@ -163,18 +172,78 @@ function startJob(command) {
   child.stderr.on("data", append);
   child.on("close", (code) => {
     clearTimeout(timeout);
-    job.status = "done";
-    job.exitCode = typeof code === "number" ? code : 1;
-    job.updatedAt = Date.now();
+    if (job.status === "running") {
+      job.status = "done";
+      job.exitCode = typeof code === "number" ? code : 1;
+      job.updatedAt = Date.now();
+    }
+    job.child = null;
+    job.timeout = null;
   });
   child.on("error", (err) => {
     clearTimeout(timeout);
     append(`\n[host-runner error] ${err?.message || String(err)}\n`);
-    job.status = "done";
-    job.exitCode = 1;
-    job.updatedAt = Date.now();
+    if (job.status === "running") {
+      job.status = "done";
+      job.exitCode = 1;
+      job.updatedAt = Date.now();
+    }
+    job.child = null;
+    job.timeout = null;
   });
   return id;
+}
+
+function killJobTree(job) {
+  const child = job.child;
+  if (!child?.pid) return;
+  try {
+    process.kill(-child.pid, "SIGTERM");
+  } catch {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // ignore
+    }
+  }
+  setTimeout(() => {
+    if (job.status !== "running" || !job.child?.pid) return;
+    try {
+      process.kill(-job.child.pid, "SIGKILL");
+    } catch {
+      try {
+        job.child.kill("SIGKILL");
+      } catch {
+        // ignore
+      }
+    }
+  }, 3000);
+}
+
+function cancelJob(id) {
+  const job = jobs.get(id);
+  if (!job || job.status !== "running") return false;
+  if (job.timeout) clearTimeout(job.timeout);
+  killJobTree(job);
+  job.output = `${job.output}\n[host-runner] cancelled by user\n`.slice(-MAX_OUTPUT);
+  job.status = "done";
+  job.exitCode = 130;
+  job.updatedAt = Date.now();
+  job.child = null;
+  job.timeout = null;
+  return true;
+}
+
+function jobPublic(job) {
+  return {
+    id: job.id,
+    status: job.status,
+    command: job.command,
+    output: job.output,
+    exitCode: job.exitCode,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -238,7 +307,18 @@ const server = http.createServer(async (req, res) => {
       json(req, res, 404, { ok: false, error: "job_not_found" });
       return;
     }
-    json(req, res, 200, { ok: true, ...job });
+    json(req, res, 200, { ok: true, ...jobPublic(job) });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/cancel/")) {
+    const id = url.pathname.replace("/cancel/", "");
+    if (!cancelJob(id)) {
+      json(req, res, 404, { ok: false, error: "job_not_found_or_not_running" });
+      return;
+    }
+    const job = jobs.get(id);
+    json(req, res, 200, { ok: true, ...(job ? jobPublic(job) : {}) });
     return;
   }
 

@@ -1,6 +1,6 @@
 import { logAdmin } from "./adminLog";
 import { buildAdminApiHeaders, setAdminNonce } from "./adminAuthState";
-import { validateWpDevConfigJson } from "./validateConfig";
+import { normalizeWpDevConfigForSave, validateWpDevConfigJson } from "./validateConfig";
 
 /** @deprecated Migrated to HttpOnly session — cleared after successful unlock. */
 export const WPDEV_ADMIN_TOKEN_LS_KEY = "wpdev-admin-save-token";
@@ -281,9 +281,10 @@ export async function saveWpDevConfig(
   _legacyToken?: string,
 ): Promise<SaveResponse> {
   const t0 = performance.now();
-  const project = typeof body.project === "string" ? body.project : "?";
+  const normalized = normalizeWpDevConfigForSave(body);
+  const project = typeof normalized.project === "string" ? normalized.project : "?";
   logAdmin("info", "saveWpDevConfig: POST started", `project=${project}`);
-  const localCheck = validateWpDevConfigJson(body);
+  const localCheck = validateWpDevConfigJson(normalized);
   if (!localCheck.ok) {
     logAdmin("warn", "saveWpDevConfig: blocked — schema validation failed", localCheck.errors);
     return { ok: false, error: `config_invalid: ${localCheck.errors}` };
@@ -294,7 +295,7 @@ export async function saveWpDevConfig(
       method: "POST",
       headers,
       credentials: "same-origin",
-      body: JSON.stringify(body),
+      body: JSON.stringify(normalized),
     });
     const ms = Math.round(performance.now() - t0);
     let data: unknown;
@@ -844,6 +845,32 @@ export async function getTerminalJobStatus(
       exitCode: typeof data.exitCode === "number" ? data.exitCode : null,
       command: String(data.command ?? ""),
     };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export async function cancelTerminalJob(
+  jobId: string,
+  runnerKind: "terminal" | "sync" = "terminal",
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(apiPhpUrl("runner-cancel"), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        ...buildAdminApiHeaders(),
+      },
+      body: JSON.stringify({ kind: runnerKind, jobId }),
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || data.ok !== true) {
+      const detail = typeof data.detail === "string" ? data.detail : "";
+      const err = String(data.error ?? `HTTP ${res.status}`);
+      return { ok: false, error: detail ? `${err}: ${detail}` : err };
+    }
+    return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }

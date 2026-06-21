@@ -64,19 +64,12 @@ export function startHostRunner(configDir: string, envPath: string): void {
     return;
   }
 
+  // Always restart so docker/host-runner.mjs changes are picked up after wp-dev up.
+  stopHostRunner(configDir);
+
   const logsDir = join(configDir, "logs");
   mkdirSync(logsDir, { recursive: true });
   const pidPath = pidFilePath(configDir);
-  if (existsSync(pidPath)) {
-    const existingPid = parsePid(readFileSync(pidPath, "utf8"));
-    if (existingPid && isPidAlive(existingPid)) return;
-    try {
-      unlinkSync(pidPath);
-    } catch {
-      /* ignore */
-    }
-  }
-
   const child = spawn(process.execPath, [join(configDir, "docker", "host-runner.mjs")], {
     cwd: configDir,
     detached: true,

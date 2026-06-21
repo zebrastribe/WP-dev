@@ -1,0 +1,7 @@
+# wp-dev admin is for local development only (localhost). Block on public hosts.
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteCond %{HTTP_HOST} !^localhost(:\d+)?$ [NC]
+RewriteCond %{HTTP_HOST} !^127\.0\.0\.1(:\d+)?$ [NC]
+RewriteRule ^ - [F,L]
+</IfModule>
