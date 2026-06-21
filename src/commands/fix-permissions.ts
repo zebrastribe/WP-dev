@@ -25,6 +25,7 @@ export const WWW_DATA_GID = 33;
  */
 export const RUNTIME_WRITE_PATHS = [
   "wp-content/upgrade",
+  "wp-content/upgrade-temp-backup",
   "wp-content/plugins",
   "wp-content/uploads",
   "wp-content/cache",
@@ -93,7 +94,7 @@ export async function cmdFixPermissions(
   if (!options.quiet) {
     console.error(
       "Updated ownership of wordpress/ for your host user (themes, core). " +
-        "Runtime paths (upgrade, plugins, uploads, cache) are www-data for wp-admin updates.",
+        "Runtime paths (upgrade, upgrade-temp-backup, plugins, uploads, cache) are www-data for wp-admin updates.",
     );
   }
 }
@@ -128,7 +129,7 @@ export async function cmdFixRuntimeWritePermissions(
   );
   if (!options.quiet) {
     console.error(
-      "Updated wp-content runtime paths for WordPress writes (upgrade, plugins, uploads, cache). " +
+      "Updated wp-content runtime paths for WordPress writes (upgrade, upgrade-temp-backup, plugins, uploads, cache). " +
         "Themes remain host-owned for local editing.",
     );
   }

@@ -60,9 +60,10 @@ async function tryDns(host: string): Promise<{ ok: true } | { ok: false; err: st
 async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fail"> {
   const marker = `wp-dev-doctor-${process.pid}`;
   const script = [
-    `d=/var/www/html/wp-content/upgrade/${marker}`,
-    `mkdir -p "$d" && touch "$d/.write-test" && rm -rf "$d"`,
-  ].join(" && ");
+    `for d in /var/www/html/wp-content/upgrade/${marker} /var/www/html/wp-content/upgrade-temp-backup/${marker}; do`,
+    `  mkdir -p "$d" && touch "$d/.write-test" && rm -rf "$d"`,
+    `done`,
+  ].join("\n");
   try {
     await compose(
       loaded.configDir,
@@ -81,11 +82,15 @@ async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fai
       ],
       { stdio: "pipe" },
     );
-    console.error("Local runtime write: OK (www-data can write wp-content/upgrade)");
+    console.error(
+      "Local runtime write: OK (www-data can write wp-content/upgrade and upgrade-temp-backup)",
+    );
     return "ok";
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error("Local runtime write: FAIL — www-data cannot write wp-content/upgrade");
+    console.error(
+      "Local runtime write: FAIL — www-data cannot write wp-content/upgrade or upgrade-temp-backup",
+    );
     console.error(
       "Fix: npm run wp-dev -- fix-runtime-permissions (or fix-permissions, which restores runtime paths automatically)",
     );

@@ -305,7 +305,7 @@ npm run wp-dev -- up
 | **`wp-dev init`** | Interactive **`wp-dev.config.json`** |
 | **`wp-dev up`** / **`down`** | Local stack; **`down`** frees **`WP_PORT`** for this clone. Optional **`down --remove-orphans`** cleans leftover containers. After **`up`**, the CLI prints **browser URLs** using **`docker/.env` `WP_PORT`** when it differs from **`local.url`**. |
 | **`wp-dev fix-permissions`** | Fix **`wordpress/`** ownership for rsync (host vs `www-data`); restores **www-data** on runtime paths |
-| **`wp-dev fix-runtime-permissions`** | Re-apply **www-data** on **`wp-content/upgrade`**, **`plugins`**, **`uploads`**, **`cache`** (after theme dev or manual chown) |
+| **`wp-dev fix-runtime-permissions`** | Re-apply **www-data** on **`wp-content/upgrade`**, **`upgrade-temp-backup`**, **`plugins`**, **`uploads`**, **`cache`** (after theme dev or manual chown) |
 | **`wp-dev status`** | Local stack health, WP install state, URL check, recent backups |
 | **`wp-dev validate`** | Config + Docker prereqs; **`--remote staging|production`** for SSH/WP check |
 | **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`**, **`--http`**, **`--local-http`** (detect stale localhost port redirects) |
@@ -424,7 +424,7 @@ Rsync **excludes** **`wp-config.php`**. Set **`WORDPRESS_TABLE_PREFIX`** in **`d
 
 ### WordPress directory ownership vs `pull`
 
-Docker often creates files as **`www-data` (uid 33)** while host **`rsync`** runs as **you** → **`mkstemp` Permission denied`**. Run **`wp-dev fix-permissions`** to **`chown`** the bind-mounted tree to your uid on the host. That command also restores **www-data** ownership on runtime paths (**`wp-content/upgrade`**, **`plugins`**, **`uploads`**, **`cache`**, **`languages`**, **`mu-plugins`**) so wp-admin plugin updates still work. **`wp-content/themes/`** stays host-owned for local theme editing.
+Docker often creates files as **`www-data` (uid 33)** while host **`rsync`** runs as **you** → **`mkstemp` Permission denied`**. Run **`wp-dev fix-permissions`** to **`chown`** the bind-mounted tree to your uid on the host. That command also restores **www-data** ownership on runtime paths (**`wp-content/upgrade`**, **`upgrade-temp-backup`**, **`plugins`**, **`uploads`**, **`cache`**, **`languages`**, **`mu-plugins`**) so wp-admin plugin updates still work. **`wp-content/themes/`** stays host-owned for local theme editing.
 
 If plugin updates fail after theme work or a manual **`chown`**, run **`wp-dev fix-runtime-permissions`** (or **`wp-dev doctor`** to verify).
 
@@ -449,6 +449,7 @@ If plugin updates fail after theme work or a manual **`chown`**, run **`wp-dev f
 | **Every `up` bumps `WP_PORT` with no other clones** | Fixed in recent wp-dev: ports owned by this compose project are no longer treated as conflicts. **`git pull`**, **`npm run build`**, **`up`** again. |
 | **`mkstemp` under `wordpress/`** | **`wp-dev fix-permissions`**. |
 | **Plugin update: “Kunne ikke oprette mappe” / “Could not create directory” under `wp-content/upgrade`** | **`wp-dev fix-runtime-permissions`** or **`wp-dev fix-permissions`** (restores **www-data** on runtime paths). Verify with **`wp-dev doctor`**. |
+| **Plugin update: “Kunne ikke flytte den gamle version til upgrade-temp-backup-mappen” / “Could not move the old version to the upgrade-temp-backup folder”** | Same fix — **`wp-content/upgrade-temp-backup`** must be **www-data**-writable (included in **`fix-runtime-permissions`**). |
 | **Pushed Query Monitor / theme `src/` to staging** | Open **`/admin/` → Sync** — set plugins to **Local only**, theme **Custom** with **`src/`** unchecked — **Save** — **`sync-preview push staging`** before next push. |
 | **`caching_sha2_password` on import** | Use shipped Compose **`mysql_native_password`**; fix old DB user or volume. |
 | **Can't connect to `db` right after `up`** | Wait for healthy **`db`** or retry **`pull`**. |
