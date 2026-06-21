@@ -55,6 +55,16 @@ if (!ok) {
   process.exit(1);
 }
 
+let phpOk = run("PHP CLI (optional, for admin API lint)", "php -v");
+if (!phpOk) {
+  console.error(
+    "\nwp-dev: PHP CLI not found (optional).\n" +
+      "  Required for: php -l on docs/admin/public/*.php, local PHP debugging.\n" +
+      "  Install: sudo apt install php-cli   (Debian/Ubuntu)\n" +
+      "  CI runs PHP lint; core CLI + sync work without PHP.\n",
+  );
+}
+
 console.error("wp-dev: prerequisites OK.\n");
 if (isMac) {
   console.error(

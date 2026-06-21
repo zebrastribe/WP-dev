@@ -115,10 +115,22 @@ Raise global thresholds as coverage improves. Do not chase 100% on CLI glue or D
 
 ## Remaining gaps
 
-- **UI (admin React):** no Vitest/Playwright yet — add `docs/admin` component tests separately.
-- **SSH/rsync E2E:** needs dedicated test host or container stack.
+- **UI (admin React):** Vitest covers config validation; component/wizard tests still optional.
+- **SSH/rsync E2E:** mocked unit + orchestration tests cover logic; real SSH host E2E still manual.
 - **Docker compose up:** doctor/full stack smoke optional for local dev only.
 - **Corrupted backup restore:** covered partially via `assertBackupFileExists`; full restore flow needs fixture DB dumps.
+
+## New test files (coverage hardening)
+
+| File | Covers |
+| ---- | ------ |
+| `tests/rsync-compose-env.test.ts` | rsync pull/push (mocked execa), compose-env helpers |
+| `tests/ssh.test.ts` | SSH connect attempts, connectSsh |
+| `tests/confirm.test.ts` | Production/staging confirmation prompts |
+| `tests/http-probe.test.ts` | Doctor HTTP redirect probing |
+| `tests/sync-preview-wpcli.test.ts` | Sync preview + wpcli helpers |
+| `tests/pull-push-orchestration.test.ts` | cmdPull/cmdPush dry-run guards |
+| `docs/admin/src/validateConfig.test.ts` | Admin JSON schema validation |
 
 ## CI pipeline
 
