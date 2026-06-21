@@ -245,7 +245,7 @@ async function main(): Promise<void> {
   program
     .command("fix-permissions")
     .description(
-      "Chown bind-mounted wordpress/ to your host uid:gid, then restore www-data write access on plugins/upgrade/uploads (fixes rsync + wp-admin updates)",
+      "Chown bind-mounted wordpress/ to your host uid:gid, then restore www-data write access on plugins/upgrade/upgrade-temp-backup/uploads (fixes rsync + wp-admin updates)",
     )
     .action(async () => {
       await runWithConfig("fix-permissions", cmdFixPermissions);
@@ -254,7 +254,7 @@ async function main(): Promise<void> {
   program
     .command("fix-runtime-permissions")
     .description(
-      "Restore www-data ownership on wp-content/plugins, upgrade, uploads, and cache (fixes wp-admin plugin updates)",
+      "Restore www-data ownership on wp-content/plugins, upgrade, upgrade-temp-backup, uploads, and cache (fixes wp-admin plugin updates)",
     )
     .action(async () => {
       await runWithConfig("fix-runtime-permissions", cmdFixRuntimeWritePermissions);

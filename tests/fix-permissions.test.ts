@@ -9,6 +9,7 @@ import {
 describe("fix-permissions runtime paths", () => {
   it("lists runtime write paths without themes", () => {
     expect(RUNTIME_WRITE_PATHS).toContain("wp-content/upgrade");
+    expect(RUNTIME_WRITE_PATHS).toContain("wp-content/upgrade-temp-backup");
     expect(RUNTIME_WRITE_PATHS).toContain("wp-content/plugins");
     expect(RUNTIME_WRITE_PATHS).not.toContain("wp-content/themes");
   });
