@@ -12,12 +12,16 @@ export async function confirmProduction(message: string): Promise<boolean> {
   }
 }
 
-/** Require typing the remote SSH host before push/restore to non-local envs. */
+/** Require typing the remote SSH host before push/restore to non-local envs (interactive terminal only). */
 export async function confirmRemoteTarget(
   env: RemoteEnvName,
   remote: { host: string; url: string },
   action: "push" | "restore",
 ): Promise<boolean> {
+  // Browser runner / CI: no TTY — auto-approve staging; production needs --yes from caller.
+  if (!process.stdin.isTTY) {
+    return env === "staging";
+  }
   if (env === "production") {
     return confirmProduction(
       `You are about to ${action} PRODUCTION (${remote.url}).`,

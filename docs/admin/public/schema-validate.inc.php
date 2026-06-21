@@ -6,6 +6,41 @@
 declare(strict_types=1);
 
 /**
+ * Drop empty optional strings so optional minLength:1 fields still validate.
+ *
+ * @param array<string, mixed> $data
+ * @return array<string, mixed>
+ */
+function wpdev_normalize_config_for_save(array $data): array
+{
+    if (isset($data['local']) && is_array($data['local'])) {
+        foreach (['composeProjectName', 'themePath', 'themeSlug'] as $key) {
+            if (array_key_exists($key, $data['local']) && $data['local'][$key] === '') {
+                unset($data['local'][$key]);
+            }
+        }
+    }
+    foreach (['staging', 'production'] as $env) {
+        if (!isset($data[$env]) || !is_array($data[$env])) {
+            continue;
+        }
+        if (array_key_exists('identityFile', $data[$env]) && $data[$env]['identityFile'] === '') {
+            unset($data[$env]['identityFile']);
+        }
+        unset($data[$env]['db']);
+    }
+    if (
+        isset($data['simply'])
+        && is_array($data['simply'])
+        && array_key_exists('account', $data['simply'])
+        && $data['simply']['account'] === ''
+    ) {
+        unset($data['simply']);
+    }
+    return $data;
+}
+
+/**
  * @param mixed $data
  * @param array<string, mixed> $doc full schema document (with definitions)
  */

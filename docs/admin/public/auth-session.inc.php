@@ -154,6 +154,25 @@ function wpdev_is_local_admin_request(): bool
     return in_array($hostOnly, ['localhost', '127.0.0.1', '[::1]'], true);
 }
 
+/** Refuse wp-dev admin API on public hosts (staging/production). */
+function wpdev_enforce_local_admin_only(): void
+{
+    if (wpdev_is_local_admin_request()) {
+        return;
+    }
+    http_response_code(403);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(
+        [
+            'ok' => false,
+            'error' => 'forbidden',
+            'detail' => 'wp-dev admin is only available on localhost.',
+        ],
+        JSON_UNESCAPED_SLASHES
+    );
+    exit;
+}
+
 function wpdev_generate_admin_save_token(): string
 {
     return rtrim(strtr(base64_encode(random_bytes(24)), '+/', '-_'), '=');

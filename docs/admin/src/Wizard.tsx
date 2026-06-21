@@ -4,7 +4,6 @@ import {
   checkStagingDbConnection,
   checkStagingHttps,
   getTerminalJobStatus,
-  loadTerminalRunnerSecrets,
   loadStagingDbSecrets,
   loadSimplyStatus,
   loadLocalStatus,
@@ -15,12 +14,13 @@ import {
   type TerminalAction,
   type LocalStatus,
   verifySimplyApi,
-  formatTerminalRunnerSecretsError,
 } from "./api";
 import { useAdminAuth } from "./AdminAuthProvider";
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 import { TerminalEmbed } from "./TerminalEmbed";
+import { SyncDeployPanel } from "./SyncDeployPanel";
+import { useRunnerSecrets } from "./useRunnerSecrets";
 
 const STEP_LABELS = ["Start", "SSH server", "Staging (optional)", "Save & sync", "Done"] as const;
 /** Wizard step index for staging — skipped when syncing from one remote only. */
@@ -183,9 +183,13 @@ function toJson(data: WizardData): Record<string, unknown> {
       db: undefined,
     };
   };
+  const local: Record<string, unknown> = { ...data.local };
+  if (!String(local.composeProjectName ?? "").trim()) {
+    delete local.composeProjectName;
+  }
   const o: Record<string, unknown> = {
     project: data.project.trim(),
-    local: { ...data.local },
+    local,
     staging: normalizeRemote(data.staging),
     production: normalizeRemote(data.production),
   };
@@ -230,11 +234,18 @@ function alignLocalUrlToCurrentBrowser(url: string): { value: string; changed: b
 
 export function Wizard() {
   const { authenticated, authVersion, requestUnlock } = useAdminAuth();
+  const {
+    terminalAuth,
+    terminalPort,
+    runnerReady: terminalSecretsReady,
+    runnerMessage,
+    canRun,
+  } = useRunnerSecrets("Unlock admin and run npm run wp-dev -- up to enable browser deploy.");
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardData>(defaults);
   const [hasStagingServer, setHasStagingServer] = useState(false);
   const [useProviderIntegration, setUseProviderIntegration] = useState(false);
-  const [terminalAuth, setTerminalAuth] = useState("");
+  const [terminalAuthDraft, setTerminalAuthDraft] = useState("");
   const [terminalWorkdir, setTerminalWorkdir] = useState("/workspace");
   const [terminalSettingsBusy, setTerminalSettingsBusy] = useState(false);
   const [terminalSettingsMessage, setTerminalSettingsMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -259,10 +270,10 @@ export function Wizard() {
   const [saving, setSaving] = useState(false);
   const [terminalPrep, setTerminalPrep] = useState<TerminalPrepState>(null);
   const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
-  const [terminalPort, setTerminalPort] = useState(7681);
-  const [runnerToken, setRunnerToken] = useState("");
-  const [terminalSecretsReady, setTerminalSecretsReady] = useState(false);
-  const [terminalSecretsError, setTerminalSecretsError] = useState("");
+
+  useEffect(() => {
+    if (terminalAuth) setTerminalAuthDraft(terminalAuth);
+  }, [terminalAuth]);
 
   const goStep = useCallback((n: number) => {
     const i = Math.max(0, Math.min(STEP_LABELS.length - 1, n));
@@ -459,34 +470,6 @@ export function Wizard() {
     void refreshSimplyStatus();
   }, [refreshSimplyStatus]);
 
-  useEffect(() => {
-    if (!authenticated) {
-      setTerminalSecretsReady(false);
-      setTerminalSecretsError("Unlock admin to load runner credentials.");
-      setRunnerToken("");
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const s = await loadTerminalRunnerSecrets();
-      if (cancelled) return;
-      if (!s.ok) {
-        setTerminalSecretsReady(false);
-        setTerminalSecretsError(formatTerminalRunnerSecretsError(s));
-        setRunnerToken("");
-        return;
-      }
-      setTerminalPort(s.terminalPort);
-      setRunnerToken(s.runnerToken);
-      setTerminalAuth(s.terminalAuth);
-      setTerminalSecretsReady(true);
-      setTerminalSecretsError("");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [authenticated, authVersion]);
-
   const patch = useCallback(<K extends keyof WizardData>(key: K, val: WizardData[K]) => {
     setData((d) => ({ ...d, [key]: val }));
   }, []);
@@ -564,7 +547,7 @@ export function Wizard() {
   }, [data.staging.db]);
 
   const saveTerminalSettingsNow = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
-    const auth = terminalAuth.trim();
+    const auth = terminalAuthDraft.trim();
     const workdir = terminalWorkdir.trim();
     const payload: Record<string, string> = {};
     if (auth) payload.WPDEV_TERMINAL_AUTH = auth;
@@ -575,7 +558,7 @@ export function Wizard() {
     const r = await saveDockerEnvSecrets(payload);
     if (!r.ok) return { ok: false, error: "error" in r ? r.error : "unknown_error" };
     return { ok: true };
-  }, [terminalAuth, terminalWorkdir]);
+  }, [terminalAuthDraft, terminalWorkdir]);
 
   const runTerminalCommand = async (
     cmd: string,
@@ -583,13 +566,15 @@ export function Wizard() {
     action?: TerminalAction,
     args?: Record<string, string>,
   ) => {
+    const runnerKind = kind === "push" || kind === "pull" ? "sync" : "terminal";
     let copied = false;
     if (action) {
+      logAdmin("info", `Wizard: runner ${action}`, cmd);
       setTerminalRun({ running: true, output: "Starting command...\n" });
-      const started = await runTerminalAction(action, args);
+      const started = await runTerminalAction(action, args, runnerKind);
       if (started.ok) {
         for (let i = 0; i < 240; i += 1) {
-          const status = await getTerminalJobStatus(started.jobId);
+          const status = await getTerminalJobStatus(started.jobId, runnerKind);
           if (!status.ok) {
             setTerminalRun({
               running: false,
@@ -602,6 +587,11 @@ export function Wizard() {
             output: status.output || "Running...",
           });
           if (status.status === "done") {
+            logAdmin(
+              status.exitCode === 0 ? "info" : "error",
+              `Wizard: runner ${action} finished`,
+              `exit=${status.exitCode ?? 1}`,
+            );
             setAlert({
               tone: status.exitCode === 0 ? "success" : "error",
               text:
@@ -917,7 +907,7 @@ export function Wizard() {
       terminalPort={terminalPort}
       terminalAuth={terminalAuth}
       secretsReady={terminalSecretsReady}
-      secretsError={terminalSecretsError}
+      secretsError={runnerMessage}
     />
   );
 
@@ -1092,7 +1082,7 @@ export function Wizard() {
           </p>
           <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
             <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
-              Terminal settings (required before one-click run)
+              Terminal settings (optional — deploy uses the host runner, not this shell)
             </summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="block">
@@ -1101,8 +1091,8 @@ export function Wizard() {
                   className={input}
                   type="text"
                   autoComplete="off"
-                  value={terminalAuth}
-                  onChange={(e) => setTerminalAuth(e.target.value)}
+                  value={terminalAuthDraft}
+                  onChange={(e) => setTerminalAuthDraft(e.target.value)}
                   placeholder="wpdev:wpdev"
                 />
               </label>
@@ -1752,8 +1742,7 @@ export function Wizard() {
                   ))}
                 </div>
                 <div className="mt-3 rounded border border-slate-200 bg-white p-2 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                  Recommended flow: save config, then run <code>npm run wp-dev -- push staging</code>, then run
-                  {" "}Verify staging HTTPS.
+                  Save config first, then use the deploy button below.
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
@@ -1789,6 +1778,15 @@ export function Wizard() {
                   </button>
                 </div>
               </div>
+              <SyncDeployPanel
+                canRun={canRun}
+                runnerMessage={runnerMessage}
+                title="Push localhost → staging"
+                fixedEnv="staging"
+                fixedDirection="push"
+                directions={["push"]}
+                hint="First push seeds an empty server with files. If WordPress is not installed yet, complete /wp-admin/install.php on staging, then push again for the database."
+              />
             </div>
           ) : (
             <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
@@ -1958,43 +1956,12 @@ export function Wizard() {
 
       {step === 3 && (
         <div className="space-y-4">
-          {terminalPanel}
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/40">
-            <p className="mb-2 font-medium text-slate-800 dark:text-slate-200">Run these in terminal</p>
-            <p className="mb-3 whitespace-pre-line text-xs text-slate-600 dark:text-slate-400">{PULL_TERMINAL_HINT}</p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void runTerminalCommand("npm run wp-dev -- pull production", "pull")}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Run: pull production to localhost
-              </button>
-              <button
-                type="button"
-                disabled={!hasStagingServer}
-                onClick={() => void runTerminalCommand("npm run wp-dev -- pull staging", "pull")}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Run: pull staging to localhost
-              </button>
-              <button
-                type="button"
-                disabled={!hasStagingServer}
-                onClick={() => void runTerminalCommand("npm run wp-dev -- push staging", "push")}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Run: push localhost to staging
-              </button>
-              <button
-                type="button"
-                onClick={() => void runTerminalCommand("npm run wp-dev -- push production", "push")}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-              >
-                Run: push localhost to production
-              </button>
-            </div>
-          </div>
+          <SyncDeployPanel
+            canRun={canRun}
+            runnerMessage={runnerMessage}
+            title="Sync localhost ↔ remote"
+            hint="Save environment below first if you changed SSH or staging settings."
+          />
           <p className="text-sm text-slate-600 dark:text-slate-400">
             Use <strong>Unlock admin</strong> (top right) once per session before save. Token lives in{" "}
             <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> as{" "}

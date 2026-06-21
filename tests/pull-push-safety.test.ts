@@ -35,6 +35,7 @@ describe("pull/push safety guards", () => {
   it("push confirms staging and rolls back remote DB on failure", () => {
     const src = readFileSync(join(process.cwd(), "src/commands/push.ts"), "utf8");
     expect(src).toContain("confirmRemoteTarget");
+    expect(src).toContain("!options.yes");
     expect(src).toContain("rolling back remote DB");
     expect(src).toContain("verifyRemoteSiteUrls");
   });

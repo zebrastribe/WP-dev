@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateWpDevConfigJson } from "./validateConfig";
+import { normalizeWpDevConfigForSave, validateWpDevConfigJson } from "./validateConfig";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
 describe("validateWpDevConfigJson", () => {
@@ -38,5 +38,23 @@ describe("validateWpDevConfigJson", () => {
       },
     });
     expect(result.ok).toBe(true);
+  });
+
+  it("rejects empty composeProjectName without normalization", () => {
+    const result = validateWpDevConfigJson({
+      ...EXAMPLE_WP_DEV_CONFIG,
+      local: { ...EXAMPLE_WP_DEV_CONFIG.local, composeProjectName: "" },
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("accepts empty composeProjectName after normalization", () => {
+    const normalized = normalizeWpDevConfigForSave({
+      ...EXAMPLE_WP_DEV_CONFIG,
+      local: { ...EXAMPLE_WP_DEV_CONFIG.local, composeProjectName: "" },
+    });
+    const result = validateWpDevConfigJson(normalized);
+    expect(result.ok).toBe(true);
+    expect((normalized.local as Record<string, unknown>).composeProjectName).toBeUndefined();
   });
 });

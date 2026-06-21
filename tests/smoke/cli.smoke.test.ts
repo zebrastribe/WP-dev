@@ -37,6 +37,24 @@ describe("CLI smoke", () => {
     });
     expect(r.exitCode).not.toBe(0);
   });
+
+  it("wp-dev push staging is a registered subcommand", async () => {
+    const r = await execa("node", [cli, "push", "staging", "--help"], {
+      cwd: root,
+      reject: false,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/dry-run/i);
+  });
+
+  it("wp-dev pull staging is a registered subcommand", async () => {
+    const r = await execa("node", [cli, "pull", "staging", "--help"], {
+      cwd: root,
+      reject: false,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/dry-run/i);
+  });
 });
 
 describe("runner smoke", () => {
@@ -46,5 +64,6 @@ describe("runner smoke", () => {
     expect(src).toContain("wpdev_sync_scan");
     expect(src).toContain("wpdev_push_dry");
     expect(src).toContain("wpdev_update");
+    expect(src).toContain("/cancel/");
   });
 });

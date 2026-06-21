@@ -13,6 +13,8 @@ require_once __DIR__ . '/schema-validate.inc.php';
 require_once __DIR__ . '/auth-session.inc.php';
 require_once __DIR__ . '/runner-proxy.inc.php';
 
+wpdev_enforce_local_admin_only();
+
 header('Content-Type: application/json; charset=utf-8');
 
 $configPath = '/wp-dev-repo/wp-dev.config.json';
@@ -59,6 +61,12 @@ function wpdev_upsert_dotenv_file(string $path, array $updates): void
     if (!rename($tmp, $path)) {
         @unlink($tmp);
         throw new RuntimeException('rename_failed');
+    }
+    // Keep host CLI (wp-dev up) and admin API both able to write docker/.env.
+    @chmod($path, 0666);
+    $dir = dirname($path);
+    if (is_dir($dir)) {
+        @chmod($dir, 0777);
     }
 }
 
@@ -312,8 +320,19 @@ function wpdev_http_request(
     string $method,
     string $url,
     array $headers,
-    ?string $body
+    ?string $body,
+    bool $followRedirects = true,
 ): array {
+    $hasUa = false;
+    foreach ($headers as $k => $_v) {
+        if (strtolower((string) $k) === 'user-agent') {
+            $hasUa = true;
+            break;
+        }
+    }
+    if (!$hasUa) {
+        $headers['User-Agent'] = 'wp-dev-admin/1.0 (+https://github.com/zebrastribe/WP-dev)';
+    }
     $headerLines = [];
     foreach ($headers as $k => $v) {
         $headerLines[] = $k . ': ' . $v;
@@ -324,7 +343,12 @@ function wpdev_http_request(
             'header' => implode("\r\n", $headerLines) . "\r\n",
             'timeout' => 20,
             'ignore_errors' => true,
+            'follow_location' => $followRedirects ? 1 : 0,
             'content' => $body ?? '',
+        ],
+        'ssl' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
         ],
     ]);
     $res = @file_get_contents($url, false, $ctx);
@@ -762,6 +786,38 @@ if ($method === 'GET' && $action === 'runner-status') {
     exit;
 }
 
+if ($method === 'POST' && $action === 'runner-cancel') {
+    wpdev_require_admin_token($token, 'POST runner-cancel');
+    $body = file_get_contents('php://input');
+    $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
+    $input = is_array($in) ? $in : [];
+    $kindRaw = $input['kind'] ?? 'terminal';
+    $kind = $kindRaw === 'sync' ? 'sync' : 'terminal';
+    $jobId = $input['jobId'] ?? '';
+    if (!is_string($jobId) || !preg_match('/^[a-f0-9-]{36}$/i', $jobId)) {
+        wpdev_json_error(400, 'invalid_job_id', 'Missing or invalid jobId.');
+        wpdev_admin_api_log('POST runner-cancel 400 invalid_job_id');
+        exit;
+    }
+    $proxied = wpdev_runner_proxy_json($kind, $dockerEnvPath, 'POST', '/cancel/' . $jobId, null);
+    if ($proxied['ok'] !== true) {
+        http_response_code(503);
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => $proxied['error'],
+                'detail' => $proxied['detail'] ?? null,
+            ],
+            JSON_UNESCAPED_SLASHES
+        );
+        wpdev_admin_api_log('POST runner-cancel 503 ' . $proxied['error']);
+        exit;
+    }
+    wpdev_admin_api_log('POST runner-cancel 200 kind=' . $kind);
+    echo json_encode($proxied['data'], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 if ($method === 'POST' && $action === 'simply-test') {
     wpdev_require_admin_token($token, 'POST simply-test');
     $body = file_get_contents('php://input');
@@ -900,6 +956,7 @@ if ($method === 'POST' && $action === 'save') {
         wpdev_admin_api_log('POST save 500 schema_not_object');
         exit;
     }
+    $data = wpdev_normalize_config_for_save($data);
     $vErr = wpdev_validate_against_schema($data, $schemaDoc);
     if ($vErr !== null) {
         http_response_code(400);
@@ -1344,7 +1401,7 @@ if ($method === 'POST' && $action === 'staging-https-check') {
     $httpsLocation = wpdev_header_value($httpsHeaders, 'Location');
 
     $httpUrl = preg_replace('#^https://#i', 'http://', $url) ?? $url;
-    $httpRes = wpdev_http_request('GET', $httpUrl, ['Accept' => 'text/html'], null);
+    $httpRes = wpdev_http_request('GET', $httpUrl, ['Accept' => 'text/html'], null, false);
     $httpHeaders = isset($http_response_header) && is_array($http_response_header)
         ? $http_response_header
         : [];
@@ -1456,7 +1513,7 @@ if ($method === 'POST' && $action === 'staging-domain-check') {
     $httpsOk = $httpsStatus >= 200 && $httpsStatus < 400;
 
     $httpUrl = preg_replace('#^https://#i', 'http://', $url) ?? $url;
-    $httpRes = wpdev_http_request('GET', $httpUrl, ['Accept' => 'text/html'], null);
+    $httpRes = wpdev_http_request('GET', $httpUrl, ['Accept' => 'text/html'], null, false);
     $httpHeaders = isset($http_response_header) && is_array($http_response_header)
         ? $http_response_header
         : [];
@@ -1479,7 +1536,11 @@ if ($method === 'POST' && $action === 'staging-domain-check') {
         $hints[] = 'No DNS records found for staging host. Add A/AAAA/CNAME in your hosting DNS panel.';
     }
     if (!$httpsOk) {
-        $hints[] = 'HTTPS is not healthy yet. Issue/renew SSL certificate for this hostname.';
+        if ($httpsStatus === 455) {
+            $hints[] = 'HTTPS returned 455 (Simply.com WAF). Check Webserver Application Firewall logs in the control panel.';
+        } else {
+            $hints[] = 'HTTPS is not healthy yet. Issue/renew SSL certificate for this hostname.';
+        }
     }
     if (!$httpRedirectsToHttps) {
         $hints[] = 'HTTP does not redirect to HTTPS. Enable forced HTTPS redirect in hosting settings.';

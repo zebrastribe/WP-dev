@@ -28,10 +28,22 @@ import { assertHostSyncTools } from "../utils/host-prereq.js";
 
 export type PushOptions = {
   dryRun: boolean;
+  /** Skip interactive SSH-host / production confirmation (browser runner, CI). */
+  yes?: boolean;
 };
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** wp-dev admin must never remain on staging/production (local dev tool only). */
+async function purgeRemoteWpDevAdmin(
+  ssh: { exec: (command: string) => Promise<unknown> },
+  remoteWpPath: string,
+): Promise<void> {
+  const adminDir = `${remoteWpPath.replace(/\/$/, "")}/admin`;
+  logInfo(`push: remove remote wp-dev admin at ${adminDir}`);
+  await ssh.exec(`rm -rf ${shellQuote(adminDir)}`);
 }
 
 async function sanitizeRemoteGeneratedAssetUrls(
@@ -63,7 +75,7 @@ export async function cmdPush(
   const remote = getRemoteEnv(config, env);
   const localWpRoot = resolveFromConfigDir(configDir, config.local.wpRoot);
 
-  if (!options.dryRun) {
+  if (!options.dryRun && !options.yes && process.env.WPDEV_ASSUME_YES !== "1") {
     const ok = await confirmRemoteTarget(
       env,
       remote,
@@ -126,6 +138,7 @@ export async function cmdPush(
         dryRun: false,
         excludes: pushExcludePatterns(configDir, config, localWpRoot),
       });
+      await purgeRemoteWpDevAdmin(ssh, remote.path);
       if (!remote.db) {
         console.error(
           `Seeded files to ${env}, but remote WordPress is not installed at ${remote.path} yet.\n` +
@@ -139,7 +152,7 @@ export async function cmdPush(
       logInfo(`push ${env}: bootstrap remote wp-config.php from ${env}.db settings`);
       const bootPath = await wpRemoteBootstrapConfigFromRemoteDb(
         ssh,
-        remote.path.replace(/^\/+/, ""),
+        remote.path,
         remote,
         localPrefix,
       );
@@ -171,6 +184,7 @@ export async function cmdPush(
         dryRun: false,
         excludes: pushExcludePatterns(configDir, config, localWpRoot),
       });
+      await purgeRemoteWpDevAdmin(ssh, wpPath);
 
       const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-push-"));
       const localDump = join(tmpDir, "local.sql");
