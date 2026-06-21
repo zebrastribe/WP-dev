@@ -161,6 +161,20 @@ function defaults(): WizardData {
   };
 }
 
+function parseStagingDbFromConfig(remote: Remote | undefined): Remote["db"] | undefined {
+  const db = remote?.db;
+  if (!db?.host?.trim() || !db?.name?.trim() || !db?.user?.trim() || !db?.password?.trim()) {
+    return undefined;
+  }
+  return {
+    host: db.host.trim(),
+    name: db.name.trim(),
+    user: db.user.trim(),
+    password: db.password,
+    prefix: db.prefix?.trim() ?? "",
+  };
+}
+
 function toJson(data: WizardData): Record<string, unknown> {
   const normalizeRemote = (r: Remote): Remote => {
     // Keep DB secrets out of wp-dev.config.json; they are stored in local docker/.env.
@@ -319,7 +333,7 @@ export function Wizard() {
                   ? Number((loaded.staging as Remote)?.port)
                   : undefined,
               identityFile: String((loaded.staging as Remote)?.identityFile ?? ""),
-              db: undefined,
+              db: parseStagingDbFromConfig(loaded.staging as Remote),
             },
             production: {
               host: String((loaded.production as Remote)?.host ?? ""),
@@ -331,7 +345,7 @@ export function Wizard() {
                   ? Number((loaded.production as Remote)?.port)
                   : undefined,
               identityFile: String((loaded.production as Remote)?.identityFile ?? ""),
-              db: undefined,
+              db: parseStagingDbFromConfig(loaded.production as Remote),
             },
             simply:
               loaded.simply &&
@@ -839,7 +853,7 @@ export function Wizard() {
       detail: "Expected e.g. https://staging.example.com",
     },
   ];
-  const readinessBlocking = checklist.filter((x) => x.status !== "done");
+  const readinessBlocking = checklist.filter((x) => x.status === "todo");
   const stepOneReady = Boolean(data.project.trim() && data.local.url.trim());
   const localUrlLooksValid = (() => {
     try {
