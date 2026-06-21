@@ -259,7 +259,6 @@ export function Wizard() {
   const [saving, setSaving] = useState(false);
   const [terminalPrep, setTerminalPrep] = useState<TerminalPrepState>(null);
   const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
-  const [showTerminal, setShowTerminal] = useState(true);
   const [terminalPort, setTerminalPort] = useState(7681);
   const [runnerToken, setRunnerToken] = useState("");
   const [terminalSecretsReady, setTerminalSecretsReady] = useState(false);
@@ -919,8 +918,6 @@ export function Wizard() {
       terminalAuth={terminalAuth}
       secretsReady={terminalSecretsReady}
       secretsError={terminalSecretsError}
-      showTerminal={showTerminal}
-      onToggleShow={() => setShowTerminal((v) => !v)}
     />
   );
 

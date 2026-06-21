@@ -8,7 +8,6 @@ type EnvName = "local" | "staging" | "production";
 export function TerminalTab() {
   const { terminalAuth, terminalPort, runnerReady, runnerMessage, canRun } = useRunnerSecrets();
   const [env, setEnv] = useState<EnvName>("staging");
-  const [showTerminal, setShowTerminal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
 
@@ -76,9 +75,6 @@ export function TerminalTab() {
         terminalAuth={terminalAuth}
         secretsReady={runnerReady}
         secretsError={runnerReady ? undefined : runnerMessage}
-        showTerminal={showTerminal}
-        onToggleShow={() => setShowTerminal((v) => !v)}
-        iframeClassName="h-[420px]"
         title="Interactive shell (optional)"
         subtitle="Hidden by default. Open only when you need manual commands; quick actions run below either way."
       />
