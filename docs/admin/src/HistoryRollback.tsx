@@ -1,20 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  formatTerminalRunnerSecretsError,
-  getTerminalJobStatus,
-  loadTerminalRunnerSecrets,
-  readStoredAdminSaveToken,
-  runTerminalAction,
-  writeStoredAdminSaveToken,
-} from "./api";
-import { AdminSaveTokenField } from "./AdminSaveTokenField";
+import { useEffect, useState } from "react";
+import { getTerminalJobStatus, runTerminalAction } from "./api";
+import { useRunnerSecrets } from "./useRunnerSecrets";
 
 type EnvName = "local" | "staging" | "production";
 type BackupKind = "full" | "db";
 
 export function HistoryRollback() {
-  const [terminalAuth, setTerminalAuth] = useState("");
-  const [runnerToken, setRunnerToken] = useState("");
+  const { terminalAuth, runnerToken, runnerReady, runnerMessage, canRun } = useRunnerSecrets();
   const [env, setEnv] = useState<EnvName>("staging");
   const [kind, setKind] = useState<BackupKind>("full");
   const [selectedBackup, setSelectedBackup] = useState("");
@@ -22,55 +14,27 @@ export function HistoryRollback() {
   const [backups, setBackups] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
-  const [runnerReady, setRunnerReady] = useState(false);
-  const [runnerMessage, setRunnerMessage] = useState("");
   const [loadingBackups, setLoadingBackups] = useState(false);
-  const [adminSaveToken, setAdminSaveToken] = useState(readStoredAdminSaveToken);
-
-  const canRun = useMemo(
-    () => Boolean(terminalAuth.trim() && runnerToken.trim() && runnerReady),
-    [terminalAuth, runnerToken, runnerReady],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const res = await loadTerminalRunnerSecrets(adminSaveToken.trim() || undefined);
-      if (cancelled) return;
-      if (!res.ok) {
-        setRunnerReady(false);
-        setRunnerMessage(formatTerminalRunnerSecretsError(res));
-        return;
-      }
-      setTerminalAuth(res.terminalAuth);
-      setRunnerToken(res.runnerToken);
-      setRunnerReady(true);
-      setRunnerMessage("Runner security is loaded automatically from backend.");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [adminSaveToken]);
 
   const run = async (action: "backup_create" | "backup_list" | "restore_env", args: Record<string, string>) => {
     if (!canRun) {
-      setOutput("Set terminal auth and runner token first.");
+      setOutput("Unlock admin and wait for runner to be ready.");
       return;
     }
     setBusy(true);
     setOutput("Starting command...\n");
     try {
-      const started = await runTerminalAction(terminalAuth.trim(), runnerToken.trim(), action, args);
+      const started = await runTerminalAction(action, args);
       if (!started.ok) {
         setOutput(
-          started.error === "missing_runner_token"
+          started.error === "runner_secrets_unavailable"
             ? "Runner credentials are missing on backend. Run: npm run wp-dev -- up"
             : `Runner error: ${started.error}`,
         );
         return;
       }
       for (let i = 0; i < 300; i += 1) {
-        const st = await getTerminalJobStatus(terminalAuth.trim(), runnerToken.trim(), started.jobId);
+        const st = await getTerminalJobStatus(started.jobId);
         if (!st.ok) {
           setOutput(`Status error: ${st.error}`);
           return;
@@ -107,7 +71,7 @@ export function HistoryRollback() {
     setBusy(true);
     setOutput("Creating pre-restore safety snapshot...\n");
     try {
-      const pre = await runTerminalAction(terminalAuth.trim(), runnerToken.trim(), "backup_create", {
+      const pre = await runTerminalAction("backup_create", {
         env,
         kind,
       });
@@ -116,7 +80,7 @@ export function HistoryRollback() {
         return;
       }
       for (let i = 0; i < 300; i += 1) {
-        const st = await getTerminalJobStatus(terminalAuth.trim(), runnerToken.trim(), pre.jobId);
+        const st = await getTerminalJobStatus(pre.jobId);
         if (!st.ok) {
           setOutput(`Pre-restore snapshot status error: ${st.error}`);
           return;
@@ -166,14 +130,6 @@ export function HistoryRollback() {
       <p className="text-sm text-slate-600 dark:text-slate-400">
         Roll back WordPress site state by restoring database/file snapshots for local, staging, or production.
       </p>
-
-      <AdminSaveTokenField
-        value={adminSaveToken}
-        onChange={(v) => {
-          setAdminSaveToken(v);
-          writeStoredAdminSaveToken(v);
-        }}
-      />
 
       <div
         className={`rounded border px-3 py-2 text-xs ${

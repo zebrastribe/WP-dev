@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
@@ -31,8 +31,22 @@ export function stopHostRunner(configDir: string): void {
   const pidPath = pidFilePath(configDir);
   if (!existsSync(pidPath)) return;
   const pid = parsePid(readFileSync(pidPath, "utf8"));
-  if (!pid) return;
-  if (!isPidAlive(pid)) return;
+  if (!pid) {
+    try {
+      unlinkSync(pidPath);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  if (!isPidAlive(pid)) {
+    try {
+      unlinkSync(pidPath);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
   try {
     process.kill(pid, "SIGTERM");
   } catch {
@@ -56,6 +70,11 @@ export function startHostRunner(configDir: string, envPath: string): void {
   if (existsSync(pidPath)) {
     const existingPid = parsePid(readFileSync(pidPath, "utf8"));
     if (existingPid && isPidAlive(existingPid)) return;
+    try {
+      unlinkSync(pidPath);
+    } catch {
+      /* ignore */
+    }
   }
 
   const child = spawn(process.execPath, [join(configDir, "docker", "host-runner.mjs")], {
@@ -65,6 +84,7 @@ export function startHostRunner(configDir: string, envPath: string): void {
     env: {
       ...process.env,
       WPDEV_HOST_RUNNER_PORT: port,
+      WPDEV_HOST_RUNNER_HOST: "0.0.0.0",
       WPDEV_TERMINAL_AUTH: auth,
       WPDEV_TERMINAL_RUNNER_TOKEN: token,
       WPDEV_TERMINAL_RUNNER_ORIGIN: origin,

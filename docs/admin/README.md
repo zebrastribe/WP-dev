@@ -36,7 +36,7 @@ npm run admin:dev
 
 `docker-compose.yml` bind-mounts **`wp-dev.config.json`** and **`logs/`** at **`/wp-dev-repo/`** in the **`wordpress`** service. `wordpress/admin/api.php` (from this package’s `public/api.php`) writes **`/wp-dev-repo/wp-dev.config.json`** and appends API lines to **`/wp-dev-repo/logs/`**. Config shape is validated against **`wp-dev.config.schema.json`** (generated from the same Zod schema as the CLI via **`npm run generate:config-artifacts`** at the repo root).
 
-Required **`WPDEV_ADMIN_SAVE_TOKEN`** in **`docker/.env`** — POST mutations must send header **`X-WP-DEV-Admin-Token`** with the same value (wizard Save step).
+Required **`WPDEV_ADMIN_SAVE_TOKEN`** in **`docker/.env`**. Unlock once in the admin UI (modal or **Unlock admin** top right) — the browser gets an HttpOnly session cookie and a CSRF nonce for POST mutations. Legacy header **`X-WP-DEV-Admin-Token`** still works for API clients.
 
 Terminal runner hardening:
 - Requires **`WPDEV_TERMINAL_AUTH`** (non-default), **`WPDEV_TERMINAL_RUNNER_TOKEN`**, and **`WPDEV_TERMINAL_RUNNER_ORIGIN`**.

@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { logAdmin } from "./adminLog";
 import { loadDockerEnvPublic, loadWpDevConfig, saveDockerEnvSecrets } from "./api";
+import { useAdminAuth } from "./AdminAuthProvider";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
 
 const DEFAULT_JSON = JSON.stringify(EXAMPLE_WP_DEV_CONFIG, null, 2);
 const PHP_OPTIONS = ["7.4", "8.0", "8.1", "8.2", "8.3", "8.4"] as const;
 
 export function ConfigAssistant() {
+  const { authenticated, requestUnlock } = useAdminAuth();
   const [raw, setRaw] = useState(DEFAULT_JSON);
   const [configSource, setConfigSource] = useState<"active" | "example">("example");
   const [providerApiKey, setProviderApiKey] = useState("");
   const [localPhpVersion, setLocalPhpVersion] = useState<(typeof PHP_OPTIONS)[number]>("8.2");
-  const [saveToken, setSaveToken] = useState("");
   const [secretSaveMsg, setSecretSaveMsg] = useState<string | null>(null);
   const [savingSecret, setSavingSecret] = useState(false);
   const prevParseOk = useRef<boolean | null>(null);
@@ -215,18 +216,6 @@ export function ConfigAssistant() {
           </label>
           <label className="mt-2 block">
             <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
-              Optional <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code> (same as docker/.env)
-            </span>
-            <input
-              type="password"
-              autoComplete="off"
-              className="w-full max-w-md rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-slate-700 dark:bg-slate-900"
-              value={saveToken}
-              onChange={(e) => setSaveToken(e.target.value)}
-            />
-          </label>
-          <label className="mt-2 block">
-            <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
               Local PHP version (<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_PHP_VERSION</code> in docker/.env)
             </span>
             <select
@@ -255,6 +244,11 @@ export function ConfigAssistant() {
             disabled={savingSecret || (!providerApiKey.trim() && !localPhpVersion.trim())}
             className="mt-2 rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
             onClick={async () => {
+              if (!authenticated) {
+                requestUnlock();
+                setSecretSaveMsg("Unlock admin first (top right).");
+                return;
+              }
               setSavingSecret(true);
               setSecretSaveMsg(null);
               try {
@@ -262,10 +256,7 @@ export function ConfigAssistant() {
                   WPDEV_PHP_VERSION: localPhpVersion,
                 };
                 if (providerApiKey.trim()) body.WPDEV_SIMPLY_API_KEY = providerApiKey.trim();
-                const r = await saveDockerEnvSecrets(
-                  body,
-                  saveToken.trim() || undefined,
-                );
+                const r = await saveDockerEnvSecrets(body);
                 if (!r.ok) {
                   setSecretSaveMsg(`Failed: ${"error" in r ? r.error : "unknown"}`);
                   logAdmin("warn", "ConfigAssistant: save-docker-env failed", "error" in r ? r.error : "");

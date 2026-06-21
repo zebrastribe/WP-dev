@@ -1,13 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  formatTerminalRunnerSecretsError,
-  getTerminalJobStatus,
-  loadTerminalRunnerSecrets,
-  readStoredAdminSaveToken,
-  runTerminalAction,
-  writeStoredAdminSaveToken,
-} from "./api";
-import { AdminSaveTokenField } from "./AdminSaveTokenField";
+import { useCallback, useEffect, useState } from "react";
+import { getTerminalJobStatus, runTerminalAction } from "./api";
+import { useRunnerSecrets } from "./useRunnerSecrets";
 
 type UpdatePreflightJson = {
   preflight: {
@@ -34,59 +27,21 @@ function parsePreflightJson(output: string): UpdatePreflightJson | null {
 }
 
 export function UpdateTab() {
-  const [terminalAuth, setTerminalAuth] = useState("");
-  const [runnerToken, setRunnerToken] = useState("");
-  const [runnerReady, setRunnerReady] = useState(false);
-  const [runnerMessage, setRunnerMessage] = useState("");
-  const [adminSaveToken, setAdminSaveToken] = useState(readStoredAdminSaveToken);
+  const { runnerReady, runnerMessage, canRun } = useRunnerSecrets(
+    "Host runner not ready",
+  );
   const [rebuildAdmin, setRebuildAdmin] = useState(true);
   const [restartStack, setRestartStack] = useState(true);
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
   const [preflight, setPreflight] = useState<UpdatePreflightJson["preflight"] | null>(null);
 
-  const canRun = useMemo(
-    () => Boolean(runnerReady && terminalAuth.trim() && runnerToken.trim()),
-    [runnerReady, terminalAuth, runnerToken],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const res = await loadTerminalRunnerSecrets(adminSaveToken.trim() || undefined);
-      if (cancelled) return;
-      if (!res.ok) {
-        setRunnerReady(false);
-        setRunnerMessage(formatTerminalRunnerSecretsError(res, { prefix: "Host runner not ready" }));
-        return;
-      }
-      setTerminalAuth(res.terminalAuth);
-      setRunnerToken(res.runnerToken);
-      setRunnerReady(true);
-      setRunnerMessage("Host runner ready. Update runs on your machine — wordpress/ site files are preserved.");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [adminSaveToken]);
-
   const refreshPreflight = useCallback(async () => {
     if (!canRun) return;
-    const started = await runTerminalAction(
-      terminalAuth.trim(),
-      runnerToken.trim(),
-      "wpdev_update_preflight",
-      {},
-      "sync",
-    );
+    const started = await runTerminalAction("wpdev_update_preflight", {}, "sync");
     if (!started.ok) return;
     for (let i = 0; i < 60; i += 1) {
-      const st = await getTerminalJobStatus(
-        terminalAuth.trim(),
-        runnerToken.trim(),
-        started.jobId,
-        "sync",
-      );
+      const st = await getTerminalJobStatus(started.jobId, "sync");
       if (!st.ok || st.status === "done") {
         if (st.ok && st.output) {
           const parsed = parsePreflightJson(st.output);
@@ -96,7 +51,7 @@ export function UpdateTab() {
       }
       await new Promise((r) => window.setTimeout(r, 500));
     }
-  }, [canRun, runnerToken, terminalAuth]);
+  }, [canRun]);
 
   useEffect(() => {
     if (canRun) void refreshPreflight();
@@ -112,8 +67,6 @@ export function UpdateTab() {
       setOutput(dryRun ? "Planning update…\n" : "Updating wp-dev…\n");
       try {
         const started = await runTerminalAction(
-          terminalAuth.trim(),
-          runnerToken.trim(),
           "wpdev_update",
           {
             admin: rebuildAdmin ? "1" : "0",
@@ -127,12 +80,7 @@ export function UpdateTab() {
           return;
         }
         for (let i = 0; i < 900; i += 1) {
-          const st = await getTerminalJobStatus(
-            terminalAuth.trim(),
-            runnerToken.trim(),
-            started.jobId,
-            "sync",
-          );
+          const st = await getTerminalJobStatus(started.jobId, "sync");
           if (!st.ok) {
             setOutput(`Status error: ${st.error}`);
             return;
@@ -151,7 +99,7 @@ export function UpdateTab() {
         setBusy(false);
       }
     },
-    [canRun, rebuildAdmin, restartStack, runnerToken, terminalAuth],
+    [canRun, rebuildAdmin, restartStack],
   );
 
   return (
@@ -170,14 +118,6 @@ export function UpdateTab() {
         <code className="rounded bg-emerald-100/80 px-1 dark:bg-emerald-900/60">pull</code> from staging/production.
       </div>
 
-      <AdminSaveTokenField
-        value={adminSaveToken}
-        onChange={(v) => {
-          setAdminSaveToken(v);
-          writeStoredAdminSaveToken(v);
-        }}
-      />
-
       <div
         className={`rounded border px-3 py-2 text-xs ${
           runnerReady
@@ -185,7 +125,10 @@ export function UpdateTab() {
             : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
         }`}
       >
-        {runnerMessage || "Loading runner…"}
+        {runnerMessage ||
+          (runnerReady
+            ? "Host runner ready. Update runs on your machine — wordpress/ site files are preserved."
+            : "Loading runner…")}
       </div>
 
       {preflight ? (

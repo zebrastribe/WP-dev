@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 const PORT = Number(process.env.WPDEV_HOST_RUNNER_PORT || 7683);
+const HOST = process.env.WPDEV_HOST_RUNNER_HOST || "0.0.0.0";
 const AUTH = process.env.WPDEV_TERMINAL_AUTH || "";
 const RUNNER_TOKEN = process.env.WPDEV_TERMINAL_RUNNER_TOKEN || "";
 const ALLOWED_ORIGIN = process.env.WPDEV_TERMINAL_RUNNER_ORIGIN || "";
@@ -119,7 +120,7 @@ function commandForAction(action, args) {
     const admin = safeArg(args?.admin);
     const restart = safeArg(args?.restart);
     const dryRun = safeArg(args?.dry_run);
-    const flags: string[] = [];
+    const flags = [];
     if (admin === "0") flags.push("--no-admin");
     if (restart === "0") flags.push("--no-restart");
     if (dryRun === "1") flags.push("--dry-run");
@@ -200,6 +201,10 @@ const server = http.createServer(async (req, res) => {
   pruneJobs();
 
   const url = new URL(req.url || "/", "http://localhost");
+  if (req.method === "GET" && url.pathname === "/health") {
+    json(req, res, 200, { ok: true, runner: "host" });
+    return;
+  }
   if (req.method === "POST" && url.pathname === "/run") {
     let body = "";
     req.on("data", (d) => {
@@ -240,4 +245,4 @@ const server = http.createServer(async (req, res) => {
   json(req, res, 404, { ok: false, error: "not_found" });
 });
 
-server.listen(PORT, "127.0.0.1");
+server.listen(PORT, HOST);

@@ -31,6 +31,8 @@ services:
   wordpress:
     image: wordpress:php${WPDEV_PHP_VERSION:-8.2}-apache
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${WP_PORT:-8888}:80"
     environment:
@@ -94,7 +96,8 @@ services:
       WPDEV_TERMINAL_RUNNER_TOKEN: ${WPDEV_TERMINAL_RUNNER_TOKEN:-}
       WPDEV_TERMINAL_RUNNER_ORIGIN: ${WPDEV_TERMINAL_RUNNER_ORIGIN:-http://localhost:${WP_PORT:-8888}}
       WPDEV_TERMINAL_WORKDIR: ${WPDEV_TERMINAL_WORKDIR:-/workspace}
-      WPDEV_TERMINAL_RUNNER_PORT: ${WPDEV_TERMINAL_RUNNER_PORT:-7682}
+      # Listen on fixed container port 7682; host publish port is WPDEV_TERMINAL_RUNNER_PORT in ports: above.
+      WPDEV_TERMINAL_RUNNER_PORT: "7682"
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
       MYSQL_USER: ${MYSQL_USER:-wordpress}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpress}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { AdminAuthBar } from "./AdminAuthBar";
 import { ActivityLog } from "./ActivityLog";
 import { logAdmin } from "./adminLog";
 import { BackupRestore } from "./BackupRestore";
@@ -156,6 +157,9 @@ export default function App() {
             >
               Documentation
             </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <AdminAuthBar />
           </div>
         </div>
       </div>
