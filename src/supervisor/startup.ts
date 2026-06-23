@@ -217,7 +217,9 @@ async function composeUp(
   envPath: string,
   sslEnabled: boolean,
 ): Promise<void> {
-  const args = sslEnabled ? ["--profile", "ssl", "up", "-d"] : ["up", "-d"];
+  const args = sslEnabled
+    ? ["--profile", "ssl", "up", "-d", "--build"]
+    : ["up", "-d", "--build"];
   try {
     await compose(loaded.configDir, loaded.config, args, { stdio: "pipe" });
   } catch (e) {

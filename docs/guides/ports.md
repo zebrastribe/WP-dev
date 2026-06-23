@@ -8,7 +8,7 @@ Each WP-dev clone uses ports from `docker/.env`. Defaults:
 | `WP_HTTPS_PORT` | 8443 | Local HTTPS (when enabled) |
 | `WPDEV_TERMINAL_PORT` | 7681 | Browser terminal |
 | `WPDEV_TERMINAL_RUNNER_PORT` | 7682 | Terminal runner API |
-| `WPDEV_HOST_RUNNER_PORT` | 7683 | Sync runner (in terminal container) |
+| `WPDEV_HOST_RUNNER_PORT` | 7683 | Sync runner **host** publish port (container always listens on **7683**) |
 
 ## Strict port mode
 
@@ -40,6 +40,8 @@ npm run wp-dev -- doctor --local-http
 ## Localhost binding
 
 WordPress and admin bind to **127.0.0.1** by default — not exposed to your LAN.
+
+**Inside Docker:** terminal-runner and sync-runner always listen on container ports **7682** and **7683**. Only the left side of `host:container` in `docker-compose.yml` uses `WPDEV_*_PORT` from `docker/.env` when ports are relocated.
 
 ## HTTPS locally
 
