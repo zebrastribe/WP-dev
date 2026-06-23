@@ -20,6 +20,8 @@ import {
   cmdFixRuntimeWritePermissions,
 } from "./commands/fix-permissions.js";
 import { cmdDoctor } from "./commands/doctor.js";
+import { cmdSupervisorRun, cmdSupervisorStatus } from "./commands/supervisor.js";
+import { cmdServices } from "./commands/services.js";
 import { cmdSyncPreview, cmdSyncRules, cmdSyncScan } from "./commands/sync-preview.js";
 import { cmdUpdate } from "./commands/update.js";
 import { cmdSslDisable, cmdSslEnable } from "./commands/ssl.js";
@@ -145,9 +147,26 @@ async function main(): Promise<void> {
 
   program
     .command("up")
-    .description("Start local WordPress (docker compose up -d)")
-    .action(async () => {
-      await runWithConfig("up", cmdUp);
+    .description("Start local WordPress (service manager startup state machine)")
+    .option(
+      "--relocate-ports",
+      "Allow automatic port reassignment when reserved ports are busy",
+    )
+    .option(
+      "--reclaim-ports",
+      "Terminate orphaned wp-dev listeners on reserved ports before startup",
+    )
+    .action(async (opts: { relocatePorts?: boolean; reclaimPorts?: boolean }) => {
+      const flags = [
+        opts.relocatePorts ? " --relocate-ports" : "",
+        opts.reclaimPorts ? " --reclaim-ports" : "",
+      ].join("");
+      await runWithConfig(`up${flags}`, (loaded) =>
+        cmdUp(loaded, {
+          relocatePorts: Boolean(opts.relocatePorts),
+          reclaimPorts: Boolean(opts.reclaimPorts),
+        }),
+      );
     });
 
   const ssl = program.command("ssl").description("Manage localhost HTTPS for the local Docker stack");
@@ -208,6 +227,31 @@ async function main(): Promise<void> {
     });
 
   program
+    .command("services")
+    .description("Show service registry, ports, and supervisor health")
+    .action(async () => {
+      await runWithConfig("services", cmdServices);
+    });
+
+  const supervisor = program
+    .command("supervisor")
+    .description("WP-dev service manager (lifecycle daemon)");
+
+  supervisor
+    .command("status")
+    .description("Show supervisor lock, registry, and managed services")
+    .action(async () => {
+      await runWithConfig("supervisor status", cmdSupervisorStatus);
+    });
+
+  supervisor
+    .command("run")
+    .description("Run the supervisor daemon in the foreground (internal)")
+    .action(async () => {
+      await runWithConfig("supervisor run", cmdSupervisorRun);
+    });
+
+  program
     .command("doctor")
     .description(
       "Check local/remote SSH + WordPress; optional rsync dry-run and HTTP probes",
@@ -219,10 +263,14 @@ async function main(): Promise<void> {
       "--local-http",
       "Probe local site URL; fail on redirect to wrong localhost port or stale home/siteurl",
     )
-    .action(async (env: string | undefined, opts: { rsync?: boolean; http?: boolean; localHttp?: boolean }) => {
+    .option("--lifecycle", "Check service manager lock, registry, and shutdown state")
+    .option("--filesystem", "Check filesystem ownership profiles and writable paths")
+    .action(async (env: string | undefined, opts: { rsync?: boolean; http?: boolean; localHttp?: boolean; lifecycle?: boolean; filesystem?: boolean }) => {
       const rsync = Boolean(opts.rsync);
       const http = Boolean(opts.http);
       const localHttp = Boolean(opts.localHttp);
+      const lifecycle = Boolean(opts.lifecycle);
+      const filesystem = Boolean(opts.filesystem);
       const envTrim = env?.trim();
       const parsedEnv =
         envTrim && envTrim.length > 0 ? parseRemoteEnv(envTrim) : undefined;
@@ -230,6 +278,8 @@ async function main(): Promise<void> {
         rsync ? " --rsync" : "",
         http ? " --http" : "",
         localHttp ? " --local-http" : "",
+        lifecycle ? " --lifecycle" : "",
+        filesystem ? " --filesystem" : "",
       ].join("");
       const label = parsedEnv ? `doctor ${parsedEnv}${flags}` : `doctor${flags}`;
       await runWithConfig(label, (loaded) =>
@@ -238,6 +288,8 @@ async function main(): Promise<void> {
           rsyncDryRun: rsync,
           httpCheck: http,
           localHttpCheck: localHttp,
+          lifecycleCheck: lifecycle,
+          filesystemCheck: filesystem,
         }),
       );
     });
