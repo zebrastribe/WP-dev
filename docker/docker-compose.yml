@@ -91,6 +91,7 @@ services:
     ports:
       - "127.0.0.1:${WPDEV_TERMINAL_PORT:-7681}:7681"
       - "127.0.0.1:${WPDEV_TERMINAL_RUNNER_PORT:-7682}:7682"
+      - "127.0.0.1:${WPDEV_HOST_RUNNER_PORT:-7683}:7683"
     environment:
       WPDEV_TERMINAL_AUTH: ${WPDEV_TERMINAL_AUTH:-wpdev:wpdev}
       WPDEV_TERMINAL_RUNNER_TOKEN: ${WPDEV_TERMINAL_RUNNER_TOKEN:-}
@@ -98,6 +99,7 @@ services:
       WPDEV_TERMINAL_WORKDIR: ${WPDEV_TERMINAL_WORKDIR:-/workspace}
       # Listen on fixed container port 7682; host publish port is WPDEV_TERMINAL_RUNNER_PORT in ports: above.
       WPDEV_TERMINAL_RUNNER_PORT: "7682"
+      WPDEV_HOST_RUNNER_PORT: ${WPDEV_HOST_RUNNER_PORT:-7683}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
       MYSQL_USER: ${MYSQL_USER:-wordpress}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpress}
