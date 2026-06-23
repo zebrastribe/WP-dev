@@ -3,6 +3,7 @@ import { logAdmin } from "./adminLog";
 import type { TerminalAction } from "./api";
 import { JobProgressPanel } from "./JobProgressPanel";
 import { useRunnerJob } from "./useRunnerJob";
+import { toggleButtonClass } from "./uiClasses";
 
 type RemoteEnv = "staging" | "production";
 type SyncDirection = "push" | "pull";
@@ -109,9 +110,7 @@ export function SyncDeployPanel({
               type="button"
               disabled={busy}
               onClick={() => setDirection(d)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize ${
-                activeDirection === d ? "bg-brand-600 text-white" : "border border-slate-300"
-              }`}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize ${toggleButtonClass(activeDirection === d)}`}
             >
               {d}
             </button>
@@ -127,11 +126,7 @@ export function SyncDeployPanel({
               type="button"
               disabled={busy}
               onClick={() => setEnv(e)}
-              className={`rounded-lg px-3 py-1.5 text-xs capitalize ${
-                activeEnv === e
-                  ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
-                  : "border border-slate-300"
-              }`}
+              className={`rounded-lg px-3 py-1.5 text-xs capitalize ${toggleButtonClass(activeEnv === e)}`}
             >
               {e}
             </button>

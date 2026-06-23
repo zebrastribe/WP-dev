@@ -10,6 +10,7 @@ import { JobProgressPanel } from "./JobProgressPanel";
 import { SyncDeployPanel } from "./SyncDeployPanel";
 import { useRunnerJob } from "./useRunnerJob";
 import { useRunnerSecrets } from "./useRunnerSecrets";
+import { secondaryAccentButtonClass, toggleButtonClass } from "./uiClasses";
 
 type RemoteEnv = "staging" | "production";
 type SyncDirection = "push" | "pull";
@@ -739,9 +740,7 @@ export function SyncTab() {
                     setDirection(d);
                     setPreview(null);
                   }}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize ${
-                    direction === d ? "bg-brand-600 text-white" : "border border-slate-300"
-                  }`}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize ${toggleButtonClass(direction === d)}`}
                 >
                   {d}
                 </button>
@@ -756,9 +755,7 @@ export function SyncTab() {
                     setEnv(e);
                     setPreview(null);
                   }}
-                  className={`rounded-lg px-3 py-1.5 text-xs capitalize ${
-                    env === e ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900" : "border"
-                  }`}
+                  className={`rounded-lg px-3 py-1.5 text-xs capitalize ${toggleButtonClass(env === e)}`}
                 >
                   {e}
                 </button>
@@ -769,7 +766,7 @@ export function SyncTab() {
                 type="button"
                 disabled={busy || !canRun || job.phase === "running"}
                 onClick={() => void runPreview()}
-                className="w-full rounded-lg border border-brand-300 bg-brand-50 py-2 text-sm font-semibold text-brand-800 disabled:opacity-50 dark:border-brand-800 dark:bg-brand-950/40 dark:text-brand-200"
+                className={`w-full rounded-lg py-2 text-sm ${secondaryAccentButtonClass} disabled:opacity-50`}
               >
                 Preview file changes
               </button>
