@@ -62,11 +62,11 @@ function wpdev_upsert_dotenv_file(string $path, array $updates): void
         @unlink($tmp);
         throw new RuntimeException('rename_failed');
     }
-    // Keep host CLI (wp-dev up) and admin API both able to write docker/.env.
-    @chmod($path, 0666);
+    // Keep host CLI and admin API both able to write docker/.env (safe modes, not world-writable).
+    @chmod($path, 0664);
     $dir = dirname($path);
     if (is_dir($dir)) {
-        @chmod($dir, 0777);
+        @chmod($dir, 0775);
     }
 }
 
@@ -712,6 +712,42 @@ if ($method === 'GET' && $action === 'terminal-runner-secrets') {
         ],
         JSON_UNESCAPED_SLASHES
     );
+    exit;
+}
+
+if ($method === 'GET' && $action === 'filesystem-health') {
+    wpdev_require_admin_token($token, 'GET filesystem-health');
+    $manifestPath = $repoRoot . '/logs/ownership-manifest.json';
+    $manifest = null;
+    if (is_readable($manifestPath)) {
+        $raw = file_get_contents($manifestPath);
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                $manifest = $decoded;
+            }
+        }
+    }
+    wpdev_admin_api_log('GET filesystem-health 200');
+    echo json_encode(['ok' => true, 'manifest' => $manifest], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+if ($method === 'GET' && $action === 'services') {
+    wpdev_require_admin_token($token, 'GET services');
+    $registryPath = $repoRoot . '/logs/service-registry.json';
+    $registry = null;
+    if (is_readable($registryPath)) {
+        $raw = file_get_contents($registryPath);
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                $registry = $decoded;
+            }
+        }
+    }
+    wpdev_admin_api_log('GET services 200');
+    echo json_encode(['ok' => true, 'registry' => $registry], JSON_UNESCAPED_SLASHES);
     exit;
 }
 

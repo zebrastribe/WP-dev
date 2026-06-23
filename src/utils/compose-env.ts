@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { LoadedConfig } from "../config/load.js";
 import { writeWpDevConfig } from "../config/load.js";
+import { writeFileAtomic } from "../fs/atomic-write.js";
 
 export type DockerEnvPortKey =
   | "WP_PORT"
@@ -43,21 +44,49 @@ export function setEnvValueInContent(content: string, key: string, value: string
   return `${prefix}${line}\n`;
 }
 
+export function writeEnvFile(
+  path: string,
+  content: string,
+  meta?: { configDir: string; projectId: string },
+): void {
+  const normalized = content.endsWith("\n") ? content : `${content}\n`;
+  writeFileAtomic(path, normalized, {
+    configDir: meta?.configDir,
+    projectId: meta?.projectId,
+    backup: true,
+    mode: 0o664,
+  });
+}
+
+export function persistEnvContent(
+  path: string,
+  content: string,
+  loaded?: { configDir: string; config: { project: string } },
+): void {
+  writeEnvFile(
+    path,
+    content,
+    loaded ? { configDir: loaded.configDir, projectId: loaded.config.project } : undefined,
+  );
+}
+
 export function setPortInEnvFile(
   path: string,
   key: DockerEnvPortKey,
   port: number,
+  meta?: { configDir: string; projectId: string },
 ): void {
   const line = `${key}=${port}`;
   const current = existsSync(path) ? readFileSync(path, "utf8") : "";
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let next: string;
   if (new RegExp(`^${escaped}=.*$`, "m").test(current)) {
-    const next = current.replace(new RegExp(`^${escaped}=.*$`, "m"), line);
-    writeFileSync(path, next.endsWith("\n") ? next : `${next}\n`, "utf8");
-    return;
+    next = current.replace(new RegExp(`^${escaped}=.*$`, "m"), line);
+  } else {
+    const prefix = current.trim().length > 0 ? `${current.replace(/\s*$/, "")}\n` : "";
+    next = `${prefix}${line}\n`;
   }
-  const prefix = current.trim().length > 0 ? `${current.replace(/\s*$/, "")}\n` : "";
-  writeFileSync(path, `${prefix}${line}\n`, "utf8");
+  writeEnvFile(path, next, meta);
 }
 
 export function setWpPortInEnvFile(path: string, port: number): void {
@@ -123,7 +152,11 @@ export function maybeUpdateLocalUrlPort(loaded: LoadedConfig, newPort: number): 
   }
 }
 
-export function maybeUpdateRunnerOriginPort(envPath: string, newPort: number): void {
+export function maybeUpdateRunnerOriginPort(
+  envPath: string,
+  newPort: number,
+  meta?: { configDir: string; projectId: string },
+): void {
   const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const runnerOrigin = readEnvValue(current, "WPDEV_TERMINAL_RUNNER_ORIGIN");
   if (!runnerOrigin) return;
@@ -143,7 +176,7 @@ export function maybeUpdateRunnerOriginPort(envPath: string, newPort: number): v
       "WPDEV_TERMINAL_RUNNER_ORIGIN",
       u.toString().replace(/\/$/, ""),
     );
-    writeFileSync(envPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
+    writeEnvFile(envPath, next, meta);
   }
 }
 

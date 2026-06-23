@@ -1,6 +1,10 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { execa } from "execa";
+import type { LoadedConfig } from "../config/load.js";
+import { checkFilesystemHealth } from "../fs/recovery.js";
+import { detectFilesystemWarnings } from "../fs/temp-registry.js";
+import { readUpdateLock } from "../fs/update-lock.js";
 
 /** Gitignored paths users should back up before risky git operations. */
 export const UPDATE_BACKUP_HINTS = [
@@ -18,6 +22,9 @@ export type UpdatePreflight = {
   commitsBehind: number | null;
   forkWorkflowRecommended: boolean;
   warnings: string[];
+  filesystemWarnings: string[];
+  filesystemOk: boolean;
+  updateLockHeld: boolean;
 };
 
 async function gitQuiet(
@@ -31,8 +38,20 @@ async function gitQuiet(
   return { ok: r.exitCode === 0, stdout: (r.stdout || "").trim() };
 }
 
-export async function collectUpdatePreflight(configDir: string): Promise<UpdatePreflight> {
+export async function collectUpdatePreflight(
+  configDir: string,
+  loaded?: LoadedConfig,
+): Promise<UpdatePreflight> {
   const warnings: string[] = [];
+  const filesystemWarnings = detectFilesystemWarnings(configDir);
+  let filesystemOk = true;
+  if (loaded) {
+    const fsHealth = checkFilesystemHealth(loaded);
+    filesystemOk = fsHealth.ok;
+    for (const i of fsHealth.issues) filesystemWarnings.push(i);
+  }
+  const updateLock = readUpdateLock(configDir);
+  const updateLockHeld = updateLock !== null;
 
   if (!existsSync(join(configDir, ".git"))) {
     return {
@@ -44,6 +63,9 @@ export async function collectUpdatePreflight(configDir: string): Promise<UpdateP
       commitsBehind: null,
       forkWorkflowRecommended: false,
       warnings: ["Not a git repository — git pull will fail unless you use --skip-pull."],
+      filesystemWarnings,
+      filesystemOk,
+      updateLockHeld,
     };
   }
 
@@ -105,6 +127,9 @@ export async function collectUpdatePreflight(configDir: string): Promise<UpdateP
     commitsBehind,
     forkWorkflowRecommended,
     warnings,
+    filesystemWarnings,
+    filesystemOk,
+    updateLockHeld,
   };
 }
 
@@ -128,6 +153,19 @@ export function formatUpdatePreflight(preflight: UpdatePreflight): string {
     lines.push(
       "  Fork detected — use a safety branch + merge (README “Fork updates”), not update alone.",
     );
+  }
+  if ((preflight.filesystemWarnings ?? []).length > 0) {
+    lines.push("");
+    lines.push("  Filesystem:");
+    for (const w of preflight.filesystemWarnings ?? []) {
+      lines.push(`  ⚠ ${w}`);
+    }
+  }
+  if (preflight.filesystemOk === false) {
+    lines.push("  ⚠ Config paths not fully writable — run wp-dev doctor --filesystem");
+  }
+  if (preflight.updateLockHeld) {
+    lines.push("  ⚠ Update lock present — another update may be in progress");
   }
   if (preflight.warnings.length > 0) {
     lines.push("");

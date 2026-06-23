@@ -16,12 +16,21 @@ import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
 import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
 import { logInfo } from "../utils/logger.js";
 import { compose } from "../services/docker-compose.js";
+import { getRunningSupervisorInfo } from "../supervisor/recovery.js";
+import { isLockStale, readLockData } from "../supervisor/project-lock.js";
+import { loadRegistry } from "../supervisor/service-registry.js";
+import { hostRunnerPidPath } from "../supervisor/paths.js";
+import { checkFilesystemHealth } from "../fs/recovery.js";
+import { ownershipManifestPath } from "../fs/path-resolver.js";
+import { existsSync } from "node:fs";
 
 export type DoctorOptions = {
   env?: RemoteEnvName;
   rsyncDryRun: boolean;
   httpCheck: boolean;
   localHttpCheck: boolean;
+  lifecycleCheck?: boolean;
+  filesystemCheck?: boolean;
 };
 
 function printSimplyStagingDnsHint(loaded: LoadedConfig): void {
@@ -260,6 +269,67 @@ async function checkOneRemote(
   return "ok";
 }
 
+async function checkLifecycle(loaded: LoadedConfig): Promise<"ok" | "fail"> {
+  console.error("\n--- lifecycle (service manager) ---");
+  let failed = false;
+
+  const lock = readLockData(loaded.configDir);
+  const supervisor = getRunningSupervisorInfo(loaded.configDir);
+  if (lock && !supervisor) {
+    console.error(`FAIL: stale lock file (PID ${lock.pid} not running)`);
+    failed = true;
+  } else if (supervisor) {
+    console.error(`Supervisor: OK (PID ${supervisor.pid}, port ${supervisor.port})`);
+  } else {
+    console.error("Supervisor: not running (expected after wp-dev down)");
+  }
+
+  if (isLockStale(loaded.configDir)) {
+    console.error("FAIL: stale wp-dev.lock — run wp-dev up to recover");
+    failed = true;
+  }
+
+  const registry = loadRegistry(loaded.configDir);
+  if (registry) {
+    console.error(`Registry: ${registry.services.length} service(s), phase=${registry.shutdownPhase}`);
+    if (registry.shutdownPhase !== "none" && registry.shutdownPhase !== "complete") {
+      console.error(`FAIL: incomplete shutdown phase "${registry.shutdownPhase}"`);
+      failed = true;
+    }
+  } else {
+    console.error("Registry: not found (run wp-dev up)");
+  }
+
+  if (existsSync(hostRunnerPidPath(loaded.configDir))) {
+    console.error(
+      "WARN: legacy host-runner PID file present — will be cleaned on next wp-dev up",
+    );
+  }
+
+  return failed ? "fail" : "ok";
+}
+
+async function checkFilesystem(loaded: LoadedConfig): Promise<"ok" | "fail"> {
+  console.error("\n--- filesystem (ownership & permissions) ---");
+  const health = checkFilesystemHealth(loaded);
+  for (const issue of health.issues) {
+    console.error(`FAIL: ${issue}`);
+  }
+  if (existsSync(ownershipManifestPath(loaded.configDir))) {
+    console.error("Ownership manifest: present (logs/ownership-manifest.json)");
+  } else {
+    console.error("Ownership manifest: missing — run wp-dev up to reconcile");
+  }
+  if (health.ok) {
+    console.error("Filesystem health: OK");
+    return "ok";
+  }
+  console.error(
+    "Filesystem health: FAIL — run: npm run wp-dev -- doctor --filesystem (auto-reconciles ownership profiles)",
+  );
+  return "fail";
+}
+
 export async function cmdDoctor(loaded: LoadedConfig, options: DoctorOptions): Promise<void> {
   assertDockerReady();
   if (options.rsyncDryRun) {
@@ -278,6 +348,16 @@ export async function cmdDoctor(loaded: LoadedConfig, options: DoctorOptions): P
 
   const localResult = await checkLocalSite(loaded, options.localHttpCheck);
   if (localResult === "fail") failed += 1;
+
+  if (options.lifecycleCheck) {
+    const lc = await checkLifecycle(loaded);
+    if (lc === "fail") failed += 1;
+  }
+
+  if (options.filesystemCheck) {
+    const fs = await checkFilesystem(loaded);
+    if (fs === "fail") failed += 1;
+  }
 
   const targets: RemoteEnvName[] = options.env
     ? [options.env]
