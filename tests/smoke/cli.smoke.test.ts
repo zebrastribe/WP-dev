@@ -111,7 +111,8 @@ describe("runner smoke", () => {
   it("sync runner listens on fixed container port 7683 (host port is publish-only)", () => {
     const content = readFileSync(composePath, "utf8");
     expect(content).toContain("${WPDEV_HOST_RUNNER_PORT:-7683}:7683");
-    expect(content).toContain("WPDEV_HOST_RUNNER_PORT:");
+    expect(content).toMatch(/WPDEV_HOST_RUNNER_PORT:\s*"7683"/);
+    expect(content).not.toMatch(/WPDEV_HOST_RUNNER_PORT:\s*\$\{/);
   });
 
   it("terminal container starts via start-terminal-services.sh", () => {
