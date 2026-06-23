@@ -20,6 +20,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:smoke": "vitest run --config vitest.smoke.config.ts",
+    "release:gate": "node scripts/release-gate.mjs",
     "test:all": "npm test && npm run build && npm run test:smoke && npm run test --prefix docs/admin",
     "postinstall": "node scripts/ensure-config.mjs",
     "admin:dev": "npm run dev --prefix docs/admin",

@@ -8,14 +8,33 @@ export default defineConfig({
     exclude: ["tests/smoke/**/*.test.ts"],
     coverage: {
       provider: "v8",
-      /** Measure testable layers; CLI command orchestration is covered by smoke/integration manually. */
+      /** Measure testable layers; CLI/orchestration covered by smoke/integration. */
       include: [
         "src/services/**/*.ts",
         "src/utils/**/*.ts",
         "src/config/**/*.ts",
+        "src/fs/atomic-write.ts",
+        "src/fs/path-resolver.ts",
+        "src/fs/temp-registry.ts",
+        "src/fs/update-lock.ts",
+        "src/fs/ownership/profiles.ts",
+        "src/fs/recovery.ts",
+        "src/supervisor/project-lock.ts",
+        "src/supervisor/service-registry.ts",
+        "src/supervisor/port-manager.ts",
+        "src/supervisor/paths.ts",
         "src/commands/fix-permissions.ts",
       ],
-      exclude: ["src/cli.ts"],
+      exclude: [
+        "src/cli.ts",
+        "src/supervisor/daemon.ts",
+        "src/supervisor/startup.ts",
+        "src/supervisor/shutdown.ts",
+        "src/supervisor/client.ts",
+        "src/supervisor/process-manager.ts",
+        "src/supervisor/port-probe.ts",
+        "src/fs/ownership/reconcile.ts",
+      ],
       thresholds: {
         lines: 50,
         functions: 55,
