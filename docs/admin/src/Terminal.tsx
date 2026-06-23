@@ -2,6 +2,7 @@ import { useState } from "react";
 import { getTerminalJobStatus, runTerminalAction } from "./api";
 import { useRunnerSecrets } from "./useRunnerSecrets";
 import { TerminalEmbed } from "./TerminalEmbed";
+import { outlineButtonClass, secondaryAccentButtonClass, toggleButtonClass } from "./uiClasses";
 
 type EnvName = "local" | "staging" | "production";
 
@@ -85,9 +86,7 @@ export function TerminalTab() {
             key={x}
             type="button"
             onClick={() => setEnv(x)}
-            className={`rounded-lg px-3 py-1.5 text-xs ${
-              env === x ? "bg-brand-600 text-white" : "border border-slate-300"
-            }`}
+            className={`rounded-lg px-3 py-1.5 text-xs ${toggleButtonClass(env === x)}`}
           >
             {x}
           </button>
@@ -99,7 +98,7 @@ export function TerminalTab() {
           type="button"
           disabled={busy || !canRun}
           onClick={() => void run("wpdev_sync_preview", { env: "staging", direction: "push" }, "sync")}
-          className="rounded-lg border border-brand-300 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-800 dark:border-brand-800 dark:bg-brand-950/40 dark:text-brand-200"
+          className={`rounded-lg px-3 py-1.5 text-xs ${secondaryAccentButtonClass}`}
         >
           Preview push → staging
         </button>
@@ -107,7 +106,7 @@ export function TerminalTab() {
           type="button"
           disabled={busy || !canRun}
           onClick={() => void run("wpdev_push", { env: "staging" }, "sync")}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
           Push localhost to staging
         </button>
@@ -115,7 +114,7 @@ export function TerminalTab() {
           type="button"
           disabled={busy || !canRun}
           onClick={() => void run("wpdev_push", { env: "production" }, "sync")}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
           Push localhost to production
         </button>
@@ -123,7 +122,7 @@ export function TerminalTab() {
           type="button"
           disabled={busy || !canRun}
           onClick={() => void run("wpdev_pull", { env: "production" }, "sync")}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
           Pull production to localhost
         </button>
@@ -131,7 +130,7 @@ export function TerminalTab() {
           type="button"
           disabled={busy || !canRun}
           onClick={() => void run("generate_keypair")}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
           Generate SSH keypair
         </button>
@@ -139,7 +138,7 @@ export function TerminalTab() {
           type="button"
           disabled={busy || !canRun || env === "local"}
           onClick={() => void run("wpdev_doctor", { env })}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800"
+          className={`rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 ${outlineButtonClass}`}
         >
           Run doctor {env === "local" ? "(pick staging/prod)" : env}
         </button>
@@ -147,7 +146,7 @@ export function TerminalTab() {
           type="button"
           disabled={busy || !canRun}
           onClick={() => void run("backup_create", { env, kind: "full" })}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
           Create {env} full backup
         </button>
@@ -155,7 +154,7 @@ export function TerminalTab() {
           type="button"
           disabled={busy || !canRun}
           onClick={() => void run("backup_list", { env, kind: "full" })}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
           List {env} full backups
         </button>
