@@ -1,7 +1,8 @@
 import { execa } from "execa";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { LoadedConfig } from "../config/load.js";
+import { persistEnvContent, setEnvValueInContent } from "../utils/compose-env.js";
 
 const SUPPORTED_PHP_VERSIONS = ["7.4", "8.0", "8.1", "8.2", "8.3", "8.4"] as const;
 type SupportedPhpVersion = (typeof SUPPORTED_PHP_VERSIONS)[number];
@@ -18,13 +19,7 @@ function readEnvValue(content: string, key: string): string {
 }
 
 function setEnvValue(content: string, key: string, value: string): string {
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const line = `${key}=${value}`;
-  if (new RegExp(`^${escaped}=.*$`, "m").test(content)) {
-    return content.replace(new RegExp(`^${escaped}=.*$`, "m"), line);
-  }
-  const prefix = content.trim().length > 0 ? `${content.replace(/\s*$/, "")}\n` : "";
-  return `${prefix}${line}\n`;
+  return setEnvValueInContent(content, key, value);
 }
 
 function assertSupported(version: string): asserts version is SupportedPhpVersion {
@@ -60,7 +55,7 @@ export async function cmdPhpSet(loaded: LoadedConfig, version: string): Promise<
   const envPath = composeEnvPath(loaded);
   const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const next = setEnvValue(current, "WPDEV_PHP_VERSION", version);
-  writeFileSync(envPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
+  persistEnvContent(envPath, next, loaded);
   console.error(`Set WPDEV_PHP_VERSION=${version} in ${envPath}.`);
   console.error("Run: npm run wp-dev -- down && npm run wp-dev -- up");
 }

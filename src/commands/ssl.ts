@@ -1,8 +1,9 @@
 import { execa } from "execa";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { LoadedConfig } from "../config/load.js";
 import { writeWpDevConfig } from "../config/load.js";
+import { persistEnvContent, setEnvValueInContent } from "../utils/compose-env.js";
 
 function readEnvValue(content: string, key: string): string {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -12,13 +13,7 @@ function readEnvValue(content: string, key: string): string {
 }
 
 function setEnvValue(content: string, key: string, value: string): string {
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const line = `${key}=${value}`;
-  if (new RegExp(`^${escaped}=.*$`, "m").test(content)) {
-    return content.replace(new RegExp(`^${escaped}=.*$`, "m"), line);
-  }
-  const prefix = content.trim().length > 0 ? `${content.replace(/\s*$/, "")}\n` : "";
-  return `${prefix}${line}\n`;
+  return setEnvValueInContent(content, key, value);
 }
 
 function composeEnvPath(loaded: LoadedConfig): string {
@@ -58,7 +53,7 @@ export async function cmdSslEnable(loaded: LoadedConfig): Promise<void> {
   next = setEnvValue(next, "WPDEV_LOCAL_HTTPS", "1");
   next = setEnvValue(next, "WP_HTTPS_PORT", String(safeHttpsPort));
   next = setEnvValue(next, "WPDEV_TERMINAL_RUNNER_ORIGIN", `https://localhost:${safeHttpsPort}`);
-  writeFileSync(envPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
+  persistEnvContent(envPath, next, loaded);
 
   loaded.config.local.url = `https://localhost:${safeHttpsPort}`;
   writeWpDevConfig(loaded.configDir, loaded.config);
@@ -80,7 +75,7 @@ export async function cmdSslDisable(loaded: LoadedConfig): Promise<void> {
   let next = current;
   next = setEnvValue(next, "WPDEV_LOCAL_HTTPS", "0");
   next = setEnvValue(next, "WPDEV_TERMINAL_RUNNER_ORIGIN", `http://localhost:${safeWpPort}`);
-  writeFileSync(envPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
+  persistEnvContent(envPath, next, loaded);
 
   loaded.config.local.url = `http://localhost:${safeWpPort}`;
   writeWpDevConfig(loaded.configDir, loaded.config);
