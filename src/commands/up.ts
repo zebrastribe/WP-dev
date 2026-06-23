@@ -3,41 +3,43 @@ import { resolveFromConfigDir } from "../config/load.js";
 import { compose } from "../services/docker-compose.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
 import { logInfo } from "../utils/logger.js";
-import { getPublishedLocalAccess } from "../utils/published-local-urls.js";
-import { openBrowserCommand } from "../utils/platform-hints.js";
-import { syncLocalWordPressUrls } from "../utils/sync-local-urls.js";
 import {
-  getComposePublishedHostPorts,
-  isPortOwnedByComposeProject,
-} from "../utils/compose-published-ports.js";
-import {
-  extractBoundPort,
   listSecurityEnvPlaceholderKeys,
-  maybeUpdateLocalUrlPort,
-  maybeUpdateRunnerOriginPort,
-  parseDockerEnvPorts,
+  persistEnvContent,
   readEnvValue,
-  resolveConflictPortKey,
   runnerOriginPortMismatch,
   setEnvValueInContent,
-  setPortInEnvFile,
-  type DockerEnvPortKey,
+  writeEnvFile,
 } from "../utils/compose-env.js";
-import {
-  accessSync,
-  constants,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import net from "node:net";
 import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
-import { startHostRunner, stopHostRunner } from "../services/host-runner.js";
-import { isLocalWpInstalled, waitForLocalMysqlReady } from "../services/wpcli.js";
+import {
+  autoReconcileOnStartup,
+  probeWritable,
+  reconcileContainerRuntime,
+  reconcileSharedConfig,
+} from "../fs/index.js";
+import { recoverStaleState } from "../supervisor/recovery.js";
+import {
+  ensureSupervisorRunning,
+  formatDuplicateInstanceMessage,
+  isSupervisorAlreadyRunning,
+  resolveSupervisorPort,
+} from "../supervisor/client.js";
+import {
+  createInitialRegistry,
+  printStartupSummary,
+  runStartupStateMachine,
+} from "../supervisor/startup.js";
+import { saveRegistry } from "../supervisor/service-registry.js";
+
+export type UpOptions = {
+  relocatePorts?: boolean;
+  reclaimPorts?: boolean;
+  strictPorts?: boolean;
+};
 
 function getComposeEnvPath(loaded: LoadedConfig): string {
   return join(loaded.configDir, loaded.config.local.path, ".env");
@@ -55,7 +57,10 @@ function ensureComposeEnvExists(loaded: LoadedConfig): string {
     copyFileSync(example, envPath);
     return envPath;
   }
-  writeFileSync(envPath, "WP_PORT=8888\n", "utf8");
+  writeEnvFile(envPath, "WP_PORT=8888\n", {
+    configDir: loaded.configDir,
+    projectId: loaded.config.project,
+  });
   return envPath;
 }
 
@@ -63,7 +68,7 @@ function makeToken(bytes = 24): string {
   return randomBytes(bytes).toString("base64url");
 }
 
-function ensureSecurityEnvDefaults(envPath: string): void {
+function ensureSecurityEnvDefaults(loaded: LoadedConfig, envPath: string): void {
   const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const currentWpPort = readEnvValue(current, "WP_PORT") || "8888";
 
@@ -115,7 +120,7 @@ function ensureSecurityEnvDefaults(envPath: string): void {
   }
 
   if (changed) {
-    writeFileSync(envPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
+    persistEnvContent(envPath, next, loaded);
     console.error(
       `Auto-updated docker/.env security values: ${changedKeys.join(", ")}\n` +
         "Run this stack restart to apply if already running: npm run wp-dev -- down && npm run wp-dev -- up\n",
@@ -134,128 +139,6 @@ function warnIfSecurityEnvPlaceholders(envPath: string): void {
   );
 }
 
-async function isPortFree(port: number): Promise<boolean> {
-  return await new Promise<boolean>((resolve) => {
-    const server = net.createServer();
-    server.unref();
-    server.on("error", () => resolve(false));
-    server.listen({ host: "0.0.0.0", port }, () => {
-      server.close(() => resolve(true));
-    });
-  });
-}
-
-async function findFreePort(startAt: number, projectPorts: Set<number>): Promise<number> {
-  for (let p = startAt; p <= 65535; p++) {
-    if (isPortOwnedByComposeProject(p, projectPorts) || (await isPortFree(p))) return p;
-  }
-  throw new Error(`Could not find a free local TCP port from ${startAt}..65535`);
-}
-
-async function ensureNonConflictingPublishedPorts(
-  loaded: LoadedConfig,
-  envPath: string,
-): Promise<void> {
-  const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-  const current = parseDockerEnvPorts(envContent);
-
-  const projectPorts = await getComposePublishedHostPorts(loaded.configDir, loaded.config);
-
-  const used = new Set<number>();
-  let changed = false;
-
-  const portAvailable = async (candidate: number): Promise<boolean> => {
-    if (isPortOwnedByComposeProject(candidate, projectPorts)) return true;
-    return isPortFree(candidate);
-  };
-
-  const allocate = async (key: DockerEnvPortKey, startAt: number): Promise<number> => {
-    let candidate = startAt;
-    while (candidate <= 65535) {
-      if (!used.has(candidate) && (await portAvailable(candidate))) {
-        used.add(candidate);
-        return candidate;
-      }
-      candidate += 1;
-    }
-    throw new Error(`Could not find a free local TCP port for ${key} from ${startAt}..65535`);
-  };
-
-  const nextWpPort = await allocate("WP_PORT", current.WP_PORT);
-  if (nextWpPort !== current.WP_PORT) {
-    setPortInEnvFile(envPath, "WP_PORT", nextWpPort);
-    maybeUpdateLocalUrlPort(loaded, nextWpPort);
-    maybeUpdateRunnerOriginPort(envPath, nextWpPort);
-    changed = true;
-  }
-  const nextHttpsPort = await allocate("WP_HTTPS_PORT", current.WP_HTTPS_PORT);
-  if (nextHttpsPort !== current.WP_HTTPS_PORT) {
-    setPortInEnvFile(envPath, "WP_HTTPS_PORT", nextHttpsPort);
-    changed = true;
-  }
-
-  const nextTerminalPort = await allocate("WPDEV_TERMINAL_PORT", current.WPDEV_TERMINAL_PORT);
-  if (nextTerminalPort !== current.WPDEV_TERMINAL_PORT) {
-    setPortInEnvFile(envPath, "WPDEV_TERMINAL_PORT", nextTerminalPort);
-    changed = true;
-  }
-
-  const nextRunnerPort = await allocate(
-    "WPDEV_TERMINAL_RUNNER_PORT",
-    current.WPDEV_TERMINAL_RUNNER_PORT,
-  );
-  if (nextRunnerPort !== current.WPDEV_TERMINAL_RUNNER_PORT) {
-    setPortInEnvFile(envPath, "WPDEV_TERMINAL_RUNNER_PORT", nextRunnerPort);
-    changed = true;
-  }
-  const nextHostRunnerPort = await allocate(
-    "WPDEV_HOST_RUNNER_PORT",
-    current.WPDEV_HOST_RUNNER_PORT,
-  );
-  if (nextHostRunnerPort !== current.WPDEV_HOST_RUNNER_PORT) {
-    setPortInEnvFile(envPath, "WPDEV_HOST_RUNNER_PORT", nextHostRunnerPort);
-    changed = true;
-  }
-
-  if (changed) {
-    logInfo(
-      `Auto-adjusted published ports in ${envPath}: ` +
-        `WP_PORT=${nextWpPort}, ` +
-        `WP_HTTPS_PORT=${nextHttpsPort}, ` +
-        `WPDEV_TERMINAL_PORT=${nextTerminalPort}, ` +
-        `WPDEV_TERMINAL_RUNNER_PORT=${nextRunnerPort}, ` +
-        `WPDEV_HOST_RUNNER_PORT=${nextHostRunnerPort}`,
-    );
-    console.error(
-      `Auto-adjusted published ports to avoid conflicts: ` +
-        `WP_PORT=${nextWpPort}, https=${nextHttpsPort}, terminal=${nextTerminalPort}, runner=${nextRunnerPort}, host-runner=${nextHostRunnerPort}`,
-    );
-  }
-}
-
-function printPublishedAccessUrls(loaded: LoadedConfig, wpInstalled?: boolean): void {
-  const { site, admin, warnings } = getPublishedLocalAccess(loaded);
-  for (const w of warnings) console.error(w);
-  if (wpInstalled === false) {
-    console.error(`\n*** Start here (setup wizard): ${admin}`);
-    console.error(`Local WordPress: ${site} (opens installer after you pull or finish sync)`);
-  } else {
-    console.error(`\nLocal WordPress: ${site}`);
-    console.error(`Browser admin:   ${admin}`);
-  }
-  const openCmd = openBrowserCommand(wpInstalled === false ? admin : admin);
-  if (openCmd) {
-    console.error(`Open in browser: ${openCmd}`);
-  }
-  console.error(
-    `\nTo stop this stack and free the published port: npm run wp-dev -- down`,
-  );
-  console.error(
-    `(Each clone has its own Compose project; WP_PORT is in docker/.env.)\n`,
-  );
-}
-
-/** Best-effort copy on host; returns false when wp-content is not writable (www-data). */
 function ensureWordPressSetupAssetsOnHost(loaded: LoadedConfig): boolean {
   const wpRoot = resolveFromConfigDir(loaded.configDir, loaded.config.local.wpRoot);
   const src = join(loaded.configDir, "docker/assets/mu-plugins/wp-dev-setup.php");
@@ -280,7 +163,6 @@ function ensureWordPressSetupAssetsOnHost(loaded: LoadedConfig): boolean {
   }
 }
 
-/** Install setup mu-plugin via container when host cannot write wp-content/. */
 async function ensureWordPressSetupAssetsViaDocker(loaded: LoadedConfig): Promise<void> {
   const src = join(loaded.configDir, "docker/assets/mu-plugins/wp-dev-setup.php");
   if (!existsSync(src)) return;
@@ -321,6 +203,7 @@ async function applyRuntimeWritePermissionsWithRetry(
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
+      await reconcileContainerRuntime(loaded);
       await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
       return;
     } catch (e) {
@@ -338,186 +221,97 @@ async function applyRuntimeWritePermissionsWithRetry(
   console.error("Try: npm run wp-dev -- fix-runtime-permissions");
 }
 
-const ADMIN_SAVE_MOUNT_SHELL = [
-  "touch /wp-dev-repo/wp-dev.config.json",
-  "chmod 666 /wp-dev-repo/wp-dev.config.json",
-  "mkdir -p /wp-dev-repo/docker",
-  "touch /wp-dev-repo/docker/.env",
-  "chmod 777 /wp-dev-repo/docker",
-  "chmod 666 /wp-dev-repo/docker/.env",
-].join(" && ");
-
-function isPathWritable(path: string): boolean {
-  try {
-    accessSync(path, constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Fix www-data-owned docker/.env before host CLI writes ports or security defaults. */
 async function ensureDockerEnvWritableBeforeUp(
   loaded: LoadedConfig,
   envPath: string,
 ): Promise<void> {
-  if (isPathWritable(envPath)) return;
+  if (probeWritable(envPath)) return;
   try {
-    await compose(
-      loaded.configDir,
-      loaded.config,
-      [
-        "run",
-        "--rm",
-        "--no-deps",
-        "-u",
-        "0",
-        "wordpress",
-        "sh",
-        "-lc",
-        [
-          "mkdir -p /wp-dev-repo/docker",
-          "touch /wp-dev-repo/docker/.env",
-          "chmod 777 /wp-dev-repo/docker",
-          "chmod 666 /wp-dev-repo/docker/.env",
-        ].join(" && "),
-      ],
-      { stdio: "pipe" },
-    );
-    logInfo("up: restored writable docker/.env (was www-data-owned)");
+    await reconcileSharedConfig(loaded);
+    logInfo("up: restored writable docker/.env via filesystem manager");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
-      `docker/.env is not writable (${msg}). Fix with:\n` +
-        `  docker compose -f docker/docker-compose.yml run --rm --no-deps -u 0 wordpress sh -lc "chmod 666 /wp-dev-repo/docker/.env"\n` +
-        `  or: sudo chown $(id -un):$(id -gn) docker/.env`,
+      `docker/.env is not writable (${msg}). Run: npm run wp-dev -- doctor --filesystem`,
     );
   }
-  if (!isPathWritable(envPath)) {
+  if (!probeWritable(envPath)) {
     throw new Error(
-      "docker/.env is still not writable after permission fix. Run:\n" +
-        "  chmod u+rw docker/.env\n" +
-        "  or: sudo chown $(id -un):$(id -gn) docker/.env",
+      "docker/.env is still not writable after filesystem recovery. Run: npm run wp-dev -- doctor --filesystem",
     );
   }
 }
 
 async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
   try {
-    await compose(
-      loaded.configDir,
-      loaded.config,
-      ["exec", "-T", "-u", "0", "wordpress", "sh", "-lc", ADMIN_SAVE_MOUNT_SHELL],
-      { stdio: "pipe" },
-    );
-    logInfo("admin save: ensured config and docker/.env mounts are writable");
+    await reconcileSharedConfig(loaded);
+    logInfo("admin save: ensured shared config paths are writable");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    logInfo(`admin save: could not enforce writable mounts (${msg})`);
+    logInfo(`admin save: could not enforce shared config permissions (${msg})`);
     console.error(
-      "Warning: could not auto-fix admin save permissions. If save fails, run:\n" +
-        "  chmod u+rw wp-dev.config.json\n" +
-        "  chmod o+w docker docker/.env\n",
+      "Warning: could not auto-fix admin save permissions. Run: npm run wp-dev -- doctor --filesystem",
     );
   }
 }
 
-export async function cmdUp(loaded: LoadedConfig): Promise<void> {
+export async function cmdUp(loaded: LoadedConfig, options: UpOptions = {}): Promise<void> {
   assertDockerReady();
+  await recoverStaleState(loaded);
+  await autoReconcileOnStartup(loaded);
+
+  if (isSupervisorAlreadyRunning(loaded)) {
+    console.error(formatDuplicateInstanceMessage(loaded));
+    console.error("Stack may already be running. Showing status URLs:");
+    printStartupSummary(loaded);
+    return;
+  }
+
   const muPluginOnHost = ensureWordPressSetupAssetsOnHost(loaded);
   const envPath = ensureComposeEnvExists(loaded);
-  await ensureDockerEnvWritableBeforeUp(loaded, envPath);
-  const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-  const sslEnabled = /^(1|true|yes)$/i.test(readEnvValue(envContent, "WPDEV_LOCAL_HTTPS"));
-  await ensureNonConflictingPublishedPorts(loaded, envPath);
-  ensureSecurityEnvDefaults(envPath);
-  warnIfSecurityEnvPlaceholders(envPath);
+
+  const registry = createInitialRegistry(loaded, process.pid, resolveSupervisorPort(loaded));
+  saveRegistry(loaded.configDir, registry);
+
+  const sslEnabled = /^(1|true|yes)$/i.test(
+    readEnvValue(existsSync(envPath) ? readFileSync(envPath, "utf8") : "", "WPDEV_LOCAL_HTTPS"),
+  );
+
+  const { wpInstalled } = await runStartupStateMachine(
+    loaded,
+    envPath,
+    registry,
+    {
+      strictPorts: options.strictPorts !== false && !options.relocatePorts,
+      relocatePorts: options.relocatePorts,
+      reclaimPorts: options.reclaimPorts,
+      sslEnabled,
+    },
+    {
+      ensureSecurityEnv: () => {
+        ensureSecurityEnvDefaults(loaded, envPath);
+        warnIfSecurityEnvPlaceholders(envPath);
+      },
+      ensureDockerEnvWritable: () => ensureDockerEnvWritableBeforeUp(loaded, envPath),
+      ensureComposeEnv: () => {
+        void ensureComposeEnvExists(loaded);
+      },
+      postStack: async () => {
+        await ensureAdminSaveWriteAccess(loaded);
+        await applyRuntimeWritePermissionsWithRetry(loaded);
+        if (!muPluginOnHost) {
+          await ensureWordPressSetupAssetsViaDocker(loaded);
+        }
+      },
+    },
+  );
+
   try {
-    logInfo(`docker compose ${sslEnabled ? "--profile ssl " : ""}up -d`);
-    await compose(
-      loaded.configDir,
-      loaded.config,
-      sslEnabled ? ["--profile", "ssl", "up", "-d"] : ["up", "-d"],
-      { stdio: "pipe" },
-    );
+    await ensureSupervisorRunning(loaded);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const conflictPort = extractBoundPort(msg);
-    if (!conflictPort) throw e;
-
-    const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-    const ports = parseDockerEnvPorts(envContent);
-    const key = resolveConflictPortKey(conflictPort, ports);
-    const nextPort = await findFreePort(
-      conflictPort + 1,
-      await getComposePublishedHostPorts(loaded.configDir, loaded.config),
-    );
-    setPortInEnvFile(envPath, key, nextPort);
-    if (key === "WP_PORT") {
-      maybeUpdateLocalUrlPort(loaded, nextPort);
-      maybeUpdateRunnerOriginPort(envPath, nextPort);
-    }
-    ensureSecurityEnvDefaults(envPath);
-
-    logInfo(`Port ${conflictPort} is in use. Updated ${envPath} ${key}=${nextPort} and retrying.`);
-    console.error(`Port ${conflictPort} is in use. Switched ${key} to ${nextPort} and retrying...`);
-
-    await ensureNonConflictingPublishedPorts(loaded, envPath);
-    await compose(
-      loaded.configDir,
-      loaded.config,
-      sslEnabled ? ["--profile", "ssl", "up", "-d"] : ["up", "-d"],
-      { stdio: "pipe" },
-    );
+    logInfo(`up: supervisor watch daemon skipped (${msg})`);
   }
 
-  await ensureAdminSaveWriteAccess(loaded);
-  stopHostRunner(loaded.configDir);
-  startHostRunner(loaded.configDir, envPath);
-  try {
-    await waitForLocalMysqlReady(loaded.configDir, loaded.config);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logInfo(`up: mysql readiness wait skipped (${msg})`);
-  }
-  await applyRuntimeWritePermissionsWithRetry(loaded);
-  if (!muPluginOnHost) {
-    await ensureWordPressSetupAssetsViaDocker(loaded);
-  }
-  let wpInstalled: boolean | undefined;
-  try {
-    wpInstalled = await isLocalWpInstalled(loaded.configDir, loaded.config);
-  } catch {
-    wpInstalled = undefined;
-  }
-  try {
-    const sync = await syncLocalWordPressUrls(loaded);
-    if (sync.synced) {
-      const parts: string[] = [];
-      if (sync.replacedFrom && sync.replacedFrom.length > 0) {
-        parts.push(`options: ${sync.replacedFrom.join(", ")}`);
-      }
-      if ((sync.contentReplacements ?? 0) > 0) {
-        parts.push(`${sync.contentReplacements} content URL replacement(s)`);
-      }
-      const detail = parts.length > 0 ? ` (${parts.join("; ")})` : "";
-      console.error(
-        `Synced WordPress URLs to ${sync.expectedUrl}${detail}. ` +
-          `Previous: home=${sync.previousHome ?? "?"} siteurl=${sync.previousSiteurl ?? "?"}`,
-      );
-    } else if (!sync.skipped && !sync.urlsOk) {
-      console.error(
-        `Warning: WordPress URLs may still differ from ${sync.expectedUrl}. ` +
-          `home=${sync.previousHome ?? "?"} siteurl=${sync.previousSiteurl ?? "?"}. ` +
-          `Try: npm run wp-dev -- doctor --local-http`,
-      );
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logInfo(`up: could not sync WordPress URLs (${msg})`);
-    console.error(
-      `Warning: could not sync WordPress home/siteurl to the published local URL (${msg}).`,
-    );
-  }
-  printPublishedAccessUrls(loaded, wpInstalled);
+  printStartupSummary(loaded, wpInstalled);
 }

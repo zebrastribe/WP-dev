@@ -7,8 +7,8 @@ declare(strict_types=1);
 
 /** Fixed listen port inside the terminal container (see docker-compose.yml). */
 const WPDEV_TERMINAL_RUNNER_CONTAINER_PORT = 7682;
+const WPDEV_SYNC_RUNNER_CONTAINER_PORT = 7683;
 const WPDEV_TERMINAL_RUNNER_DOCKER_HOST = 'terminal';
-const WPDEV_HOST_RUNNER_DOCKER_HOST = 'host.docker.internal';
 
 /**
  * @return array{base: string, auth: string, token: string, origin: string}|null
@@ -27,9 +27,7 @@ function wpdev_runner_upstream(string $kind, string $dockerEnvPath): ?array
     }
 
     if ($kind === 'sync') {
-        $portRaw = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_HOST_RUNNER_PORT');
-        $port = is_string($portRaw) && ctype_digit($portRaw) ? (int) $portRaw : 7683;
-        $base = 'http://' . WPDEV_HOST_RUNNER_DOCKER_HOST . ':' . $port;
+        $base = 'http://' . WPDEV_TERMINAL_RUNNER_DOCKER_HOST . ':' . WPDEV_SYNC_RUNNER_CONTAINER_PORT;
     } else {
         $base = 'http://' . WPDEV_TERMINAL_RUNNER_DOCKER_HOST . ':' . WPDEV_TERMINAL_RUNNER_CONTAINER_PORT;
     }

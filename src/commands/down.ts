@@ -1,34 +1,48 @@
 import type { LoadedConfig } from "../config/load.js";
-import { compose } from "../services/docker-compose.js";
-import { assertDockerReady } from "../utils/docker-prereq.js";
 import {
   dockerComposeEnvPath,
   readWpPortFromDockerEnvFile,
 } from "../utils/published-local-urls.js";
 import { logInfo } from "../utils/logger.js";
-import { stopHostRunner } from "../services/host-runner.js";
+import {
+  getRunningSupervisorInfo,
+  requestSupervisorShutdown,
+} from "../supervisor/client.js";
+import { runShutdownStateMachine } from "../supervisor/shutdown.js";
 
 export type DownOptions = {
   removeOrphans?: boolean;
 };
 
 export async function cmdDown(loaded: LoadedConfig, options: DownOptions = {}): Promise<void> {
-  assertDockerReady();
-  stopHostRunner(loaded.configDir);
   const envPath = dockerComposeEnvPath(loaded);
   const wpPort = readWpPortFromDockerEnvFile(envPath);
-  const args = ["down", ...(options.removeOrphans ? ["--remove-orphans"] : [])];
-  logInfo(`docker compose ${args.join(" ")}`);
-  await compose(loaded.configDir, loaded.config, args);
+  const supervisor = getRunningSupervisorInfo(loaded.configDir);
+
+  if (supervisor) {
+    logInfo("down: requesting supervisor shutdown");
+    const ok = await requestSupervisorShutdown(supervisor.port, options.removeOrphans);
+    if (ok) {
+      console.error("\nSupervisor shut down the local stack.");
+      if (wpPort != null) {
+        console.error(`Published host port ${wpPort} (WP_PORT) should now be free.`);
+      }
+      return;
+    }
+    logInfo("down: supervisor HTTP shutdown failed; running inline shutdown");
+  }
+
+  await runShutdownStateMachine(loaded, options);
+
   const portLine =
     wpPort != null
       ? `Published host port ${wpPort} (WP_PORT in docker/.env) should now be free on this machine.`
-      : "The stack’s published port (WP_PORT in docker/.env) should now be free.";
+      : "The stack's published port (WP_PORT in docker/.env) should now be free.";
   console.error(`\n${portLine}`);
   if (options.removeOrphans) {
     console.error("Removed orphan containers for this Compose project.");
   }
   console.error(
-    "If something still listens on that port, another process or clone is using it — check with ss or lsof, or run down in other WP-dev clones.\n",
+    "Service registry: logs/service-registry.json (shutdown complete).\n",
   );
 }
