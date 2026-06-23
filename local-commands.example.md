@@ -1,5 +1,7 @@
 # Common Commands
 
+Full documentation: [docs/README.md](docs/README.md) · [Command reference](docs/reference/commands.md)
+
 ## macOS first run
 
 ```bash
