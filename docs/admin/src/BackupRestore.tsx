@@ -6,7 +6,7 @@ type EnvName = "local" | "staging" | "production";
 type BackupKind = "db" | "full";
 
 export function BackupRestore() {
-  const { terminalAuth, runnerToken, runnerReady, runnerMessage, canRun } = useRunnerSecrets();
+  const { runnerReady, runnerMessage, canRun } = useRunnerSecrets();
   const [env, setEnv] = useState<EnvName>("local");
   const [backupKind, setBackupKind] = useState<BackupKind>("full");
   const [restoreFile, setRestoreFile] = useState("");

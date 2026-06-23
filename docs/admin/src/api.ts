@@ -136,7 +136,10 @@ export function apiPhpUrl(
     | "logout"
     | "runner-health"
     | "runner-run"
-    | "runner-status",
+    | "runner-status"
+    | "runner-cancel"
+    | "services"
+    | "filesystem-health",
 ): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return `${origin}/admin/api.php?action=${action}`;
@@ -715,24 +718,6 @@ export function buildTerminalEmbedUrl(terminalPort: number, terminalAuth?: strin
 
 export function terminalIframeBlockedByHttpsAdmin(): boolean {
   return typeof window !== "undefined" && window.location.protocol === "https:";
-}
-
-function terminalRunnerBaseUrl(kind: "terminal" | "sync" = "terminal"): string {
-  const port = kind === "sync" ? syncRunnerPort : terminalRunnerPort;
-  return `http://127.0.0.1:${port}`;
-}
-
-function basicAuthHeader(auth: string): string {
-  return `Basic ${btoa(auth)}`;
-}
-
-function runnerSecurityHeaders(auth: string, token: string): Record<string, string> {
-  const trimmed = token.trim();
-  if (!trimmed) return {};
-  return {
-    Authorization: basicAuthHeader(auth),
-    "X-WP-DEV-Terminal-Token": trimmed,
-  };
 }
 
 export type TerminalAction =

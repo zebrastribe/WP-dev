@@ -6,7 +6,7 @@ type EnvName = "local" | "staging" | "production";
 type BackupKind = "full" | "db";
 
 export function HistoryRollback() {
-  const { terminalAuth, runnerToken, runnerReady, runnerMessage, canRun } = useRunnerSecrets();
+  const { runnerReady, runnerMessage, canRun } = useRunnerSecrets();
   const [env, setEnv] = useState<EnvName>("staging");
   const [kind, setKind] = useState<BackupKind>("full");
   const [selectedBackup, setSelectedBackup] = useState("");
