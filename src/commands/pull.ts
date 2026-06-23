@@ -19,7 +19,13 @@ import {
 } from "../services/wpcli.js";
 import { logInfo } from "../utils/logger.js";
 import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
-import { cmdFixPermissions, cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
+import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
+import {
+  reconcileContainerRuntime,
+  reconcileHostEditable,
+  reconcileSharedConfig,
+} from "../fs/index.js";
+import { registerTempDir, unregisterTempDir } from "../fs/temp-registry.js";
 import { cmdSimplySetupStagingDns } from "./simply.js";
 import { getSimplyApiKey } from "../services/simply.js";
 import { isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
@@ -90,6 +96,7 @@ export async function cmdPull(
     await wpRemoteDbExport(ssh, remote.path, remoteDump);
 
     const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-pull-"));
+    const tempId = registerTempDir(loaded, tmpDir, `pull-${env}`);
     const localDump = join(tmpDir, "dump.sql");
     try {
       await ssh.getFile(remoteDump, localDump);
@@ -97,11 +104,11 @@ export async function cmdPull(
 
       logInfo(`pull ${env}: rsync files -> ${localWpRoot}`);
       try {
-        await cmdFixPermissions(loaded, { quiet: true });
+        await reconcileHostEditable(loaded);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         throw new Error(
-          `pull ${env}: fix-permissions failed (${msg}). Run: npm run wp-dev -- fix-permissions — then retry pull.`,
+          `pull ${env}: filesystem reconcile failed (${msg}). Run: npm run wp-dev -- doctor --filesystem`,
         );
       }
       try {
@@ -160,6 +167,8 @@ export async function cmdPull(
       }
       try {
         logInfo(`pull ${env}: restore runtime write permissions for wp-content`);
+        await reconcileContainerRuntime(loaded);
+        await reconcileSharedConfig(loaded);
         await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -169,6 +178,7 @@ export async function cmdPull(
         );
       }
     } finally {
+      unregisterTempDir(loaded.configDir, tempId);
       rmSync(tmpDir, { recursive: true, force: true });
     }
   } finally {

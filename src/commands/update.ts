@@ -9,6 +9,7 @@ import {
   collectUpdatePreflight,
   formatUpdatePreflight,
 } from "../services/update-preflight.js";
+import { acquireUpdateLock, releaseUpdateLock } from "../fs/update-lock.js";
 
 export const UPDATE_WORDPRESS_SAFETY =
   "This updates the wp-dev tool only. Your wordpress/ site (themes, plugins, uploads, database) is not replaced.";
@@ -66,7 +67,7 @@ async function runShellStep(configDir: string, shell: string): Promise<void> {
 
 export async function cmdUpdate(loaded: LoadedConfig, options: UpdateOptions = {}): Promise<void> {
   const { configDir } = loaded;
-  const preflight = await collectUpdatePreflight(configDir);
+  const preflight = await collectUpdatePreflight(configDir, loaded);
 
   if (options.preflightOnly && options.json) {
     console.log(JSON.stringify({ preflight, wordpressSafe: true }, null, 2));
@@ -106,6 +107,13 @@ export async function cmdUpdate(loaded: LoadedConfig, options: UpdateOptions = {
     assertGitRepository(configDir);
   }
 
+  if (!options.dryRun && !options.preflightOnly) {
+    if (!acquireUpdateLock(configDir)) {
+      throw new Error("Another wp-dev update is in progress (logs/wp-dev-update.lock).");
+    }
+  }
+
+  try {
   for (const step of steps) {
     logInfo(`update: ${step.label}`);
     console.error(`→ ${step.label}`);
@@ -120,4 +128,9 @@ export async function cmdUpdate(loaded: LoadedConfig, options: UpdateOptions = {
   }
 
   console.error("\nwp-dev update finished successfully.\n");
+  } finally {
+    if (!options.dryRun && !options.preflightOnly) {
+      releaseUpdateLock(configDir);
+    }
+  }
 }

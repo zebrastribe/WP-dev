@@ -1,11 +1,11 @@
 import {
   readFileSync,
-  writeFileSync,
   copyFileSync,
   existsSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { wpDevConfigSchema, type WpDevConfig } from "./schema.js";
+import { writeFileAtomic } from "../fs/atomic-write.js";
 
 const CONFIG_NAMES = ["wp-dev.config.json"];
 const EXAMPLE_NAME = "wp-dev.config.example.json";
@@ -78,7 +78,12 @@ export function ensureWpDevConfigJson(cwd = process.cwd()): string {
 export function writeWpDevConfig(configDir: string, config: WpDevConfig): void {
   const path = join(configDir, "wp-dev.config.json");
   const validated = wpDevConfigSchema.parse(config);
-  writeFileSync(path, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
+  writeFileAtomic(path, `${JSON.stringify(validated, null, 2)}\n`, {
+    configDir,
+    projectId: validated.project,
+    backup: true,
+    mode: 0o664,
+  });
 }
 
 /** Resolve a path from the config file directory */
