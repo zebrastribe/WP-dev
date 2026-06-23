@@ -4,7 +4,6 @@ import {
   existsSync,
   readFileSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
@@ -18,6 +17,7 @@ import {
   getDockerComposeLeadArgs,
 } from "./docker-compose.js";
 import { resolveFromConfigDir } from "../config/load.js";
+import { persistEnvContent, setEnvValueInContent, writeEnvFile } from "../utils/compose-env.js";
 
 const CONTAINER_WP_PATH = "/var/www/html";
 
@@ -340,17 +340,9 @@ export async function wpRemoteBootstrapConfigFromRemoteDb(
 }
 
 function upsertDotenvKey(envPath: string, key: string, value: string): void {
-  const line = `${key}=${value}`;
   const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`^${escapedKey}=.*$`, "m");
-  if (re.test(current)) {
-    const next = current.replace(re, line);
-    writeFileSync(envPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
-    return;
-  }
-  const prefix = current.trim().length > 0 ? `${current.replace(/\s*$/, "")}\n` : "";
-  writeFileSync(envPath, `${prefix}${line}\n`, "utf8");
+  const next = setEnvValueInContent(current, key, value);
+  persistEnvContent(envPath, next);
 }
 
 function ensureComposeDotenv(configDir: string, config: WpDevConfig): string {
@@ -362,7 +354,7 @@ function ensureComposeDotenv(configDir: string, config: WpDevConfig): string {
     copyFileSync(example, envPath);
     return envPath;
   }
-  writeFileSync(envPath, "WP_PORT=8888\n", "utf8");
+  writeEnvFile(envPath, "WP_PORT=8888\n");
   return envPath;
 }
 
