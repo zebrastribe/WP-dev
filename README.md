@@ -303,12 +303,14 @@ npm run wp-dev -- up
 | **`npm run quickstart`** | setup + **`wp-dev quickstart`** — best first run on **macOS** |
 | **`wp-dev quickstart`** | Start stack, print wizard steps, run **`status`** |
 | **`wp-dev init`** | Interactive **`wp-dev.config.json`** |
-| **`wp-dev up`** / **`down`** | Local stack; **`down`** frees **`WP_PORT`** for this clone. Optional **`down --remove-orphans`** cleans leftover containers. After **`up`**, the CLI prints **browser URLs** using **`docker/.env` `WP_PORT`** when it differs from **`local.url`**. |
+| **`wp-dev up`** / **`down`** | Local stack via service manager startup/shutdown state machines; **`up --relocate-ports`** / **`--reclaim-ports`** for port conflicts; **`down`** frees **`WP_PORT`** for this clone. Optional **`down --remove-orphans`**. After **`up`**, prints browser URLs from **`docker/.env` `WP_PORT`**. |
+| **`wp-dev services`** | Show service registry, reserved ports, and supervisor health |
+| **`wp-dev supervisor status`** | Inspect project lock, lifecycle registry, and managed services |
 | **`wp-dev fix-permissions`** | Fix **`wordpress/`** ownership for rsync (host vs `www-data`); restores **www-data** on runtime paths |
 | **`wp-dev fix-runtime-permissions`** | Re-apply **www-data** on **`wp-content/upgrade`**, **`upgrade-temp-backup`**, **`plugins`**, **`uploads`**, **`cache`** (after theme dev or manual chown) |
 | **`wp-dev status`** | Local stack health, WP install state, URL check, recent backups |
 | **`wp-dev validate`** | Config + Docker prereqs; **`--remote staging|production`** for SSH/WP check |
-| **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`**, **`--http`**, **`--local-http`** (detect stale localhost port redirects) |
+| **`wp-dev doctor`** | Optional **`staging`** or **`production`** (default: both). SSH + **`wp core is-installed`**; **`--rsync`**, **`--http`**, **`--local-http`**, **`--lifecycle`** (supervisor lock/registry), **`--filesystem`** (ownership profiles and writable paths) |
 | **`wp-dev pull`** / **`push`** | Sync with pre-backup, URL verify, DB rollback on failure; **`push staging`** requires typing SSH host — use **`push theme`** for theme-only deploys |
 | **`wp-dev push theme`** / **`pull theme`** | Sync **theme files only** (no database, no uploads). **`--build`** compiles before push |
 | **`wp-dev theme build`** | Run **`npm run production`** in the configured theme source tree |
