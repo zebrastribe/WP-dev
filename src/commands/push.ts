@@ -25,16 +25,13 @@ import { getUrlVariants } from "../utils/url-variants.js";
 import { verifyRemoteSiteUrls } from "../utils/sync-verify.js";
 import { pushExcludePatterns } from "../services/sync-excludes.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
+import { posixShellQuote, remoteRmFile } from "../utils/shell-quote.js";
 
 export type PushOptions = {
   dryRun: boolean;
   /** Skip interactive SSH-host / production confirmation (browser runner, CI). */
   yes?: boolean;
 };
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 /** wp-dev admin must never remain on staging/production (local dev tool only). */
 async function purgeRemoteWpDevAdmin(
@@ -43,7 +40,7 @@ async function purgeRemoteWpDevAdmin(
 ): Promise<void> {
   const adminDir = `${remoteWpPath.replace(/\/$/, "")}/admin`;
   logInfo(`push: remove remote wp-dev admin at ${adminDir}`);
-  await ssh.exec(`rm -rf ${shellQuote(adminDir)}`);
+  await ssh.exec(`rm -rf ${posixShellQuote(adminDir)}`);
 }
 
 async function sanitizeRemoteGeneratedAssetUrls(
@@ -53,9 +50,9 @@ async function sanitizeRemoteGeneratedAssetUrls(
   toUrl: string,
 ): Promise<void> {
   const cmd = [
-    `ROOT_PATH=${shellQuote(wpPath)}`,
-    `FROM_URL=${shellQuote(fromUrl)}`,
-    `TO_URL=${shellQuote(toUrl)}`,
+    `ROOT_PATH=${posixShellQuote(wpPath)}`,
+    `FROM_URL=${posixShellQuote(fromUrl)}`,
+    `TO_URL=${posixShellQuote(toUrl)}`,
     "changed=0",
     "for d in \"$ROOT_PATH/wp-content/uploads/elementor/css\" \"$ROOT_PATH/wp-content/cache\"; do [ -d \"$d\" ] || continue; while IFS= read -r -d '' f; do if grep -q \"$FROM_URL\" \"$f\"; then sed -i \"s|$FROM_URL|$TO_URL|g\" \"$f\" && changed=$((changed+1)); fi; done < <(find \"$d\" -type f \\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.txt' -o -name '*.html' -o -name '*.xml' -o -name '*.map' \\) -print0); done",
     "echo \"asset-url-sanitize changed_files=$changed\"",
@@ -173,7 +170,7 @@ export async function cmdPush(
       logInfo(`push ${env}: remote pre-push db backup -> ${prePushBackup}`);
       await wpRemoteDbExport(ssh, wpPath, remotePreDump);
       await ssh.getFile(remotePreDump, prePushBackup);
-      await ssh.exec(`rm -f ${remotePreDump}`);
+      await ssh.exec(remoteRmFile(remotePreDump));
     } else {
       logInfo(`push ${env}: bootstrap mode — skipping pre-push remote DB backup`);
     }
@@ -194,7 +191,7 @@ export async function cmdPush(
         await wpLocalDbExportToFile(configDir, config, localDump);
         await ssh.putFile(localDump, remoteImport);
         await wpRemoteDbImport(ssh, wpPath, remoteImport);
-        await ssh.exec(`rm -f ${remoteImport}`);
+        await ssh.exec(remoteRmFile(remoteImport));
         const localCandidates = getUrlVariants(config.local.url).filter(
           (candidate) => candidate !== remote.url,
         );
@@ -228,7 +225,7 @@ export async function cmdPush(
         logInfo(`push ${env}: force option home/siteurl -> ${remote.url}`);
         await wpRemoteForceSiteUrls(ssh, wpPath, remote.url);
         await ssh.exec(
-          `cd ${shellQuote(wpPath)} && wp cache flush --allow-root || true && wp elementor flush_css --allow-root || true`,
+          `cd ${posixShellQuote(wpPath)} && wp cache flush --allow-root || true && wp elementor flush_css --allow-root || true`,
         );
         const urlCheck = await verifyRemoteSiteUrls(ssh, wpPath, remote.url);
         if (!urlCheck.ok) {
@@ -246,7 +243,7 @@ export async function cmdPush(
           const remoteRollback = `/tmp/wp-dev-push-rollback-${Date.now()}.sql`;
           await ssh.putFile(prePushBackup, remoteRollback);
           await wpRemoteDbImport(ssh, wpPath, remoteRollback);
-          await ssh.exec(`rm -f ${remoteRollback}`);
+          await ssh.exec(remoteRmFile(remoteRollback));
           console.error(
             `Rolled back remote DB from pre-push backup: ${prePushBackup}\n` +
               "Remote files may still differ — re-run push or restore from a full backup.",

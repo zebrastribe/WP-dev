@@ -10,6 +10,7 @@ import {
   isPlaceholderRemoteHost,
   isStagingRemotePlaceholder,
 } from "../../utils/remote-placeholder.js";
+import { posixShellQuote } from "../../utils/shell-quote.js";
 
 export async function cmdImportPush(
   loaded: LoadedConfig,
@@ -74,7 +75,7 @@ export async function cmdImportPush(
   if (!dryRun) {
     const ssh = await connectSsh(remote);
     try {
-      const mkdir = await ssh.exec(`mkdir -p ${shellQuote(remoteStorage)}`);
+      const mkdir = await ssh.exec(`mkdir -p ${posixShellQuote(remoteStorage)}`);
       if (mkdir.code !== 0) {
         throw new Error(
           `Failed to create remote storage directory ${remoteStorage}: ${mkdir.stderr || mkdir.stdout}`,
@@ -87,8 +88,4 @@ export async function cmdImportPush(
 
   console.log(`[wp-dev] import push ${env}: storage → ${remoteStorage}/`);
   await rsyncPushToPath(remote, storageDir, remoteStorage, { dryRun });
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
 }

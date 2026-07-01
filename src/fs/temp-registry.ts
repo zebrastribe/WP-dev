@@ -65,7 +65,8 @@ export function sweepTempRegistry(
   const kept: TempRegistryEntry[] = [];
 
   for (const entry of reg.entries) {
-    const age = now - Date.parse(entry.createdAt);
+    const created = Date.parse(entry.createdAt);
+    const age = Number.isFinite(created) ? now - created : Number.POSITIVE_INFINITY;
     const exists = existsSync(entry.path);
     if (!exists || age > ttlMs) {
       if (exists) {

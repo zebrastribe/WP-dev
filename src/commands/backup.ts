@@ -14,6 +14,7 @@ import {
   wpRemoteDbExport,
 } from "../services/wpcli.js";
 import { logInfo } from "../utils/logger.js";
+import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
 
 export type BackupTarget = RemoteEnvName | "local";
 
@@ -21,10 +22,6 @@ export type BackupOptions = {
   /** When true, backup wp-content + DB as a .tar.gz. */
   files?: boolean;
 };
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 export function listRecentBackups(
   project: string,
@@ -72,7 +69,7 @@ export async function cmdBackup(
     const remoteDump = `/tmp/wp-dev-backup-${Date.now()}.sql`;
     await wpRemoteDbExport(ssh, remote.path, remoteDump);
     await ssh.getFile(remoteDump, outPath);
-    await ssh.exec(`rm -f ${remoteDump}`);
+    await ssh.exec(remoteRmFile(remoteDump));
   } finally {
     ssh.dispose();
   }
@@ -118,7 +115,7 @@ async function cmdBackupFull(
   const stamp = Date.now();
   const remoteDir = `/tmp/wp-dev-full-${env}-${stamp}`;
   const remoteTar = `${remoteDir}/full.tar.gz`;
-  const wpPath = shellQuote(remote.path);
+  const wpPath = posixShellQuote(remote.path);
   try {
     await assertRemoteWpInstalled(ssh, remote.path);
     await ssh.exec(
@@ -131,7 +128,7 @@ async function cmdBackupFull(
       ].join("; "),
     );
     await ssh.getFile(remoteTar, outPath);
-    await ssh.exec(`rm -rf ${remoteDir}`);
+    await ssh.exec(remoteRmRf(remoteDir));
   } finally {
     ssh.dispose();
   }
