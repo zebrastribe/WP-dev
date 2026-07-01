@@ -13,6 +13,7 @@ import {
 } from "../services/wpcli.js";
 import { confirmRemoteTarget } from "../utils/confirm.js";
 import { logInfo } from "../utils/logger.js";
+import { remoteRmFile } from "../utils/shell-quote.js";
 
 export type RestoreTarget = RemoteEnvName | "local";
 
@@ -69,11 +70,11 @@ export async function cmdRestore(
     const remotePreDump = `/tmp/wp-dev-pre-restore-${Date.now()}.sql`;
     await wpRemoteDbExport(ssh, remote.path, remotePreDump);
     await ssh.getFile(remotePreDump, preRestoreLocal);
-    await ssh.exec(`rm -f ${remotePreDump}`);
+    await ssh.exec(remoteRmFile(remotePreDump));
 
     await ssh.putFile(resolvedFile, remoteImport);
     await wpRemoteDbImport(ssh, remote.path, remoteImport);
-    await ssh.exec(`rm -f ${remoteImport}`);
+    await ssh.exec(remoteRmFile(remoteImport));
   } finally {
     ssh.dispose();
   }

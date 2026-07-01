@@ -18,6 +18,8 @@ import {
   wpRemoteDbExport,
 } from "../services/wpcli.js";
 import { logInfo } from "../utils/logger.js";
+import { assertValidSqlDump } from "../utils/sql-dump-validate.js";
+import { remoteRmFile } from "../utils/shell-quote.js";
 import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
 import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
 import {
@@ -100,7 +102,7 @@ export async function cmdPull(
     const localDump = join(tmpDir, "dump.sql");
     try {
       await ssh.getFile(remoteDump, localDump);
-      await ssh.exec(`rm -f ${remoteDump.replace(/'/g, `'\\''`)}`);
+      await ssh.exec(remoteRmFile(remoteDump));
 
       logInfo(`pull ${env}: rsync files -> ${localWpRoot}`);
       try {
@@ -118,9 +120,7 @@ export async function cmdPull(
         });
 
         const sql = readFileSync(localDump, "utf8");
-        if (!/CREATE TABLE|INSERT INTO/i.test(sql)) {
-          throw new Error("Downloaded SQL dump looks empty or invalid.");
-        }
+        assertValidSqlDump(sql, "Downloaded SQL dump");
         const tablePrefix = detectTablePrefixFromSqlDump(sql);
 
         logInfo(`pull ${env}: local wp db import`);

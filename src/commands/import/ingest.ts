@@ -3,6 +3,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { LoadedConfig } from "../../config/load.js";
 import { dockerComposeProjectId } from "../../services/docker-compose.js";
+import { commandExists } from "../../utils/command-exists.js";
+import { pickChildEnv } from "../../utils/child-env.js";
 
 export async function cmdImportIngest(loaded: LoadedConfig): Promise<void> {
   const apiDir = join(loaded.configDir, "content-recovery-workspace", "api");
@@ -11,16 +13,14 @@ export async function cmdImportIngest(loaded: LoadedConfig): Promise<void> {
     loaded.config.importWorkspace?.knowledgeBasePath ??
     join(loaded.configDir, "..", "knowledge-base");
 
-  const env = {
-    ...process.env,
+  const env = pickChildEnv({
     WPDEV_PROJECT: loaded.config.project,
     WPDEV_KNOWLEDGE_BASE: kbPath,
-  };
+  });
 
   if (existsSync("/.dockerenv") || (await commandExists("php"))) {
-    const php = existsSync("/.dockerenv") ? "php" : "php";
     if (await commandExists("php")) {
-      const { stdout } = await execa(php, [script], { cwd: apiDir, env, reject: true });
+      const { stdout } = await execa("php", [script], { cwd: apiDir, env, reject: true });
       process.stdout.write(stdout);
       return;
     }
@@ -47,13 +47,4 @@ export async function cmdImportIngest(loaded: LoadedConfig): Promise<void> {
     { cwd: join(loaded.configDir, loaded.config.local.path), env, reject: true },
   );
   process.stdout.write(stdout);
-}
-
-async function commandExists(cmd: string): Promise<boolean> {
-  try {
-    await execa("which", [cmd]);
-    return true;
-  } catch {
-    return false;
-  }
 }

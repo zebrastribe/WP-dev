@@ -6,6 +6,7 @@ import { execSync } from "node:child_process";
 import { platform } from "node:os";
 
 const isMac = platform() === "darwin";
+const isWin = platform() === "win32";
 
 function run(label, cmd) {
   try {
@@ -25,7 +26,13 @@ function macHint(title, lines) {
   for (const line of lines) console.error(`  ${line}`);
 }
 
-console.error(`wp-dev: checking prerequisites (${isMac ? "macOS" : platform()})…`);
+console.error(`wp-dev: checking prerequisites (${isMac ? "macOS" : isWin ? "Windows" : platform()})…`);
+
+if (isWin) {
+  console.error(
+    "wp-dev: native Windows is not supported. Use WSL2 (Ubuntu) and run wp-dev inside Linux.\n",
+  );
+}
 
 let ok = true;
 if (!run("Docker CLI / daemon", "docker version")) {

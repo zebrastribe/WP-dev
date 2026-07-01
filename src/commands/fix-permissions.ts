@@ -3,6 +3,7 @@ import type { LoadedConfig } from "../config/load.js";
 import { compose } from "../services/docker-compose.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
 import { logInfo } from "../utils/logger.js";
+import { posixShellQuote } from "../utils/shell-quote.js";
 
 export type FixPermissionsOptions = {
   /**
@@ -33,10 +34,6 @@ export const RUNTIME_WRITE_PATHS = [
   "wp-content/mu-plugins",
 ] as const;
 
-function shellQuote(path: string): string {
-  return `'${path.replace(/'/g, `'\\''`)}'`;
-}
-
 /** Shell script run inside the wordpress container (root) to fix runtime write ownership. */
 export function buildRuntimeWritePermissionsShell(
   htmlRoot = "/var/www/html",
@@ -47,12 +44,12 @@ export function buildRuntimeWritePermissionsShell(
     `${htmlRoot}/wp-content/themes`,
   ];
   const mkdirCmd = mkdirTargets
-    .map((p) => `mkdir -p ${shellQuote(p)}`)
+    .map((p) => `mkdir -p ${posixShellQuote(p)}`)
     .join(" && ");
   const chownCmd = runtimeAbs
     .map(
       (p) =>
-        `chown -R ${WWW_DATA_UID}:${WWW_DATA_GID} ${shellQuote(p)} && find ${shellQuote(p)} -type d -exec chmod 775 {} + && find ${shellQuote(p)} -type f -exec chmod 664 {} +`,
+        `chown -R ${WWW_DATA_UID}:${WWW_DATA_GID} ${posixShellQuote(p)} && find ${posixShellQuote(p)} -type d -exec chmod 775 {} + && find ${posixShellQuote(p)} -type f -exec chmod 664 {} +`,
     )
     .join(" && ");
   return `${mkdirCmd} && ${chownCmd}`;

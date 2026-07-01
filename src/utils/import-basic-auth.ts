@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execa } from "execa";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -48,11 +48,11 @@ export function loadImportBasicAuth(configDir: string): ImportBasicAuth | null {
 }
 
 /** @deprecated only used if tooling needs apr1 hashes */
-export function htpasswdLine(user: string, password: string): string {
-  const hash = execSync(`openssl passwd -apr1 ${JSON.stringify(password)}`, {
+export async function htpasswdLine(user: string, password: string): Promise<string> {
+  const { stdout } = await execa("openssl", ["passwd", "-apr1", password], {
     encoding: "utf8",
-  }).trim();
-  return `${user}:${hash}`;
+  });
+  return `${user}:${stdout.trim()}`;
 }
 
 export function writeImportRemoteConfig(
