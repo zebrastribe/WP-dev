@@ -1,4 +1,5 @@
 import type { RemoteEnvConfig } from "../config/schema.js";
+import { resolveIdentityFile } from "./remote-config-helpers.js";
 
 /** SSH options passed to rsync via `-e` (BatchMode, identity file, port). */
 export function buildSshRsyncEnv(remote: RemoteEnvConfig): string {
@@ -6,8 +7,9 @@ export function buildSshRsyncEnv(remote: RemoteEnvConfig): string {
   if (remote.port != null) {
     parts.push("-p", String(remote.port));
   }
-  if (remote.identityFile) {
-    parts.push("-i", remote.identityFile);
+  const key = resolveIdentityFile(remote.identityFile);
+  if (key) {
+    parts.push("-i", key);
   }
   return parts.join(" ");
 }

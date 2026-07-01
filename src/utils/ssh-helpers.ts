@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { NodeSSH } from "node-ssh";
 import type { RemoteEnvConfig } from "../config/schema.js";
+import { resolveIdentityFile } from "./remote-config-helpers.js";
 
 export function expandHomePath(path: string): string {
   if (path === "~") return homedir();
@@ -29,7 +30,7 @@ export function discoverIdentityFiles(remote: RemoteEnvConfig): string[] {
     const resolved = expandHomePath(p);
     if (existsSync(resolved) && !out.includes(resolved)) out.push(resolved);
   };
-  add(remote.identityFile);
+  add(resolveIdentityFile(remote.identityFile));
   const sshDir = join(homedir(), ".ssh");
   for (const name of ["id_ed25519", "id_rsa", "id_ecdsa", "id_dsa"]) {
     add(join(sshDir, name));

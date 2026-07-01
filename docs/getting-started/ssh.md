@@ -64,7 +64,7 @@ Important fields:
 | `path` | Folder containing `wp-config.php` on the server |
 | `url` | Site URL in the remote database (`siteurl` / `home`) |
 
-Optional: `identityFile` if your key is not the default path.
+Optional: `identityFile` if your key is not the default path. Use `~/.ssh/your-key` (works on the host and in the browser terminal); avoid host-only paths like `/home/you/.ssh/...`.
 
 ## Verify with doctor
 
