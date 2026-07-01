@@ -3,6 +3,7 @@
  * Validates SSH-related fields against a strict allowlist before quoting.
  */
 import { readFileSync } from "node:fs";
+import { resolveIdentityFile } from "../dist/utils/remote-config-helpers.js";
 
 const SAFE = /^[a-zA-Z0-9._:@~/-]+$/;
 
@@ -27,7 +28,8 @@ export function readRemoteEnv(envName) {
     throw new Error("invalid_remote_fields");
   }
   const port = remote.port != null ? String(remote.port).trim() : "";
-  const key = remote.identityFile != null ? String(remote.identityFile).trim() : "";
+  const keyRaw = remote.identityFile != null ? String(remote.identityFile).trim() : "";
+  const key = keyRaw ? resolveIdentityFile(keyRaw) ?? keyRaw : "";
   if (port && !/^\d+$/.test(port)) throw new Error("invalid_port");
   if (key && !SAFE.test(key)) throw new Error("invalid_identity_file");
   const project = String(config.project ?? "site").replace(/[^a-zA-Z0-9_-]/g, "-");

@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import * as os from "node:os";
 import {
   expandUserPath,
   normalizeSiteUrl,
   parseOptionalPort,
+  preferTildePath,
+  resolveIdentityFile,
 } from "../src/utils/remote-config-helpers.js";
 
 describe("expandUserPath", () => {
@@ -35,5 +40,39 @@ describe("parseOptionalPort", () => {
 
   it("throws for invalid", () => {
     expect(() => parseOptionalPort("abc")).toThrow();
+  });
+});
+
+describe("resolveIdentityFile", () => {
+  const created: string[] = [];
+
+  afterEach(() => {
+    for (const path of created.splice(0)) {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("expands tilde paths under the current home", () => {
+    const sshDir = join(os.homedir(), ".ssh");
+    mkdirSync(sshDir, { recursive: true });
+    const keyName = `wp-dev-test-tilde-${process.pid}.pem`;
+    const keyPath = join(sshDir, keyName);
+    writeFileSync(keyPath, "fake-key");
+    created.push(keyPath);
+    expect(resolveIdentityFile(`~/.ssh/${keyName}`)).toBe(keyPath);
+  });
+
+  it("remaps a foreign host absolute .ssh path to local ~/.ssh", () => {
+    const sshDir = join(os.homedir(), ".ssh");
+    mkdirSync(sshDir, { recursive: true });
+    const keyName = `wp-dev-test-remap-${process.pid}.pem`;
+    const keyPath = join(sshDir, keyName);
+    writeFileSync(keyPath, "fake-key");
+    created.push(keyPath);
+    expect(resolveIdentityFile(`/home/other-user/.ssh/${keyName}`)).toBe(keyPath);
+  });
+
+  it("preferTildePath shortens paths under home", () => {
+    expect(preferTildePath(join(os.homedir(), ".ssh", "id_ed25519"))).toBe("~/.ssh/id_ed25519");
   });
 });

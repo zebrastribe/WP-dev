@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
 
 /** Expand `~` / `~/…` for SSH identity paths. */
@@ -41,4 +41,32 @@ export function isPrivateKeyFilePath(absPath: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Prefer `~/…` when the path is under the current user's home directory. */
+export function preferTildePath(absPath: string): string {
+  const home = homedir();
+  if (absPath === home) return "~";
+  const prefix = home.endsWith("/") ? home : `${home}/`;
+  if (absPath.startsWith(prefix)) return `~/${absPath.slice(prefix.length)}`;
+  return absPath;
+}
+
+/**
+ * Resolve an SSH identity file for the current process environment.
+ * Expands `~` and remaps host absolute `.ssh` paths to the local `~/.ssh` mount
+ * (browser terminal / Docker runs as root with keys mounted at `/root/.ssh`).
+ */
+export function resolveIdentityFile(input: string | undefined): string | undefined {
+  if (!input?.trim()) return undefined;
+  const expanded = expandUserPath(input);
+  if (isPrivateKeyFilePath(expanded)) return expanded;
+
+  const sshBasename = expanded.match(/\/\.ssh\/([^/]+)$/)?.[1];
+  if (sshBasename) {
+    const localCandidate = join(homedir(), ".ssh", sshBasename);
+    if (isPrivateKeyFilePath(localCandidate)) return localCandidate;
+  }
+
+  return expanded;
 }

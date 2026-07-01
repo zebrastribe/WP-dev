@@ -9,10 +9,11 @@ import {
 } from "../config/load.js";
 import { initLogger, logInfo } from "../utils/logger.js";
 import {
-  expandUserPath,
   normalizeSiteUrl,
   parseOptionalPort,
   isPrivateKeyFilePath,
+  preferTildePath,
+  resolveIdentityFile,
 } from "../utils/remote-config-helpers.js";
 import {
   domainPathSlug,
@@ -94,9 +95,9 @@ async function promptIdentityFile(
   for (;;) {
     const raw = await askOptional(rl, `${label} (path only; never paste key text)`, current);
     if (!raw.trim()) return undefined;
-    const abs = expandUserPath(raw);
-    if (isPrivateKeyFilePath(abs)) return abs;
-    console.error(`Not a readable file: ${abs}. Try again or leave empty.`);
+    const resolved = resolveIdentityFile(raw);
+    if (resolved && isPrivateKeyFilePath(resolved)) return preferTildePath(resolved);
+    console.error(`Not a readable file: ${resolved ?? raw}. Try again or leave empty.`);
   }
 }
 

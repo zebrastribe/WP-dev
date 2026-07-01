@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import * as os from "node:os";
 import {
   buildSshRsyncEnv,
   canRetryPullWithRelativePath,
@@ -16,18 +16,26 @@ vi.mock("execa", () => ({
 }));
 
 describe("rsync-ssh-env helpers", () => {
-  it("buildSshRsyncEnv includes port and identity file", () => {
+  it("buildSshRsyncEnv includes port and resolved identity file", () => {
+    const sshDir = join(os.homedir(), ".ssh");
+    mkdirSync(sshDir, { recursive: true });
+    const keyName = `wp-dev-test-${process.pid}.pem`;
+    const keyPath = join(sshDir, keyName);
+    writeFileSync(keyPath, "fake-key");
+
     const env = buildSshRsyncEnv({
       host: "example.com",
       user: "deploy",
       path: "/var/www",
       url: "https://example.com",
       port: 2222,
-      identityFile: "~/.ssh/id_ed25519",
+      identityFile: `~/.ssh/${keyName}`,
     });
     expect(env).toContain("-p 2222");
-    expect(env).toContain("-i ~/.ssh/id_ed25519");
+    expect(env).toContain(`-i ${keyPath}`);
     expect(env).toContain("BatchMode=yes");
+
+    rmSync(keyPath, { force: true });
   });
 
   it("detects pull relative-path retry", () => {
@@ -103,7 +111,7 @@ describe("compose-env", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "wp-dev-env-"));
+    dir = mkdtempSync(join(os.tmpdir(), "wp-dev-env-"));
   });
 
   afterEach(() => {

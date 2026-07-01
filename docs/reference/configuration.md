@@ -34,7 +34,7 @@ Main config file: **`wp-dev.config.json`** at the repo root (gitignored). Copy f
 | `user` | SSH username |
 | `path` | Remote WordPress root (`wp-config.php` directory) |
 | `url` | Site URL in remote DB (for search-replace) |
-| `identityFile` | Optional path to SSH private key |
+| `identityFile` | Optional path to SSH private key (`~/.ssh/…` recommended) |
 | `db` | Optional DB credentials for remote bootstrap |
 
 ## `sync`
