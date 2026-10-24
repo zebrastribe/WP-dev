@@ -22,17 +22,19 @@ export function TerminalEmbed({
   const canOpen = secretsReady && colon > 0;
 
   const openTerminal = () => {
-    const url = buildTerminalEmbedUrl(terminalPort, terminalAuth);
+    // Do not put basic-auth password in the URL (history / referrer leak). Browser prompts once.
+    const url = buildTerminalEmbedUrl(terminalPort);
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
-        </div>
+    <details className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+      <summary className="cursor-pointer text-sm font-semibold text-slate-900 dark:text-white">
+        {title}
+      </summary>
+      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
           type="button"
           disabled={!canOpen}
@@ -52,12 +54,13 @@ export function TerminalEmbed({
 
       {canOpen ? (
         <p className="mt-3 text-xs text-slate-600 dark:text-slate-300">
-          Opens <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">127.0.0.1:{terminalPort}</code>{" "}
-          in a new tab. Login user: <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{terminalUser}</code>
-          {" "}— password is in <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>{" "}
+          Opens <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">127.0.0.1:{terminalPort}</code>.
+          Browser will ask for login — user{" "}
+          <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{terminalUser}</code>, password from{" "}
+          <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>{" "}
           (<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_TERMINAL_AUTH</code>).
         </p>
       ) : null}
-    </div>
+    </details>
   );
 }

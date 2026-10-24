@@ -44,13 +44,15 @@ services:
       WPDEV_ADMIN_SAVE_TOKEN: ${WPDEV_ADMIN_SAVE_TOKEN:-}
       WPDEV_IMPORT_TOKEN: ${WPDEV_IMPORT_TOKEN:-}
     volumes:
-      - ../wordpress:/var/www/html
+      # Absolute host paths (WPDEV_HOST_PROJECT_ROOT) so compose from the terminal
+      # container (docker.sock) does not resolve ../wordpress → /workspace/wordpress on the host.
+      - ${WPDEV_HOST_PROJECT_ROOT}/wordpress:/var/www/html
       # wp-dev admin: config + logs + docker/ (so api.php can upsert Simply API key into docker/.env).
-      - ../wp-dev.config.json:/wp-dev-repo/wp-dev.config.json:rw
-      - ../logs:/wp-dev-repo/logs:rw
-      - ../docker:/wp-dev-repo/docker:rw
-      - ../content-recovery-workspace/storage:/import-storage:rw
-      - ../../knowledge-base:/workspace/knowledge-base:ro
+      - ${WPDEV_HOST_PROJECT_ROOT}/wp-dev.config.json:/wp-dev-repo/wp-dev.config.json:rw
+      - ${WPDEV_HOST_PROJECT_ROOT}/logs:/wp-dev-repo/logs:rw
+      - ${WPDEV_HOST_PROJECT_ROOT}/docker:/wp-dev-repo/docker:rw
+      - ${WPDEV_HOST_PROJECT_ROOT}/content-recovery-workspace/storage:/import-storage:rw
+      - ${WPDEV_HOST_PROJECT_ROOT}/../knowledge-base:/workspace/knowledge-base:ro
     depends_on:
       db:
         condition: service_healthy
@@ -64,15 +66,15 @@ services:
     ports:
       - "127.0.0.1:${WP_HTTPS_PORT:-8443}:443"
     volumes:
-      - ./nginx-local-ssl.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certs:/certs:ro
+      - ${WPDEV_HOST_PROJECT_ROOT}/docker/nginx-local-ssl.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${WPDEV_HOST_PROJECT_ROOT}/docker/certs:/certs:ro
 
   # Official `wordpress` image has no `wp` binary; wp-dev uses this service for WP-CLI.
   wpcli:
     image: wordpress:cli-php${WPDEV_PHP_VERSION:-8.2}
     user: "33:33"
     volumes:
-      - ../wordpress:/var/www/html
+      - ${WPDEV_HOST_PROJECT_ROOT}/wordpress:/var/www/html
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_USER: ${MYSQL_USER:-wordpress}
@@ -100,13 +102,19 @@ services:
       # Fixed container listen ports; host publish ports are in ports: above.
       WPDEV_TERMINAL_RUNNER_PORT: "7682"
       WPDEV_HOST_RUNNER_PORT: "7683"
+      # Host developer uid/gid so interactive ttyd can write the bind-mounted workspace
+      # without running as root (docker CLI stays root-only; runners keep sock access).
+      WPDEV_HOST_UID: ${WPDEV_HOST_UID:-}
+      WPDEV_HOST_GID: ${WPDEV_HOST_GID:-}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
       MYSQL_USER: ${MYSQL_USER:-wordpress}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpress}
     volumes:
-      - ../:/workspace
-      - ${HOME}/.ssh:/root/.ssh:ro
-      - ${HOME}/.wp-dev:/root/.wp-dev
+      - ${WPDEV_HOST_PROJECT_ROOT}:/workspace
+      - ${WPDEV_HOST_HOME}/.ssh:/root/.ssh:ro
+      - ${WPDEV_HOST_HOME}/.wp-dev:/root/.wp-dev
+      # Sync runner (pull/push) needs the host Docker daemon for wp-cli compose exec.
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   db_data:

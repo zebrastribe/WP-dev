@@ -12,7 +12,7 @@ This repository is the **public localhost tool** (CLI + optional `/admin/` UI). 
 
 - Local WordPress in Docker (MySQL + Apache)
 - **Pull** / **push** database and files via SSH and rsync
-- Browser **setup wizard** at `/admin/`
+- Optional browser UI at `/admin/` — **Backup · Setup staging · Sync** (Advanced for power tools)
 - **DB backups** before sync when WordPress is already installed (first pull / bootstrap may skip)
 - **Theme-only** deploy (without overwriting production database)
 - **Service manager** — ports, health, lifecycle

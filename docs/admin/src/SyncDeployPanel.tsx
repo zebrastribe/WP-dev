@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { logAdmin } from "./adminLog";
-import type { TerminalAction } from "./api";
+import { loadWpDevConfig, type TerminalAction } from "./api";
 import { JobProgressPanel } from "./JobProgressPanel";
 import { useRunnerJob } from "./useRunnerJob";
 import { toggleButtonClass } from "./uiClasses";
@@ -18,6 +18,8 @@ type SyncDeployPanelProps = {
   directions?: SyncDirection[];
   /** Lock direction (e.g. push-only on staging step) */
   fixedDirection?: SyncDirection;
+  /** Allow Production in the env picker (default false — full push to prod is unsafe from Setup). */
+  allowProduction?: boolean;
   hint?: string;
   onBeforeRun?: () => Promise<boolean>;
 };
@@ -29,38 +31,75 @@ export function SyncDeployPanel({
   fixedEnv,
   directions = ["push", "pull"],
   fixedDirection,
+  allowProduction = false,
   hint,
   onBeforeRun,
 }: SyncDeployPanelProps) {
   const [env, setEnv] = useState<RemoteEnv>(fixedEnv ?? "staging");
   const [direction, setDirection] = useState<SyncDirection>(fixedDirection ?? "push");
+  const [hosts, setHosts] = useState<{ staging: string; production: string }>({
+    staging: "",
+    production: "",
+  });
   const { job, run, cancel, outputRef, isRunning } = useRunnerJob("sync", canRun);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const cfg = await loadWpDevConfig();
+      if (cancelled || !cfg) return;
+      const staging = cfg.staging as { host?: string } | undefined;
+      const production = cfg.production as { host?: string } | undefined;
+      setHosts({
+        staging: String(staging?.host ?? "").trim(),
+        production: String(production?.host ?? "").trim(),
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const activeEnv = fixedEnv ?? env;
   const activeDirection = fixedDirection ?? direction;
   const busy = isRunning;
+  const envChoices = (
+    allowProduction ? (["staging", "production"] as const) : (["staging"] as const)
+  ).filter((e) => !fixedEnv || e === fixedEnv);
 
   const runDeploy = async (dryRun: boolean) => {
+    if (activeDirection === "push" && activeEnv === "production" && !allowProduction) {
+      window.alert(
+        "Full-site Dev → Production is not offered here. Use Sync → Theme only for live theme files.",
+      );
+      return;
+    }
     if (!dryRun) {
+      const host = hosts[activeEnv];
+      const hostLine = host ? `SSH host: ${host}\n\n` : "";
       if (
         activeDirection === "push" &&
         activeEnv === "production" &&
-        !window.confirm("Push to PRODUCTION replaces remote files and database. Continue?")
+        !window.confirm(`${hostLine}Push to PRODUCTION replaces remote files and database. Continue?`)
       ) {
         return;
       }
       if (
         activeDirection === "pull" &&
         activeEnv === "production" &&
-        !window.confirm("Pull PRODUCTION → localhost replaces local files and database. Continue?")
+        !window.confirm(`${hostLine}Pull PRODUCTION → localhost replaces local files and database. Continue?`)
       ) {
         return;
       }
       if (
         activeDirection === "push" &&
         activeEnv === "staging" &&
-        !window.confirm("Push localhost → staging replaces remote files and database. Continue?")
+        !window.confirm(`${hostLine}Push localhost → staging replaces remote files and database. Continue?`)
       ) {
+        return;
+      }
+      if (activeEnv === "staging" && !host) {
+        window.alert("Set staging.host in config before full-site sync.");
         return;
       }
     }
@@ -86,7 +125,14 @@ export function SyncDeployPanel({
         : `Pull ${activeEnv} → localhost`);
 
     logAdmin("info", "SyncDeployPanel: start", `${label} dryRun=${dryRun}`);
-    const result = await run(action, { env: activeEnv }, label);
+    const args: Record<string, string> = { env: activeEnv };
+    if (!dryRun && activeEnv === "production") {
+      args.confirm = "SYNC_PRODUCTION";
+    }
+    if (!dryRun && activeEnv === "staging") {
+      args.confirm = hosts.staging;
+    }
+    const result = await run(action, args, label);
     if (!result.ok && !dryRun) {
       logAdmin("error", "SyncDeployPanel: failed", result.output.slice(0, 200));
     }
@@ -133,9 +179,9 @@ export function SyncDeployPanel({
         </div>
       ) : null}
 
-      {!fixedEnv ? (
+      {!fixedEnv && envChoices.length > 1 ? (
         <div className="flex flex-wrap gap-2">
-          {(["staging", "production"] as const).map((e) => (
+          {envChoices.map((e) => (
             <button
               key={e}
               type="button"

@@ -1,6 +1,6 @@
-import { userInfo } from "node:os";
 import type { LoadedConfig } from "../../config/load.js";
 import { compose } from "../../services/docker-compose.js";
+import { resolveHostIdentity } from "../../utils/host-paths.js";
 import {
   cmdFixPermissions,
   cmdFixRuntimeWritePermissions,
@@ -14,26 +14,33 @@ import { detectPlatform } from "../platform/detect.js";
 import { buildOwnershipManifest } from "./profiles.js";
 
 /**
- * Ensure shared config paths are host-owned with safe modes (664 files, 775 dirs).
- * Replaces chmod 666/777 band-aids — both host CLI and container root can write.
+ * Ensure shared config paths stay writable by host CLI + www-data admin API,
+ * without world-readable secrets (replaces chmod 666/777 band-aids).
+ * - wp-dev.config.json: 664 host:host (non-secret project config)
+ * - docker/.env: 660 host:www-data (secrets; owner + Apache group only)
  */
 export function buildSharedConfigReconcileShell(
   hostUid: number,
   hostGid: number,
+  wwwDataGid: number = 33,
 ): string {
   return [
     "mkdir -p /wp-dev-repo/docker /wp-dev-repo/logs",
     "touch /wp-dev-repo/wp-dev.config.json /wp-dev-repo/docker/.env",
-    `chown ${hostUid}:${hostGid} /wp-dev-repo/wp-dev.config.json /wp-dev-repo/docker/.env`,
+    `chown ${hostUid}:${hostGid} /wp-dev-repo/wp-dev.config.json`,
+    `chown ${hostUid}:${wwwDataGid} /wp-dev-repo/docker/.env`,
+    `if [ -f /wp-dev-repo/docker/.env.bak ]; then chown ${hostUid}:${wwwDataGid} /wp-dev-repo/docker/.env.bak && chmod 660 /wp-dev-repo/docker/.env.bak; fi`,
     `chown ${hostUid}:${hostGid} /wp-dev-repo/docker /wp-dev-repo/logs`,
     "chmod 775 /wp-dev-repo/docker /wp-dev-repo/logs",
-    "chmod 664 /wp-dev-repo/wp-dev.config.json /wp-dev-repo/docker/.env",
+    "chmod 664 /wp-dev-repo/wp-dev.config.json",
+    "chmod 660 /wp-dev-repo/docker/.env",
   ].join(" && ");
 }
 
 export async function reconcileSharedConfig(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
-  const { uid, gid } = userInfo();
+  // Prefer host bind ownership — process may be root inside the terminal container.
+  const { uid, gid } = resolveHostIdentity(loaded.configDir);
   if (uid < 0 || gid < 0) return;
 
   logInfo("fs: reconcile shared config paths (wp-dev.config.json, docker/.env)");

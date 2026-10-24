@@ -1,6 +1,9 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { safeArg, wpdevPullPushCommand } from "./runner-sync-gates.mjs";
 
 const PORT = Number(process.env.WPDEV_HOST_RUNNER_PORT || 7683);
 const HOST = process.env.WPDEV_HOST_RUNNER_HOST || "0.0.0.0";
@@ -9,7 +12,8 @@ const RUNNER_TOKEN = process.env.WPDEV_TERMINAL_RUNNER_TOKEN || "";
 const ALLOWED_ORIGIN = process.env.WPDEV_TERMINAL_RUNNER_ORIGIN || "";
 const WORKDIR = process.env.WPDEV_TERMINAL_WORKDIR || process.cwd();
 const MAX_OUTPUT = 64_000;
-const JOB_TTL_MS = 10 * 60 * 1000;
+/** Keep finished jobs briefly; never prune while status is still running. */
+const JOB_TTL_MS = 35 * 60 * 1000;
 const JOB_TIMEOUT_MS = 30 * 60 * 1000;
 
 if (!AUTH || AUTH === "wpdev:wpdev") {
@@ -30,6 +34,7 @@ const jobs = new Map();
 function pruneJobs() {
   const now = Date.now();
   for (const [id, job] of jobs.entries()) {
+    if (job.status === "running") continue;
     if (now - job.updatedAt > JOB_TTL_MS) jobs.delete(id);
   }
 }
@@ -67,8 +72,14 @@ function parseAuth(req) {
   }
 }
 
-function safeArg(v) {
-  return typeof v === "string" && /^[a-zA-Z0-9._:@~/-]+$/.test(v) ? v : "";
+function readProjectId() {
+  try {
+    const raw = readFileSync(join(WORKDIR, "wp-dev.config.json"), "utf8");
+    const p = JSON.parse(raw).project;
+    return typeof p === "string" && /^[a-zA-Z0-9._-]+$/.test(p) ? p : "";
+  } catch {
+    return "";
+  }
 }
 
 function hasValidRunnerToken(req) {
@@ -87,9 +98,7 @@ function commandForAction(action, args) {
     return `npm run wp-dev -- doctor ${env} --http`;
   }
   if (action === "wpdev_pull") {
-    const env = safeArg(args?.env);
-    if (!["staging", "production"].includes(env)) return null;
-    return `npm run wp-dev -- pull ${env} --yes`;
+    return wpdevPullPushCommand("pull", args?.env, args?.confirm);
   }
   if (action === "wpdev_pull_dry") {
     const env = safeArg(args?.env);
@@ -97,14 +106,34 @@ function commandForAction(action, args) {
     return `npm run wp-dev -- pull ${env} --dry-run`;
   }
   if (action === "wpdev_push") {
-    const env = safeArg(args?.env);
-    if (!["staging", "production"].includes(env)) return null;
-    return `npm run wp-dev -- push ${env} --yes`;
+    return wpdevPullPushCommand("push", args?.env, args?.confirm);
   }
   if (action === "wpdev_push_dry") {
     const env = safeArg(args?.env);
     if (!["staging", "production"].includes(env)) return null;
     return `npm run wp-dev -- push ${env} --dry-run`;
+  }
+  if (action === "wpdev_push_theme") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    const build = safeArg(args?.build) === "1" ? " --build" : "";
+    return `npm run wp-dev -- push theme ${env} --yes${build}`;
+  }
+  if (action === "wpdev_push_theme_dry") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    const build = safeArg(args?.build) === "1" ? " --build" : "";
+    return `npm run wp-dev -- push theme ${env} --dry-run${build}`;
+  }
+  if (action === "wpdev_pull_theme") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- pull theme ${env}`;
+  }
+  if (action === "wpdev_pull_theme_dry") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- pull theme ${env} --dry-run`;
   }
   if (action === "wpdev_sync_preview") {
     const env = safeArg(args?.env);
@@ -150,6 +179,31 @@ function commandForAction(action, args) {
     if (env === "local" && safeArg(args?.restart) === "1") flags.push("--restart");
     return `npm run wp-dev -- php rollback ${flags.join(" ")}`;
   }
+  if (action === "backup_create") {
+    const env = safeArg(args?.env);
+    const kindRaw = safeArg(args?.kind);
+    const kind = kindRaw === "full" ? "full" : "db";
+    if (!["local", "staging", "production"].includes(env)) return null;
+    return kind === "full"
+      ? `npm run wp-dev -- backup ${env} --files`
+      : `npm run wp-dev -- backup ${env}`;
+  }
+  if (action === "backup_list") {
+    const env = safeArg(args?.env);
+    const kindRaw = safeArg(args?.kind);
+    const kind = kindRaw === "full" ? "full" : kindRaw === "all" ? "all" : "db";
+    const project = readProjectId();
+    if (!["local", "staging", "production"].includes(env) || !project) return null;
+    const base = `$HOME/.wp-dev/backups/${project}/${env}`;
+    if (kind === "full") {
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/full-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No full backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+    }
+    if (kind === "all") {
+      // Prefer full + db/pre prefixes; avoid *.sql which double-matches those globs.
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/full-*.tar.gz ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 40 || true)"; if [ -z "$OUT" ]; then echo "No backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+    }
+    return `mkdir -p ${base}; OUT="$(ls -1t ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No database backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+  }
   return null;
 }
 
@@ -191,8 +245,13 @@ function startJob(command) {
   };
   child.stdout.on("data", append);
   child.stderr.on("data", append);
+  // Quiet jobs (e.g. remote dumps with little stdout) must not look abandoned.
+  const heartbeat = setInterval(() => {
+    if (job.status === "running") job.updatedAt = Date.now();
+  }, 30_000);
   child.on("close", (code) => {
     clearTimeout(timeout);
+    clearInterval(heartbeat);
     if (job.status === "running") {
       job.status = "done";
       job.exitCode = typeof code === "number" ? code : 1;
@@ -203,6 +262,7 @@ function startJob(command) {
   });
   child.on("error", (err) => {
     clearTimeout(timeout);
+    clearInterval(heartbeat);
     append(`\n[host-runner error] ${err?.message || String(err)}\n`);
     if (job.status === "running") {
       job.status = "done";

@@ -1,64 +1,25 @@
 import { useState } from "react";
-import { getTerminalJobStatus, runTerminalAction } from "./api";
+import { useRunnerJob } from "./useRunnerJob";
 import { useRunnerSecrets } from "./useRunnerSecrets";
 import { TerminalEmbed } from "./TerminalEmbed";
-import { outlineButtonClass, secondaryAccentButtonClass, toggleButtonClass } from "./uiClasses";
+import { outlineButtonClass, toggleButtonClass } from "./uiClasses";
 
 type EnvName = "local" | "staging" | "production";
 
 export function TerminalTab() {
   const { terminalAuth, terminalPort, runnerReady, runnerMessage, canRun } = useRunnerSecrets();
+  const { job, run, cancel, reset, outputRef, isRunning } = useRunnerJob("terminal", canRun);
   const [env, setEnv] = useState<EnvName>("staging");
-  const [busy, setBusy] = useState(false);
-  const [output, setOutput] = useState("");
 
-  const run = async (
-    action:
-      | "generate_keypair"
-      | "wpdev_doctor"
-      | "wpdev_push"
-      | "wpdev_pull"
-      | "wpdev_sync_preview"
-      | "backup_create"
-      | "backup_list"
-      | "git_status"
-      | "git_log"
-      | "ssh_test",
-    args?: Record<string, string>,
-    runnerKind: "terminal" | "sync" = "terminal",
-  ) => {
-    if (!canRun) {
-      setOutput("Runner is not ready yet.");
-      return;
-    }
-    setBusy(true);
-    setOutput("Starting command...\n");
-    try {
-      const started = await runTerminalAction(action, args, runnerKind);
-      if (!started.ok) {
-        setOutput(`Runner error: ${started.error}`);
-        return;
-      }
-      for (let i = 0; i < 300; i += 1) {
-        const st = await getTerminalJobStatus(started.jobId, runnerKind);
-        if (!st.ok) {
-          setOutput(`Status error: ${st.error}`);
-          return;
-        }
-        setOutput(st.output || "Running...");
-        if (st.status === "done") return;
-        await new Promise((resolve) => window.setTimeout(resolve, 1000));
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
+  const envLabel = env === "local" ? "Dev" : env === "staging" ? "Staging" : "Production";
+  const backupKind = env === "local" ? "full" : "db";
 
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Terminal</h2>
       <p className="text-sm text-slate-600 dark:text-slate-400">
-        Use the action buttons below; command output always appears in the lower output window.
+        Doctor, SSH key, and backups for the selected environment. Full-site push/pull lives under{" "}
+        <strong>Sync</strong> (theme-only by default; staging full-site after preview).
       </p>
 
       <div
@@ -77,18 +38,24 @@ export function TerminalTab() {
         secretsReady={runnerReady}
         secretsError={runnerReady ? undefined : runnerMessage}
         title="Interactive shell (optional)"
-        subtitle="Hidden by default. Open only when you need manual commands; quick actions run below either way."
+        subtitle="Open only when you need manual commands; quick actions run below either way."
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        {(["local", "staging", "production"] as const).map((x) => (
+        {(
+          [
+            ["local", "Dev"],
+            ["staging", "Staging"],
+            ["production", "Production"],
+          ] as const
+        ).map(([value, label]) => (
           <button
-            key={x}
+            key={value}
             type="button"
-            onClick={() => setEnv(x)}
-            className={`rounded-lg px-3 py-1.5 text-xs ${toggleButtonClass(env === x)}`}
+            onClick={() => setEnv(value)}
+            className={`rounded-lg px-3 py-1.5 text-xs ${toggleButtonClass(env === value)}`}
           >
-            {x}
+            {label}
           </button>
         ))}
       </div>
@@ -96,92 +63,82 @@ export function TerminalTab() {
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          disabled={busy || !canRun}
-          onClick={() => void run("wpdev_sync_preview", { env: "staging", direction: "push" }, "sync")}
-          className={`rounded-lg px-3 py-1.5 text-xs ${secondaryAccentButtonClass}`}
-        >
-          Preview push → staging
-        </button>
-        <button
-          type="button"
-          disabled={busy || !canRun}
-          onClick={() => {
-            if (!window.confirm("Push localhost → staging? This overwrites remote files and DB.")) return;
-            void run("wpdev_push", { env: "staging" }, "sync");
-          }}
-          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
-        >
-          Push localhost to staging
-        </button>
-        <button
-          type="button"
-          disabled={busy || !canRun}
-          onClick={() => {
-            if (
-              !window.confirm(
-                "Push localhost → PRODUCTION? This overwrites live files and database. Type OK mentally, then confirm.",
-              )
-            )
-              return;
-            void run("wpdev_push", { env: "production" }, "sync");
-          }}
-          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
-        >
-          Push localhost to production
-        </button>
-        <button
-          type="button"
-          disabled={busy || !canRun}
-          onClick={() => {
-            if (
-              !window.confirm(
-                "Pull PRODUCTION → localhost? This overwrites local wordpress/ files and the local database.",
-              )
-            )
-              return;
-            void run("wpdev_pull", { env: "production" }, "sync");
-          }}
-          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
-        >
-          Pull production to localhost
-        </button>
-        <button
-          type="button"
-          disabled={busy || !canRun}
-          onClick={() => void run("generate_keypair")}
+          disabled={isRunning || !canRun}
+          onClick={() => void run("generate_keypair", undefined, "Generate SSH keypair")}
           className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
           Generate SSH keypair
         </button>
         <button
           type="button"
-          disabled={busy || !canRun || env === "local"}
-          onClick={() => void run("wpdev_doctor", { env })}
+          disabled={isRunning || !canRun || env === "local"}
+          onClick={() => void run("wpdev_doctor", { env }, `Doctor ${envLabel}`)}
           className={`rounded-lg px-3 py-1.5 text-xs disabled:opacity-50 ${outlineButtonClass}`}
         >
-          Run doctor {env === "local" ? "(pick staging/prod)" : env}
+          Run doctor {env === "local" ? "(pick Staging/Production)" : envLabel}
         </button>
         <button
           type="button"
-          disabled={busy || !canRun}
-          onClick={() => void run("backup_create", { env, kind: "full" })}
+          disabled={isRunning || !canRun}
+          onClick={() =>
+            void run(
+              "backup_create",
+              { env, kind: backupKind },
+              `Backup ${envLabel} (${backupKind === "full" ? "DB + files" : "database"})`,
+            )
+          }
           className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
-          Create {env} full backup
+          Backup {envLabel} ({backupKind === "full" ? "full" : "database"})
         </button>
         <button
           type="button"
-          disabled={busy || !canRun}
-          onClick={() => void run("backup_list", { env, kind: "full" })}
+          disabled={isRunning || !canRun}
+          onClick={() =>
+            void run("backup_list", { env, kind: backupKind }, `List ${envLabel} backups`)
+          }
           className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
-          List {env} full backups
+          List {envLabel} backups
         </button>
       </div>
 
-      <pre className="max-h-80 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] dark:border-slate-700 dark:bg-slate-950">
-        {output || "No command output yet."}
-      </pre>
+      <div className="space-y-2">
+        {job.phase === "running" ? (
+          <button
+            type="button"
+            onClick={() => void cancel()}
+            className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
+          >
+            Stop
+          </button>
+        ) : null}
+        {job.label ? (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {job.label}
+            {job.phase === "success"
+              ? " — done"
+              : job.phase === "error"
+                ? ` — ${job.error ?? "failed"}`
+                : job.phase === "cancelled"
+                  ? " — stopped"
+                  : job.phase === "running"
+                    ? " — running…"
+                    : ""}
+          </p>
+        ) : null}
+        <pre
+          ref={outputRef}
+          className="max-h-80 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] dark:border-slate-700 dark:bg-slate-950"
+        >
+          {job.output || "No command output yet."}
+        </pre>
+        {job.phase !== "idle" && job.phase !== "running" ? (
+          <button type="button" className="text-xs text-slate-500 underline" onClick={reset}>
+            Clear log
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

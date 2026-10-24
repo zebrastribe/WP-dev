@@ -1,5 +1,5 @@
 import type { FC, ReactNode } from "react";
-import { ConfigAssistant } from "./ConfigAssistant";
+
 
 function Prose({ children }: { children: ReactNode }) {
   return (
@@ -19,8 +19,8 @@ export const Overview: FC = () => (
         </code>
       </strong>{" "}
       after <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev up</code> and{" "}
-      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run admin:build:wp</code> — use the{" "}
-      <strong>wp-dev</strong> tab first, then read the rest here.
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run admin:build:wp</code> — start with{" "}
+      <strong>Setup staging</strong> / <strong>Sync</strong>, then use Advanced docs when you need detail.
     </p>
     <p className="text-base text-slate-600 dark:text-slate-400">
       <strong className="text-slate-900 dark:text-white">wp-dev</strong> is a CLI: local WordPress in Docker,
@@ -192,15 +192,18 @@ export const PullPush: FC = () => (
 export const Backups: FC = () => (
   <Prose>
     <p>
-      Database backups: <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev backup local|staging|production</code>{" "}
+      Use the <strong>Backup</strong> tab, or CLI:{" "}
+      <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev backup local|staging|production</code>{" "}
       → <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">~/.wp-dev/backups/&lt;project&gt;/&lt;env&gt;/</code>.
+    </p>
+    <p>
+      Database-only backups restore in the admin (Backup → Restore, or Advanced → Restore points).
+      Dev can also create a full archive (<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">backup --files</code>)
+      with DB + wp-content; Staging/Production full archives restore via CLI only.
     </p>
     <p>
       Restore: <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev restore &lt;env&gt; &lt;file.sql&gt;</code>{" "}
       (overwrites DB on target; production asks for confirmation).
-    </p>
-    <p>
-      Files and WordPress core are <strong>not</strong> snapshotted by wp-dev — use Git, hosting backups, or archives.
     </p>
   </Prose>
 );
@@ -277,8 +280,7 @@ export type NavId =
   | "pullpush"
   | "backups"
   | "provider"
-  | "updating"
-  | "config";
+  | "updating";
 
 export const NAV_ITEMS: { id: NavId; label: string; Component: FC }[] = [
   { id: "overview", label: "Overview", Component: Overview },
@@ -289,5 +291,5 @@ export const NAV_ITEMS: { id: NavId; label: string; Component: FC }[] = [
   { id: "backups", label: "Backups", Component: Backups },
   { id: "provider", label: "Provider integration", Component: SimplyDns },
   { id: "updating", label: "Updating wp-dev", Component: Updating },
-  { id: "config", label: "Config assistant", Component: ConfigAssistant },
+
 ];

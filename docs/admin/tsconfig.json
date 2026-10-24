@@ -16,7 +16,16 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    "baseUrl": ".",
+    "paths": {
+      "@wpdev/web": ["../../packages/wpdev-web/src/index.ts"],
+      "@wpdev/web/*": ["../../packages/wpdev-web/src/*"],
+      "@wpdev/web-host": ["./src/webHost.ts"],
+      "react": ["./node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"],
+      "react/jsx-dev-runtime": ["./node_modules/@types/react/jsx-dev-runtime.d.ts"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "../../packages/wpdev-web/src"]
 }

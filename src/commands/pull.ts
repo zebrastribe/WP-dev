@@ -6,7 +6,11 @@ import { resolveFromConfigDir } from "../config/load.js";
 import { getRemoteEnv, type RemoteEnvName } from "../config/schema.js";
 import { connectSsh } from "../services/ssh.js";
 import { rsyncPull } from "../services/rsync.js";
-import { ensureBackupDir, timestampedDbName } from "../services/backup.js";
+import {
+  chownBackupArtifact,
+  ensureBackupDir,
+  timestampedDbName,
+} from "../services/backup.js";
 import {
   assertRemoteWpInstalled,
   assertNotInTerminalContainerWithoutDocker,
@@ -18,6 +22,11 @@ import {
   wpLocalSearchReplace,
   wpRemoteDbExport,
 } from "../services/wpcli.js";
+import {
+  DISK_NEED,
+  assertLocalFreeSpace,
+  assertRemoteFreeSpace,
+} from "../utils/disk-space.js";
 import { logInfo } from "../utils/logger.js";
 import { assertValidSqlDump } from "../utils/sql-dump-validate.js";
 import { remoteRmFile } from "../utils/shell-quote.js";
@@ -48,6 +57,8 @@ export type PullOptions = {
   skipSimplyStagingDns?: boolean;
   /** Skip interactive SSH-host / production confirmation (browser runner, CI). */
   yes?: boolean;
+  /** Required with --yes for staging: must equal staging.host */
+  confirmHost?: string;
 };
 
 export async function cmdPull(
@@ -67,8 +78,11 @@ export async function cmdPull(
     );
   }
 
-  if (!options.dryRun && !options.yes && process.env.WPDEV_ASSUME_YES !== "1") {
-    const ok = await confirmRemoteTarget(env, remote, "pull");
+  if (!options.dryRun) {
+    const ok = await confirmRemoteTarget(env, remote, "pull", {
+      yes: Boolean(options.yes) || process.env.WPDEV_ASSUME_YES === "1",
+      confirmHost: options.confirmHost,
+    });
     if (!ok) {
       logInfo(`pull ${env}: user aborted at confirmation`);
       console.error("Aborted.");
@@ -90,7 +104,7 @@ export async function cmdPull(
   assertHostSyncTools();
   assertNotInTerminalContainerWithoutDocker();
 
-  const syncLock = acquireSyncLock(configDir, `pull:${env}`);
+  const syncLock = acquireSyncLock(config.project, `pull:${env}`);
   try {
   let prePullBackup: string | undefined;
   if (options.backupLocal) {
@@ -99,6 +113,7 @@ export async function cmdPull(
       prePullBackup = join(backupDir, `pre-pull-${timestampedDbName()}`);
       logInfo(`pull ${env}: local pre-pull db backup -> ${prePullBackup}`);
       await wpLocalDbExportToFile(configDir, config, prePullBackup);
+      chownBackupArtifact(prePullBackup, configDir);
     } else {
       logInfo(
         `pull ${env}: skip local pre-pull backup (local WordPress not installed yet — first pull)`,
@@ -109,6 +124,8 @@ export async function cmdPull(
   logInfo(`pull ${env}: connect ssh ${remote.user}@${remote.host}`);
   const ssh = await connectSsh(remote);
   try {
+    assertLocalFreeSpace(tmpdir(), DISK_NEED.dbBackupLocal, `pull ${env}`);
+    await assertRemoteFreeSpace(ssh, "/tmp", DISK_NEED.dbBackupRemoteTmp, `pull ${env}`);
     const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
     if (wpPath !== remote.path) {
       logInfo(`pull ${env}: using remote wp path ${wpPath} (configured: ${remote.path})`);

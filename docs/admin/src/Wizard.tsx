@@ -22,7 +22,7 @@ import { TerminalEmbed } from "./TerminalEmbed";
 import { SyncDeployPanel } from "./SyncDeployPanel";
 import { useRunnerSecrets } from "./useRunnerSecrets";
 
-const STEP_LABELS = ["Start", "SSH server", "Staging (optional)", "Save & sync", "Done"] as const;
+const STEP_LABELS = ["Connect", "SSH", "Staging", "First backup", "Ready"] as const;
 /** Wizard step index for staging — skipped when syncing from one remote only. */
 const STAGING_STEP = 2;
 
@@ -186,7 +186,15 @@ function toJson(
       db: undefined,
     };
   };
-  const local: Record<string, unknown> = { ...data.local };
+  // Preserve on-disk local keys the form does not edit (themePath, themeSlug, …).
+  const prevLocal =
+    existing &&
+    typeof existing.local === "object" &&
+    existing.local !== null &&
+    !Array.isArray(existing.local)
+      ? (existing.local as Record<string, unknown>)
+      : {};
+  const local: Record<string, unknown> = { ...prevLocal, ...data.local };
   if (!String(local.composeProjectName ?? "").trim()) {
     delete local.composeProjectName;
   }
@@ -587,14 +595,19 @@ export function Wizard() {
       setTerminalRun({ running: true, output: "Starting command...\n" });
       const started = await runTerminalAction(action, args, runnerKind);
       if (started.ok) {
-        for (let i = 0; i < 240; i += 1) {
+        // Match runner TTL (~30m); do not abandon a live job and invite a second run.
+        for (let i = 0; i < 1800; i += 1) {
           const status = await getTerminalJobStatus(started.jobId, runnerKind);
           if (!status.ok) {
             setTerminalRun({
               running: false,
-              output: `Runner status error: ${status.error}\n\nFalling back to manual command:\n${cmd}`,
+              output: `Runner status error: ${status.error}`,
             });
-            break;
+            setAlert({
+              tone: "error",
+              text: `Runner status error: ${status.error}\n\nDo not start the same job again until you check the host.`,
+            });
+            return;
           }
           setTerminalRun({
             running: status.status === "running",
@@ -616,14 +629,22 @@ export function Wizard() {
           }
           await new Promise((resolve) => window.setTimeout(resolve, 1000));
         }
-      }
-      // Runner unavailable/auth failed -> fallback to clipboard flow.
-      if (!started.ok) {
         setTerminalRun({
           running: false,
-          output: `Runner unavailable: ${started.error}\n\nFalling back to manual copy/run.`,
+          output:
+            "Timed out after 30 minutes waiting for the runner. The job may still be running on the host — check before starting another.",
         });
+        setAlert({
+          tone: "error",
+          text: "Timed out waiting for the runner. Check host logs before starting another job.",
+        });
+        return;
       }
+      // Runner unavailable/auth failed -> fallback to clipboard flow.
+      setTerminalRun({
+        running: false,
+        output: `Runner unavailable: ${started.error}\n\nFalling back to manual copy/run.`,
+      });
     }
     try {
       await navigator.clipboard.writeText(cmd);
@@ -866,15 +887,6 @@ export function Wizard() {
       return false;
     }
   })();
-  const stagingReady = !hasStagingServer
-    ? true
-    : Boolean(
-        data.staging.host.trim() &&
-          data.staging.user.trim() &&
-          data.staging.path.trim() &&
-          data.staging.url.trim(),
-      );
-
   const localLink = data.local.url.trim();
   const productionLink = data.production.url.trim();
   const stagingLink = hasStagingServer ? data.staging.url.trim() : "";
@@ -886,13 +898,6 @@ export function Wizard() {
     localStatus?.writable.wpContent &&
     localStatus?.writable.plugins &&
     localStatus?.writable.upgrade;
-  const sshServerReady = Boolean(
-    data.production.host.trim() &&
-      data.production.user.trim() &&
-      data.production.path.trim() &&
-      (data.production.url.trim() || guessSiteUrlFromSshHost(data.production.host)),
-  );
-
   if (loading) {
     return (
       <p className="text-sm text-slate-600 dark:text-slate-400">
@@ -946,30 +951,6 @@ export function Wizard() {
           );
         })}
       </div>
-      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/50">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={stepOneReady ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
-            1) Local {stepOneReady ? "OK" : "TODO"}
-          </span>
-          <span
-            className={
-              sshServerReady || workflow === "local-only"
-                ? "text-emerald-700 dark:text-emerald-300"
-                : "text-amber-700 dark:text-amber-300"
-            }
-          >
-            2) SSH {sshServerReady || workflow === "local-only" ? "OK" : "TODO"}
-          </span>
-          {!skipStaging && (
-            <span className={stagingReady ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}>
-              3) Staging {stagingReady ? "OK" : "optional"}
-            </span>
-          )}
-          <span className="text-slate-500 dark:text-slate-400">{skipStaging ? "3" : "4"}) Save & pull</span>
-          <span className="text-slate-500 dark:text-slate-400">{skipStaging ? "4" : "5"}) Done</span>
-        </div>
-      </div>
-
       {alertBox}
       {terminalRun && (
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
@@ -1970,63 +1951,64 @@ export function Wizard() {
 
       {step === 3 && (
         <div className="space-y-4">
-          <SyncDeployPanel
-            canRun={canRun}
-            runnerMessage={runnerMessage}
-            title="Sync localhost ↔ remote"
-            hint="Save environment below first if you changed SSH or staging settings."
-          />
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            Use <strong>Unlock admin</strong> (top right) once per session before save. Token lives in{" "}
-            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code> as{" "}
-            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code>.
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">First backup</h2>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+              Take a real backup (DB + files) before you rely on Staging. This is{" "}
+              <strong>not</strong> a full-site push. Day-to-day deploys use Sync → Theme only.
+            </p>
+          </div>
+          {!canRun ? (
+            <p className="text-sm text-amber-800 dark:text-amber-200">{runnerMessage}</p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!canRun || Boolean(terminalRun?.running)}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              onClick={() =>
+                void runTerminalCommand(
+                  "npm run wp-dev -- backup local --files",
+                  "plain",
+                  "backup_create",
+                  { env: "local", kind: "full" },
+                )
+              }
+            >
+              Backup Dev (full)
+            </button>
+            {hasStagingServer ? (
+              <button
+                type="button"
+                disabled={!canRun || Boolean(terminalRun?.running)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold dark:border-slate-600 disabled:opacity-50"
+                onClick={() =>
+                  void runTerminalCommand(
+                    "npm run wp-dev -- backup staging --files",
+                    "plain",
+                    "backup_create",
+                    { env: "staging", kind: "full" },
+                  )
+                }
+              >
+                Backup Staging (full)
+              </button>
+            ) : null}
+          </div>
+          <p className="text-xs text-slate-500">
+            Save config on earlier steps if SSH changed. Full-site push/pull lives under the Sync tab
+            (marked Destructive) — not here.
           </p>
-          <pre className="max-h-64 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950">
-            {JSON.stringify(
-              toJson({
-                ...data,
-                staging: hasStagingServer
-                  ? data.staging
-                  : { ...STAGING_PLACEHOLDER, user: data.production.user || "deploy" },
-                production: (() => {
-                  let p =
-                    workflow === "local-only" && !data.production.host.trim()
-                      ? { ...PRODUCTION_PLACEHOLDER, user: data.production.user.trim() || "deploy" }
-                      : { ...data.production };
-                  if (workflow === "pull" && !p.url.trim()) {
-                    const guessed = guessSiteUrlFromSshHost(p.host);
-                    if (guessed) p = { ...p, url: guessed };
-                  }
-                  return p;
-                })(),
-                simply: data.simply,
-              }, existingConfig),
-              null,
-              2,
-            )}
-          </pre>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={onSave}
               disabled={saving}
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm dark:border-slate-600 disabled:opacity-50"
             >
               {saving ? "Saving…" : "Save environment"}
             </button>
-            <button
-              type="button"
-              onClick={() => goStep(0)}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm dark:border-slate-600"
-            >
-              Back to start
-            </button>
           </div>
-          <p className="text-xs text-slate-500">
-            If save returns permission denied, the container user may not own <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev.config.json</code> on the host — for local dev try{" "}
-            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">chmod u+w wp-dev.config.json</code> or run{" "}
-            <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev init</code> from the terminal instead.
-          </p>
         </div>
       )}
 
@@ -2037,12 +2019,13 @@ export function Wizard() {
             {workflow === "pull" && !localStatus?.hasSyncedContent && (
               <ol className="mt-2 list-inside list-decimal space-y-1 text-emerald-900 dark:text-emerald-100">
                 <li>
-                  Go to the <strong>Save</strong> step and click <strong>Run: pull production to localhost</strong>{" "}
-                  (or use the Terminal tab).
+                  Open the <strong>Sync</strong> tab → Full site → <strong>Production → Dev</strong> (or{" "}
+                  <code className="rounded bg-white/60 px-1 dark:bg-slate-900">npm run wp-dev -- pull production</code>
+                  ).
                 </li>
                 <li>When pull finishes, open Localhost below to verify the site.</li>
-                <li>Plugin updates need correct permissions — if they fail, run{" "}
-                  <code className="rounded bg-white/60 px-1 dark:bg-slate-900">npm run wp-dev -- up</code>.
+                <li>
+                  Day-to-day theme work: Sync → <strong>Theme only</strong>. Keep a Backup before big changes.
                 </li>
               </ol>
             )}

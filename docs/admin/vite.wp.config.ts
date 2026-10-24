@@ -11,6 +11,12 @@ const adminDir = path.resolve(
 /** Build into repo `wordpress/admin/` for Apache at http://localhost:<WP_PORT>/admin/ */
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      "@wpdev/web": path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../packages/wpdev-web/src"),
+      "@wpdev/web-host": path.resolve(path.dirname(fileURLToPath(import.meta.url)), "src/webHost.ts"),
+    },
+  },
   base: "/admin/",
   publicDir: "public",
   build: {

@@ -29,7 +29,7 @@ npm run wp-dev -- backup staging --files
 
 ```bash
 npm run wp-dev -- restore local ~/.wp-dev/backups/my-site/local/pre-pull-2026-06-23.sql
-npm run wp-dev -- restore production /path/to/backup.sql
+npm run wp-dev -- restore production ~/.wp-dev/backups/<project>/production/db-….sql
 ```
 
 Restore **always** creates a pre-restore backup when possible.
@@ -42,7 +42,12 @@ Restore **always** creates a pre-restore backup when possible.
 
 ## Browser admin
 
-The **Backup / Restore** and **History / Rollback** tabs in `/admin/` run the same operations via the terminal runner.
+In `/admin/`:
+
+- **Backup** — env picker, Backup now, restore on the same page (database for Staging/Production; full archives are Dev-oriented in the UI).
+- **Advanced → Restore points** — longer restore-point list for the same `~/.wp-dev/backups/<project>/` store.
+
+Both use the terminal runner (`backup` / `restore`). See [Browser admin](./browser-admin.md).
 
 ## Related
 

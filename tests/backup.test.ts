@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertBackupFileExists,
   backupDirFor,
+  chownBackupArtifact,
   timestampedDbName,
   timestampedFullName,
   timestampedPreRestoreName,
@@ -52,6 +53,14 @@ describe("backup service", () => {
     const file = join(dir, "dump.sql");
     writeFileSync(file, "-- sql");
     expect(() => assertBackupFileExists(file)).not.toThrow();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("chownBackupArtifact does not throw on a normal file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wp-dev-backup-chown-"));
+    const file = join(dir, "dump.sql");
+    writeFileSync(file, "-- sql");
+    expect(() => chownBackupArtifact(file, dir)).not.toThrow();
     rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, chownSync, existsSync, readFileSync } from "node:fs";
 import type { LoadedConfig } from "../config/load.js";
 import { writeWpDevConfig } from "../config/load.js";
 import { writeFileAtomic } from "../fs/atomic-write.js";
+import { resolveHostIdentity } from "./host-paths.js";
 
 export type DockerEnvPortKey =
   | "WP_PORT"
@@ -54,8 +55,26 @@ export function writeEnvFile(
     configDir: meta?.configDir,
     projectId: meta?.projectId,
     backup: true,
-    mode: 0o664,
+    mode: 0o660,
   });
+  // When the CLI runs as root inside the terminal container, keep host:www-data
+  // ownership so host CLI + Apache can both read secrets (and UI job polls don't
+  // briefly see runner_secrets_unavailable).
+  if (meta?.configDir) {
+    try {
+      const { uid } = resolveHostIdentity(meta.configDir);
+      const wwwDataGid = 33;
+      chownSync(path, uid, wwwDataGid);
+      chmodSync(path, 0o660);
+      const bak = `${path}.bak`;
+      if (existsSync(bak)) {
+        chownSync(bak, uid, wwwDataGid);
+        chmodSync(bak, 0o660);
+      }
+    } catch {
+      /* non-root or unsupported platform */
+    }
+  }
 }
 
 export function persistEnvContent(

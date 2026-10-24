@@ -16,6 +16,8 @@ export type PushThemeOptions = {
   dryRun: boolean;
   build: boolean;
   skipBuildCheck: boolean;
+  /** Skip production confirmation (admin runner / CI). */
+  yes?: boolean;
 };
 
 export async function cmdPushTheme(
@@ -27,19 +29,29 @@ export async function cmdPushTheme(
   const { deployDir, slug } = resolveThemePaths(loaded);
 
   if (env === "production" && !options.dryRun) {
-    const ok = await confirmProduction(
-      `You are about to push THEME FILES ONLY to PRODUCTION (${slug}).\n` +
-        "The remote database and uploads will NOT be changed.",
-    );
-    if (!ok) {
-      logInfo("push theme production: user aborted");
-      console.error("Aborted.");
-      process.exitCode = 1;
-      return;
+    const skipConfirm =
+      Boolean(options.yes) || process.env.WPDEV_ASSUME_YES === "1";
+    if (!skipConfirm) {
+      if (!process.stdin.isTTY) {
+        throw new Error(
+          "Production theme push requires --yes when run non-interactively (admin / CI).",
+        );
+      }
+      const ok = await confirmProduction(
+        `You are about to push THEME FILES ONLY to PRODUCTION (${slug}).\n` +
+          "The remote database and uploads will NOT be changed.",
+      );
+      if (!ok) {
+        logInfo("push theme production: user aborted");
+        console.error("Aborted.");
+        process.exitCode = 1;
+        return;
+      }
     }
   }
 
-  if (options.build && !options.dryRun) {
+  // Build before dry-run too so Preview matches the tree Start will push.
+  if (options.build) {
     await cmdThemeBuild(loaded, { quiet: true });
   } else if (!options.skipBuildCheck && !options.dryRun) {
     const check = checkThemeBuildArtifacts(deployDir);

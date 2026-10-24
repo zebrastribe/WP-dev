@@ -1,8 +1,12 @@
-import { join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { join } from "node:path";
 import type { LoadedConfig } from "../config/load.js";
 import { getRemoteEnv, type RemoteEnvName } from "../config/schema.js";
-import { assertBackupFileExists, ensureBackupDir, timestampedPreRestoreName } from "../services/backup.js";
+import {
+  chownBackupArtifact,
+  ensureBackupDir,
+  timestampedPreRestoreName,
+} from "../services/backup.js";
+import { assertRestoreBackupPath } from "../utils/restore-path.js";
 import { connectSsh } from "../services/ssh.js";
 import {
   assertLocalWpInstalled,
@@ -21,6 +25,8 @@ export type RestoreTarget = RemoteEnvName | "local";
 
 export type RestoreOptions = {
   yes?: boolean;
+  /** Required with --yes for staging: must equal staging.host */
+  confirmHost?: string;
 };
 
 export async function cmdRestore(
@@ -30,19 +36,17 @@ export async function cmdRestore(
   opts: RestoreOptions = {},
 ): Promise<void> {
   const { config, configDir } = loaded;
-  assertBackupFileExists(file);
-  const resolvedFile = resolve(file);
-  const backupRoot = resolve(join(homedir(), ".wp-dev", "backups"));
-  if (!resolvedFile.startsWith(backupRoot + "/") && resolvedFile !== backupRoot) {
-    throw new Error(`Restore refused: file must be under ${backupRoot}`);
-  }
+  const resolvedFile = assertRestoreBackupPath(config.project, env, file);
 
   logInfo(`restore ${env} from ${resolvedFile}`);
-  const syncLock = acquireSyncLock(configDir, `restore:${env}`);
+  const syncLock = acquireSyncLock(config.project, `restore:${env}`);
   try {
     if (env !== "local") {
       const remote = getRemoteEnv(config, env);
-      const ok = opts.yes ? true : await confirmRemoteTarget(env, remote, "restore");
+      const ok = await confirmRemoteTarget(env, remote, "restore", {
+        yes: Boolean(opts.yes),
+        confirmHost: opts.confirmHost,
+      });
       if (!ok) {
         logInfo(`restore ${env}: user aborted at confirmation`);
         console.error("Aborted.");
@@ -57,6 +61,7 @@ export async function cmdRestore(
       const preRestore = join(backupDir, timestampedPreRestoreName());
       logInfo(`restore local: pre-restore db backup -> ${preRestore}`);
       await wpLocalDbExportToFile(configDir, config, preRestore);
+      chownBackupArtifact(preRestore, configDir);
       await wpLocalDbImportFromFile(configDir, config, resolvedFile);
       console.error(`Local database restored from backup. Pre-restore DB backup: ${preRestore}`);
       return;
@@ -73,6 +78,7 @@ export async function cmdRestore(
       const remotePreDump = `/tmp/wp-dev-pre-restore-${Date.now()}.sql`;
       await wpRemoteDbExport(ssh, wpPath, remotePreDump);
       await ssh.getFile(remotePreDump, preRestoreLocal);
+      chownBackupArtifact(preRestoreLocal, configDir);
       await ssh.exec(remoteRmFile(remotePreDump));
 
       await ssh.putFile(resolvedFile, remoteImport);

@@ -154,6 +154,19 @@ function wpdev_is_local_admin_request(): bool
     return in_array($hostOnly, ['localhost', '127.0.0.1', '[::1]'], true);
 }
 
+/**
+ * True for same-origin browser fetches (Sec-Fetch-Site). In-container PHP/curl
+ * typically omits these headers — blocks RCE→admin-session without extra unlock steps.
+ */
+function wpdev_is_browser_fetch_request(): bool
+{
+    $site = strtolower(trim((string) ($_SERVER['HTTP_SEC_FETCH_SITE'] ?? '')));
+    if ($site === '') {
+        return false;
+    }
+    return $site === 'same-origin';
+}
+
 /** Refuse wp-dev admin API on public hosts (staging/production). */
 function wpdev_enforce_local_admin_only(): void
 {

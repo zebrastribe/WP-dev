@@ -123,6 +123,13 @@ describe("runner smoke", () => {
     expect(content).not.toMatch(/WPDEV_HOST_RUNNER_PORT:\s*\$\{/);
   });
 
+  it("compose bind mounts use WPDEV_HOST_PROJECT_ROOT (not relative ../wordpress)", () => {
+    const content = readFileSync(composePath, "utf8");
+    expect(content).toContain("${WPDEV_HOST_PROJECT_ROOT}/wordpress:/var/www/html");
+    expect(content).toContain("${WPDEV_HOST_HOME}/.wp-dev:/root/.wp-dev");
+    expect(content).not.toMatch(/^-\s+\.\.\/wordpress:/m);
+  });
+
   it("terminal container starts via start-terminal-services.sh", () => {
     const dockerfile = readFileSync(join(root, "docker/terminal.Dockerfile"), "utf8");
     expect(dockerfile).toContain("start-terminal-services.sh");

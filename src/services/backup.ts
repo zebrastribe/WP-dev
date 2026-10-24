@@ -1,15 +1,30 @@
-import { mkdirSync, existsSync } from "node:fs";
+import { chownSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { RemoteEnvName } from "../config/schema.js";
+import { resolveHostIdentity } from "../utils/host-paths.js";
 
 export function backupDirFor(project: string, env: RemoteEnvName | "local"): string {
   return join(homedir(), ".wp-dev", "backups", project, env);
 }
 
+/**
+ * When CLI runs as root inside the terminal container, backup files land on the
+ * host bind as root-owned. Re-own to the workstation user so host tools can read them.
+ */
+export function chownBackupArtifact(path: string, configDir = process.cwd()): void {
+  try {
+    const { uid, gid } = resolveHostIdentity(configDir);
+    chownSync(path, uid, gid);
+  } catch {
+    /* ignore: non-posix or permission denied */
+  }
+}
+
 export function ensureBackupDir(project: string, env: RemoteEnvName | "local"): string {
   const dir = backupDirFor(project, env);
   mkdirSync(dir, { recursive: true });
+  chownBackupArtifact(dir);
   return dir;
 }
 

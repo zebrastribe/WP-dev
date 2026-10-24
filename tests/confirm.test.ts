@@ -38,16 +38,28 @@ describe("confirm", () => {
     ).resolves.toBe(false);
   });
 
-  it("confirmRemoteTarget auto-approves staging without a TTY", async () => {
+  it("confirmRemoteTarget rejects staging without TTY when confirmHost missing", async () => {
     const isTTY = process.stdin.isTTY;
     Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
     await expect(
       confirmRemoteTarget("staging", { host: "staging.host", url: "https://s.example" }, "push"),
+    ).resolves.toBe(false);
+    Object.defineProperty(process.stdin, "isTTY", { value: isTTY, configurable: true });
+  });
+
+  it("confirmRemoteTarget accepts staging without TTY when confirmHost matches", async () => {
+    const isTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    await expect(
+      confirmRemoteTarget("staging", { host: "staging.host", url: "https://s.example" }, "push", {
+        yes: true,
+        confirmHost: "staging.host",
+      }),
     ).resolves.toBe(true);
     Object.defineProperty(process.stdin, "isTTY", { value: isTTY, configurable: true });
   });
 
-  it("confirmRemoteTarget rejects production without a TTY", async () => {
+  it("confirmRemoteTarget rejects production without a TTY unless yes", async () => {
     const isTTY = process.stdin.isTTY;
     Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
     await expect(
@@ -57,6 +69,14 @@ describe("confirm", () => {
         "push",
       ),
     ).resolves.toBe(false);
+    await expect(
+      confirmRemoteTarget(
+        "production",
+        { host: "prod.host", url: "https://prod.example" },
+        "push",
+        { yes: true },
+      ),
+    ).resolves.toBe(true);
     Object.defineProperty(process.stdin, "isTTY", { value: isTTY, configurable: true });
   });
 });

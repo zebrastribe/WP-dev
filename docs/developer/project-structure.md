@@ -16,7 +16,8 @@ WP-dev/
 │   ├── .env.example
 │   └── terminal.Dockerfile
 ├── docs/                   # User and developer documentation
-├── docs/admin/             # Browser admin (React + Vite)
+├── docs/admin/             # Thin Vite shell (host + LocalAdapter) → wordpress/admin/
+├── packages/wpdev-web/     # Shared UI pages + adapter types (@wpdev/web)
 ├── wordpress/              # Local WP files (gitignored content)
 │   └── admin/              # Built wizard UI
 ├── tests/                  # Vitest unit/integration tests

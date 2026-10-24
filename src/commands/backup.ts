@@ -6,13 +6,26 @@ import type { LoadedConfig } from "../config/load.js";
 import { resolveFromConfigDir } from "../config/load.js";
 import { getRemoteEnv, type RemoteEnvName } from "../config/schema.js";
 import { connectSsh } from "../services/ssh.js";
-import { ensureBackupDir, timestampedDbName, timestampedFullName } from "../services/backup.js";
+import {
+  chownBackupArtifact,
+  ensureBackupDir,
+  timestampedDbName,
+  timestampedFullName,
+} from "../services/backup.js";
 import {
   assertLocalWpInstalled,
   assertRemoteWpInstalled,
   wpLocalDbExportToFile,
   wpRemoteDbExport,
 } from "../services/wpcli.js";
+import {
+  DISK_NEED,
+  assertLocalFreeSpace,
+  assertRemoteFreeSpace,
+  directorySizeBytes,
+  needForFullBackup,
+  wrapNoSpaceError,
+} from "../utils/disk-space.js";
 import { logInfo } from "../utils/logger.js";
 import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
 
@@ -54,10 +67,16 @@ export async function cmdBackup(
   const outPath = join(dir, name);
 
   logInfo(`backup ${env} -> ${outPath}`);
+  assertLocalFreeSpace(dir, DISK_NEED.dbBackupLocal, `backup ${env} (database)`);
 
   if (env === "local") {
     await assertLocalWpInstalled(configDir, config);
-    await wpLocalDbExportToFile(configDir, config, outPath);
+    try {
+      await wpLocalDbExportToFile(configDir, config, outPath);
+    } catch (e) {
+      throw wrapNoSpaceError(e, `backup ${env} (database)`);
+    }
+    chownBackupArtifact(outPath, configDir);
     console.error(`Local database backup written to ${outPath}`);
     return;
   }
@@ -65,15 +84,24 @@ export async function cmdBackup(
   const remote = getRemoteEnv(config, env);
   const ssh = await connectSsh(remote);
   try {
+    await assertRemoteFreeSpace(
+      ssh,
+      "/tmp",
+      DISK_NEED.dbBackupRemoteTmp,
+      `backup ${env} (database)`,
+    );
     const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
     const remoteDump = `/tmp/wp-dev-backup-${Date.now()}.sql`;
     await wpRemoteDbExport(ssh, wpPath, remoteDump);
     await ssh.getFile(remoteDump, outPath);
     await ssh.exec(remoteRmFile(remoteDump));
+  } catch (e) {
+    throw wrapNoSpaceError(e, `backup ${env} (database)`);
   } finally {
     ssh.dispose();
   }
 
+  chownBackupArtifact(outPath, configDir);
   console.error(`${env} database backup written to ${outPath}`);
 }
 
@@ -94,6 +122,9 @@ async function cmdBackupFull(
     if (!existsSync(wpContent)) {
       throw new Error(`Missing wp-content directory: ${wpContent}`);
     }
+    const need = needForFullBackup(directorySizeBytes(wpContent));
+    assertLocalFreeSpace(dir, need, `backup ${env} (full)`);
+    assertLocalFreeSpace(tmpdir(), need, `backup ${env} (full) temp`);
     const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-backup-full-"));
     const dbPath = join(tmpDir, "db.sql");
     try {
@@ -103,9 +134,12 @@ async function cmdBackupFull(
         ["-czf", outPath, "-C", wpRoot, "wp-content", "-C", tmpDir, "db.sql"],
         { reject: true },
       );
+    } catch (e) {
+      throw wrapNoSpaceError(e, `backup ${env} (full)`);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+    chownBackupArtifact(outPath, configDir);
     console.error(`Local full backup (DB + wp-content) written to ${outPath}`);
     return;
   }
@@ -117,6 +151,14 @@ async function cmdBackupFull(
   const remoteTar = `${remoteDir}/full.tar.gz`;
   try {
     const resolvedPath = await assertRemoteWpInstalled(ssh, remote.path);
+    // Remote /tmp must hold the packed archive; local disk must hold the download.
+    await assertRemoteFreeSpace(
+      ssh,
+      "/tmp",
+      DISK_NEED.fullBackupFloor,
+      `backup ${env} (full)`,
+    );
+    assertLocalFreeSpace(dir, DISK_NEED.fullBackupFloor, `backup ${env} (full) download`);
     const wpPath = posixShellQuote(resolvedPath);
     const packed = await ssh.exec(
       [
@@ -128,14 +170,20 @@ async function cmdBackupFull(
       ].join("; "),
     );
     if (packed.code !== 0) {
-      throw new Error(
-        `Remote full backup failed (exit ${packed.code}): ${packed.stderr || packed.stdout}`,
+      throw wrapNoSpaceError(
+        new Error(
+          `Remote full backup failed (exit ${packed.code}): ${packed.stderr || packed.stdout}`,
+        ),
+        `backup ${env} (full)`,
       );
     }
     await ssh.getFile(remoteTar, outPath);
     await ssh.exec(remoteRmRf(remoteDir));
+  } catch (e) {
+    throw wrapNoSpaceError(e, `backup ${env} (full)`);
   } finally {
     ssh.dispose();
   }
+  chownBackupArtifact(outPath, configDir);
   console.error(`${env} full backup (DB + wp-content) written to ${outPath}`);
 }

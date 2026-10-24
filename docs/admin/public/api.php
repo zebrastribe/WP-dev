@@ -63,8 +63,8 @@ function wpdev_upsert_dotenv_file(string $path, array $updates): void
         @unlink($tmp);
         throw new RuntimeException('rename_failed');
     }
-    // Keep host CLI and admin API both able to write docker/.env (safe modes, not world-writable).
-    @chmod($path, 0664);
+    // Secrets: owner + www-data group only (host CLI + admin API). Not world-readable.
+    @chmod($path, 0660);
     $dir = dirname($path);
     if (is_dir($dir)) {
         @chmod($dir, 0775);
@@ -551,12 +551,11 @@ if ($method === 'POST' && $action === 'auth-bootstrap') {
         wpdev_admin_api_log('POST auth-bootstrap 403 not_local');
         exit;
     }
-    // Require loopback REMOTE_ADDR so Host-header spoofing alone cannot bootstrap.
-    $remoteAddr = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
-    $loopbackAddrs = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
-    if (!in_array($remoteAddr, $loopbackAddrs, true)) {
-        wpdev_json_error(403, 'forbidden', 'Auto unlock requires a loopback client address.');
-        wpdev_admin_api_log('POST auth-bootstrap 403 not_loopback_addr remote=' . $remoteAddr);
+    // Browser same-origin fetch only — blocks in-container PHP/curl (REMOTE_ADDR loopback
+    // alone is unsafe: Apache inside WordPress sees 127.0.0.1 for local RCE clients).
+    if (!wpdev_is_browser_fetch_request()) {
+        wpdev_json_error(403, 'forbidden', 'Auto unlock requires a same-origin browser request.');
+        wpdev_admin_api_log('POST auth-bootstrap 403 not_browser_fetch');
         exit;
     }
     $resolved = $token;
@@ -678,7 +677,7 @@ if ($method === 'GET' && $action === 'docker-env-public') {
 }
 
 if ($method === 'GET' && $action === 'staging-db-secrets') {
-    wpdev_require_admin_token_if_configured($token, 'staging-db-secrets');
+    wpdev_require_admin_token($token, 'GET staging-db-secrets');
     $out = [
         'ok' => true,
         'host' => wpdev_dotenv_value($dockerEnvPath, 'WPDEV_STAGING_DB_HOST'),
@@ -693,7 +692,7 @@ if ($method === 'GET' && $action === 'staging-db-secrets') {
 }
 
 if ($method === 'GET' && $action === 'terminal-runner-secrets') {
-    wpdev_require_admin_token_if_configured($token, 'terminal-runner-secrets');
+    wpdev_require_admin_token($token, 'GET terminal-runner-secrets');
     $auth = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_AUTH');
     $runnerToken = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_TOKEN');
     $runnerOrigin = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_ORIGIN');
@@ -716,8 +715,8 @@ if ($method === 'GET' && $action === 'terminal-runner-secrets') {
     echo json_encode(
         [
             'ok' => true,
+            // ttyd basic-auth for the embed iframe only (bound to 127.0.0.1). Runner token never leaves PHP.
             'terminalAuth' => $auth,
-            // Runner token stays server-side (PHP proxy). Do not send to the browser.
             'runnerToken' => null,
             'runnerOrigin' => null,
             'terminalPort' => $terminalPort,

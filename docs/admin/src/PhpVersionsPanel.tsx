@@ -103,16 +103,27 @@ export function PhpVersionsPanel() {
       requestUnlock();
       return;
     }
-    const version = envs[env]!.selected;
+    const st = envs[env]!;
+    if (!st.status) {
+      window.alert(`Load current PHP for ${env === "local" ? "Dev" : env} first (Refresh), then Apply.`);
+      return;
+    }
+    const version = st.selected;
+    if (env === "staging") {
+      const ok = window.confirm(
+        `Change Staging PHP to ${version}? A rollback snapshot will be saved first.`,
+      );
+      if (!ok) return;
+    }
     if (env === "production") {
       const ok = window.confirm(
         `Change PRODUCTION PHP to ${version}? A rollback snapshot will be saved first.`,
       );
       if (!ok) return;
     }
-    if (env !== "local" && envs[env]!.status && !envs[env]!.status!.supported) {
+    if (env !== "local" && !st.status.supported) {
       window.alert(
-        `Automated PHP change is not supported on ${env}.\n${envs[env]!.status!.detail}\n\nUse the hosting panel, then Refresh.`,
+        `Automated PHP change is not supported on ${env}.\n${st.status.detail}\n\nUse the hosting panel, then Refresh.`,
       );
       return;
     }
@@ -235,7 +246,8 @@ export function PhpVersionsPanel() {
                 <button
                   type="button"
                   className={`${secondaryAccentButtonClass} rounded-md px-3 py-1.5 text-xs`}
-                  disabled={busy || !canRun || !authenticated}
+                  disabled={busy || !canRun || !authenticated || !st.status || st.loading}
+                  title={!st.status ? "Refresh this environment first" : undefined}
                   onClick={() => void applySet(env)}
                 >
                   {busy ? "Working…" : "Apply"}

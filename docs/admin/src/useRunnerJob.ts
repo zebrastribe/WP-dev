@@ -106,13 +106,22 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
 
       activeJobIdRef.current = started.jobId;
 
-      for (let i = 0; i < 600; i += 1) {
+      // Match runner job TTL (~30 minutes); do not abandon while the runner still runs.
+      for (let i = 0; i < 1800; i += 1) {
         if (abortRef.current) {
           return { ok: false, output: "Cancelled." };
         }
 
         const st = await getTerminalJobStatus(started.jobId, runnerKind);
         if (!st.ok) {
+          // Pull/reconcile may briefly rewrite docker/.env; don't abandon a live job
+          // on a transient secrets blip — retry a few polls first.
+          const transient =
+            /runner_secrets_unavailable|runner_unreachable/i.test(st.error || "");
+          if (transient && i < 1795) {
+            await new Promise((r) => window.setTimeout(r, 1000));
+            continue;
+          }
           setJob({
             phase: "error",
             output: st.error,
@@ -157,12 +166,13 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
       }
 
       activeJobIdRef.current = null;
-      const timeoutMsg = "Timed out after 10 minutes.\n";
+      const timeoutMsg =
+        "Timed out after 30 minutes waiting for the runner. The job may still be running on the host — check logs before starting another.\n";
       setJob({
         phase: "error",
         output: timeoutMsg,
         exitCode: 1,
-        error: "Timed out after 10 minutes.",
+        error: "Timed out after 30 minutes.",
         label,
         startedAt,
       });
