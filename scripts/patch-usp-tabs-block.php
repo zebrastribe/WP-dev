@@ -8,7 +8,7 @@ $root  = is_dir( '/workspace/wordpress/wp-content/themes/agency-starter' )
 $theme = "$root/theme";
 $scripts = file_exists( '/workspace/WP-dev/scripts/usp-tabs.js' )
 	? '/workspace/WP-dev/scripts'
-	: '/home/jesper/Documents/dev/timework/WP-dev/scripts';
+	: dirname( __DIR__ ) . '/scripts';
 
 mkdir( "$theme/blocks/usp-tabs", 0755, true );
 
