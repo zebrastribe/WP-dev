@@ -33,7 +33,7 @@ The folder containing `package.json` and `wp-dev.config.json`.
 
 This repo (**WP-dev**) stays **public**: localhost CLI, Docker, local admin, and (later) shared `packages/sync-engine` + `packages/wpdev-web`.
 
-A separate **private** repo (`WP-dev-cloud`, name TBD) will hold the hosted control plane. It is **not** required for everyday CLI use. The detailed hosted/web migration plan is **not published** in this public repo — see [online-migration-plan.md](./online-migration-plan.md) (stub only).
+A separate **private** repo ([zebrastribe/WP-dev-cloud](https://github.com/zebrastribe/WP-dev-cloud)) holds hosted/control-plane planning (and later code). It is **not** required for everyday CLI use. See the public stub [online-migration-plan.md](./online-migration-plan.md).
 
 ## Optional: content recovery / import workspace
 
