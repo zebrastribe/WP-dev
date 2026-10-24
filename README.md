@@ -1,22 +1,25 @@
 # WP-dev
 
-Run **WordPress on your computer** with Docker, then **pull** and **push** your site to staging or production over SSH.
+**WordPress on your computer** (Docker) plus **pull / push** to staging or production over SSH.
 
-WP-dev does **not** host your live servers — it only syncs with servers you already have.
+WP-dev does **not** host your live servers — it syncs with servers you already have.
 
-This repository is the **public localhost tool** (CLI + optional `/admin/` UI). A future **private** cloud control plane (if used) is a separate repo — you do not need it to run WP-dev locally. Hosted/web migration planning is **not published** here. See [docs/developer/project-structure.md](docs/developer/project-structure.md).
+This repository is the **public localhost tool** (CLI + optional `/admin/` UI). A future private cloud control plane (if used) is a separate repo — you do not need it for local work. See [docs/developer/project-structure.md](docs/developer/project-structure.md).
 
 ---
 
 ## Features
 
 - Local WordPress in Docker (MySQL + Apache)
-- **Pull** / **push** database and files via SSH and rsync
+- **Pull / push** database and files via SSH and rsync
 - Optional browser UI at `/admin/` — **Backup · Setup staging · Sync** (Advanced for power tools)
-- **DB backups** before sync when WordPress is already installed (first pull / bootstrap may skip)
-- **Theme-only** deploy (without overwriting production database)
-- **Service manager** — ports, health, lifecycle
-- **Filesystem manager** — permissions fixed automatically on up/pull
+- **Theme-only** day-to-day sync (default); full-site after Preview
+- **DB backups** before destructive sync when WordPress is already installed
+- Staging sync/restore requires **host confirm** (`--confirm-host`); production stays gated
+- Restore paths limited to `~/.wp-dev/backups/<project>/<env>/` (symlinks that escape are refused)
+- Full backups exclude build junk (`node_modules`, `.git`)
+- Bind mounts and `.env` / backup ownership follow the **installing host user** (`WPDEV_HOST_UID`), not a fixed username
+- Service + filesystem managers (ports, health, permissions on up/pull)
 - macOS and Linux
 
 ---
@@ -66,7 +69,7 @@ Update the **tool** — your site in `wordpress/` is kept:
 npm run wp-dev -- update
 ```
 
-Or use the **Update** tab in `/admin/`.
+Or use **Advanced → Update** in `/admin/`.
 
 → [Update guide](docs/getting-started/update.md)
 
@@ -100,7 +103,7 @@ cat ~/.ssh/id_ed25519.pub
 ssh user@your-ssh-host.example.com
 ```
 
-**4. Add to WP-dev** — wizard at `/admin/` or:
+**4. Add to WP-dev** — **Setup staging** in `/admin/` or:
 
 ```bash
 npm run wp-dev -- init
@@ -118,13 +121,13 @@ npm run wp-dev -- init
 npm run wp-dev -- up
 ```
 
-**2. Open the setup wizard:**
+**2. Open the browser admin:**
 
 ```
 http://localhost:8888/admin/
 ```
 
-Follow the steps and click **Save** (token is in `docker/.env` → `WPDEV_ADMIN_SAVE_TOKEN` if prompted).
+Use **Setup staging** to save SSH/config, then **Sync** or **Backup** as needed. Unlock with the token in `docker/.env` → `WPDEV_ADMIN_SAVE_TOKEN` if prompted.
 
 **3. Open your site:**
 
@@ -145,6 +148,21 @@ npm run wp-dev -- pull production
 
 ---
 
+## Browser admin (optional)
+
+| Tab | Purpose |
+|-----|---------|
+| **Backup** | Snapshot Dev / Staging / Production; restore on the same page |
+| **Setup staging** | SSH (or Simply), save config, verify |
+| **Sync** | Theme-only (default) or full-site after Preview → Start |
+| **Advanced** | Restore points, PHP versions, services, terminal, update, docs |
+
+Header badges: **Dev** = stack online/offline; **Staging / Production** = host saved in config (not “safe to push”).
+
+→ [Browser admin guide](docs/guides/browser-admin.md)
+
+---
+
 ## Common commands
 
 Run from the repo root:
@@ -162,12 +180,13 @@ npm run wp-dev -- <command>
 | `pull production` | Download site from production |
 | `pull staging` | Download site from staging |
 | `push staging` | Upload site to staging |
-| `push theme production --build` | Deploy theme only (safer for production) |
+| `push theme staging --build` | Deploy theme only (safer day-to-day) |
 | `doctor` | Test SSH and WordPress connections |
 | `doctor --filesystem` | Check permissions and paths |
 | `update` | Update WP-dev from git |
 | `backup local` | Save database backup |
-| `restore local <file>` | Restore a backup |
+| `backup local --files` | Full archive (DB + wp-content; excludes `node_modules`) |
+| `restore local <file>` | Restore a backup under `~/.wp-dev/backups/<project>/local/` |
 | `services` | Show ports and service health |
 | `logs` | Show recent log lines |
 | `--help` | Full command list |
@@ -189,8 +208,9 @@ npm run wp-dev -- up --reclaim-ports
 |-------|----------------|
 | **All documentation** | [docs/README.md](docs/README.md) |
 | Sync pull and push | [guides/syncing.md](docs/guides/syncing.md) |
+| Theme deploy | [guides/theme-deploy.md](docs/guides/theme-deploy.md) |
 | Backups and restore | [guides/backups.md](docs/guides/backups.md) |
-| Browser wizard | [guides/browser-admin.md](docs/guides/browser-admin.md) |
+| Browser admin | [guides/browser-admin.md](docs/guides/browser-admin.md) |
 | Permissions | [guides/permissions.md](docs/guides/permissions.md) |
 | Ports | [guides/ports.md](docs/guides/ports.md) |
 | Shared hosting | [guides/shared-hosting.md](docs/guides/shared-hosting.md) |
