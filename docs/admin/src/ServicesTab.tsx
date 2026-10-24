@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiPhpUrl } from "./api";
 import { buildAdminApiHeaders } from "./adminAuthState";
+import { PhpVersionsPanel } from "./PhpVersionsPanel";
 
 type ManagedService = {
   name: string;
@@ -55,6 +56,7 @@ export function ServicesTab() {
 
   return (
     <div className="space-y-4">
+      <PhpVersionsPanel />
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Service Manager</h2>

@@ -199,9 +199,12 @@ async function main(): Promise<void> {
     .command("show")
     .description("Show current PHP version / change strategy for an environment")
     .option("--env <name>", "local | staging | production", "local")
-    .action(async (opts: { env?: string }) => {
+    .option("--json", "Machine-readable status (for admin UI)")
+    .action(async (opts: { env?: string; json?: boolean }) => {
       const env = parsePhpEnv(opts.env);
-      await runWithConfig(`php show --env ${env}`, (loaded) => cmdPhpShow(loaded, { env }));
+      await runWithConfig(`php show --env ${env}`, (loaded) =>
+        cmdPhpShow(loaded, { env, json: Boolean(opts.json) }),
+      );
     });
 
   php

@@ -137,6 +137,27 @@ function commandForAction(action, args) {
   if (action === "wpdev_update_preflight") {
     return `npm run wp-dev -- update --preflight --json`;
   }
+  if (action === "wpdev_php_show") {
+    const env = safeArg(args?.env) || "local";
+    if (!["local", "staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- php show --env ${env} --json`;
+  }
+  if (action === "wpdev_php_set") {
+    const env = safeArg(args?.env) || "local";
+    const version = safeArg(args?.version);
+    if (!["local", "staging", "production"].includes(env)) return null;
+    if (!/^\d+\.\d+$/.test(version)) return null;
+    const flags = [`--env ${env}`, "--yes"];
+    if (env === "local" && safeArg(args?.restart) === "1") flags.push("--restart");
+    return `npm run wp-dev -- php set ${version} ${flags.join(" ")}`;
+  }
+  if (action === "wpdev_php_rollback") {
+    const env = safeArg(args?.env) || "local";
+    if (!["local", "staging", "production"].includes(env)) return null;
+    const flags = [`--env ${env}`, "--yes"];
+    if (env === "local" && safeArg(args?.restart) === "1") flags.push("--restart");
+    return `npm run wp-dev -- php rollback ${flags.join(" ")}`;
+  }
   if (action === "backup_create") {
     const env = safeArg(args?.env);
     const kindRaw = safeArg(args?.kind);

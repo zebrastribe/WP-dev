@@ -105,7 +105,15 @@ describe("runner smoke", () => {
     expect(src).toContain("wpdev_sync_scan");
     expect(src).toContain("wpdev_push_dry");
     expect(src).toContain("wpdev_update");
+    expect(src).toContain("wpdev_php_show");
+    expect(src).toContain("wpdev_php_set");
+    expect(src).toContain("wpdev_php_rollback");
     expect(src).toContain("/cancel/");
+
+    const host = readFileSync(join(root, "docker/host-runner.mjs"), "utf8");
+    expect(host).toContain("wpdev_php_show");
+    expect(host).toContain("wpdev_php_set");
+    expect(host).toContain("wpdev_php_rollback");
   });
 
   it("sync runner listens on fixed container port 7683 (host port is publish-only)", () => {

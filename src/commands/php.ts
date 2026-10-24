@@ -17,6 +17,7 @@ export type PhpCommandOptions = {
   env?: PhpEnvTarget;
   restart?: boolean;
   yes?: boolean;
+  json?: boolean;
 };
 
 function resolveEnv(options: PhpCommandOptions): PhpEnvTarget {
@@ -52,12 +53,36 @@ export async function cmdPhpShow(
 ): Promise<void> {
   const env = resolveEnv(options);
   const detect = await detectPhp(loaded, env);
+  const rb = readPhpRollback(loaded.configDir, env);
+  if (options.json) {
+    console.log(
+      JSON.stringify(
+        {
+          env,
+          currentVersion: detect.currentVersion,
+          strategy: detect.strategy,
+          supported: detect.supported,
+          detail: detect.detail,
+          allowed: [...SUPPORTED_PHP_VERSIONS],
+          rollback: rb
+            ? {
+                previousVersion: rb.previousVersion,
+                at: rb.at,
+                strategy: rb.strategy,
+              }
+            : null,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
   console.error(`Environment: ${env}`);
   console.error(`Current PHP (best effort): ${detect.currentVersion ?? "unknown"}`);
   console.error(`Change strategy: ${detect.strategy}${detect.supported ? "" : " (manual panel only)"}`);
   console.error(`Detail: ${detect.detail}`);
   console.error(`Allowed values: ${SUPPORTED_PHP_VERSIONS.join(", ")}`);
-  const rb = readPhpRollback(loaded.configDir, env);
   if (rb) {
     console.error(
       `Rollback available → ${rb.previousVersion ?? "prior files"} (saved ${rb.at}). Run: wp-dev php rollback --env ${env}`,

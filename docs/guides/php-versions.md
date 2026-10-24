@@ -6,6 +6,12 @@ WP-dev can switch PHP for **Dev (local Docker)** and, when the host supports it,
 
 `7.4`, `8.0`, `8.1`, `8.2`, `8.3`, `8.4`
 
+## Admin UI
+
+**Services** tab → **PHP versions**: show / apply / rollback for Dev, Staging, and Production (same CLI under the hood). Production asks for a confirm dialog in the browser; runners pass `--yes` so the CLI does not double-prompt.
+
+Hosted cloud web UI is not built yet — localhost admin only for now.
+
 ## Local (Dev)
 
 Uses `WPDEV_PHP_VERSION` in `docker/.env` and matching `wordpress:php*-apache` / `wordpress:cli-php*` images.
