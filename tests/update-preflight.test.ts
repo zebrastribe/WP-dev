@@ -9,7 +9,14 @@ describe("update preflight", () => {
   it("collectUpdatePreflight runs on this repository", async () => {
     const preflight = await collectUpdatePreflight(process.cwd());
     expect(preflight.isGitRepo).toBe(true);
-    expect(preflight.upstream).toBeTruthy();
+    // Upstream is optional (CI PR checkouts / local branches may have none).
+    if (preflight.upstream) {
+      expect(preflight.upstream.length).toBeGreaterThan(0);
+    } else {
+      expect(
+        preflight.warnings.some((w) => w.includes("No upstream tracking branch")),
+      ).toBe(true);
+    }
     expect(formatUpdatePreflight(preflight)).toContain("Pre-flight check:");
   });
 
