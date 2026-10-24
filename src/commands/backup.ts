@@ -9,6 +9,7 @@ import { connectSsh } from "../services/ssh.js";
 import {
   chownBackupArtifact,
   ensureBackupDir,
+  FULL_BACKUP_TAR_EXCLUDES,
   timestampedDbName,
   timestampedFullName,
 } from "../services/backup.js";
@@ -131,7 +132,17 @@ async function cmdBackupFull(
       await wpLocalDbExportToFile(configDir, config, dbPath);
       await execa(
         "tar",
-        ["-czf", outPath, "-C", wpRoot, "wp-content", "-C", tmpDir, "db.sql"],
+        [
+          "-czf",
+          outPath,
+          ...FULL_BACKUP_TAR_EXCLUDES.flatMap((e) => ["--exclude", e]),
+          "-C",
+          wpRoot,
+          "wp-content",
+          "-C",
+          tmpDir,
+          "db.sql",
+        ],
         { reject: true },
       );
     } catch (e) {
@@ -166,7 +177,7 @@ async function cmdBackupFull(
         `mkdir -p ${remoteDir}`,
         `cd ${wpPath}`,
         `wp db export ${remoteDir}/db.sql --allow-root >/dev/null`,
-        `tar -czf ${remoteTar} -C ${wpPath} wp-content -C ${remoteDir} db.sql`,
+        `tar -czf ${remoteTar} ${FULL_BACKUP_TAR_EXCLUDES.map((e) => `--exclude=${e}`).join(" ")} -C ${wpPath} wp-content -C ${remoteDir} db.sql`,
       ].join("; "),
     );
     if (packed.code !== 0) {

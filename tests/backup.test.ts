@@ -3,6 +3,7 @@ import {
   assertBackupFileExists,
   backupDirFor,
   chownBackupArtifact,
+  FULL_BACKUP_TAR_EXCLUDES,
   timestampedDbName,
   timestampedFullName,
   timestampedPreRestoreName,
@@ -54,6 +55,11 @@ describe("backup service", () => {
     writeFileSync(file, "-- sql");
     expect(() => assertBackupFileExists(file)).not.toThrow();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("FULL_BACKUP_TAR_EXCLUDES drops build junk from archives", () => {
+    expect(FULL_BACKUP_TAR_EXCLUDES).toContain("node_modules");
+    expect(FULL_BACKUP_TAR_EXCLUDES).toContain(".git");
   });
 
   it("chownBackupArtifact does not throw on a normal file", () => {

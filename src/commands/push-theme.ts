@@ -2,6 +2,7 @@ import type { LoadedConfig } from "../config/load.js";
 import { getRemoteEnv, type RemoteEnvName } from "../config/schema.js";
 import { connectSsh } from "../services/ssh.js";
 import { rsyncPushToPath } from "../services/rsync.js";
+import { SAFE_SYNC_EXCLUDES } from "../services/sync-excludes.js";
 import {
   checkThemeBuildArtifacts,
   remoteThemePath,
@@ -86,6 +87,7 @@ export async function cmdPushTheme(
 
     await rsyncPushToPath(remote, deployDir, target, {
       dryRun: options.dryRun,
+      excludes: [...SAFE_SYNC_EXCLUDES, "node_modules", "**/node_modules"],
     });
 
     if (!options.dryRun) {

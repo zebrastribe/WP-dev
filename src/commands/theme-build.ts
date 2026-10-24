@@ -6,12 +6,30 @@ import {
   checkThemeBuildArtifacts,
   resolveThemePaths,
 } from "../services/theme-path.js";
+import { resolveHostIdentity } from "../utils/host-paths.js";
 import { logInfo } from "../utils/logger.js";
 
 export type ThemeBuildOptions = {
   skipInstall?: boolean;
   quiet?: boolean;
 };
+
+/** Re-own bind-mounted theme build trees created as root inside the terminal. */
+async function chownThemeBuildArtifacts(
+  themeSourcePath: string,
+  configDir: string,
+): Promise<void> {
+  const { uid, gid } = resolveHostIdentity(configDir);
+  const targets = ["node_modules", "vendor"].map((n) => join(themeSourcePath, n));
+  for (const target of targets) {
+    if (!existsSync(target)) continue;
+    try {
+      await execa("chown", ["-R", `${uid}:${gid}`, target], { reject: false });
+    } catch {
+      /* ignore: non-posix or no permission */
+    }
+  }
+}
 
 /**
  * Run npm run production in the theme source tree (Tailwind/esbuild or similar).
@@ -47,6 +65,9 @@ export async function cmdThemeBuild(
     cwd: themeSourcePath,
     stdio: "inherit",
   });
+
+  // Terminal/container builds run as root; re-own node_modules for the host user.
+  await chownThemeBuildArtifacts(themeSourcePath, loaded.configDir);
 
   const check = checkThemeBuildArtifacts(deployDir);
   if (!options.quiet) {

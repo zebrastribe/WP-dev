@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { assertRestoreBackupPath } from "../src/utils/restore-path.js";
@@ -36,6 +42,33 @@ describe("assertRestoreBackupPath", () => {
     writeFileSync(file, "-- prod\n");
     expect(() => assertRestoreBackupPath(project, "staging", file)).toThrow(
       /Restore refused: file must be under/,
+    );
+  });
+
+  it("refuses an in-tree symlink whose target is outside the backup tree", () => {
+    mkdirSync(root, { recursive: true });
+    const outside = mkdtempSync(join(tmpdir(), "wp-dev-restore-symlink-"));
+    const target = join(outside, "outside.sql");
+    const link = join(root, "zz-symlink-test.sql");
+    try {
+      writeFileSync(target, "-- outside\n");
+      rmSync(link, { force: true });
+      symlinkSync(target, link);
+      expect(() => assertRestoreBackupPath(project, env, link)).toThrow(
+        /Restore refused: file must be under/,
+      );
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an empty backup file", () => {
+    mkdirSync(root, { recursive: true });
+    const file = join(root, "db-empty.sql");
+    writeFileSync(file, "");
+    expect(() => assertRestoreBackupPath(project, env, file)).toThrow(
+      /Restore refused: backup file is empty/,
     );
   });
 });

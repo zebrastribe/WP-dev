@@ -43,6 +43,9 @@ export function timestampedFullName(): string {
   return `full-${stampParts()}.tar.gz`;
 }
 
+/** Paths excluded from full (DB + wp-content) archives. */
+export const FULL_BACKUP_TAR_EXCLUDES = ["node_modules", ".git"] as const;
+
 export function timestampedPreRestoreName(): string {
   return `pre-restore-${stampParts()}.sql`;
 }
