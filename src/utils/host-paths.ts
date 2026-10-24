@@ -80,7 +80,7 @@ export function resolveHostHome(composeEnvPath?: string): string {
   if (home === "/root" || home === "/") {
     const bind = readHostBindSource("/root/.wp-dev") ?? readHostBindSource("/root/.ssh");
     if (bind) {
-      // `/home/jesper/.wp-dev` → `/home/jesper`
+      // e.g. `/home/<installer>/.wp-dev` → `/home/<installer>`
       const idx = bind.lastIndexOf("/.wp-dev");
       if (idx > 0) return bind.slice(0, idx);
       const idxSsh = bind.lastIndexOf("/.ssh");
@@ -91,9 +91,11 @@ export function resolveHostHome(composeEnvPath?: string): string {
 }
 
 /**
- * Host developer uid/gid for chown of bind-mounted files.
- * Inside the terminal container the process is often root (uid 0); prefer
- * WPDEV_HOST_UID/GID, then ownership of the project bind, then userInfo.
+ * Installing host user's uid/gid for chown of bind-mounted files.
+ * Never a fixed username — set by `wp-dev up` as WPDEV_HOST_UID/GID from the
+ * account that owns the project. Inside the terminal the process is often root
+ * (uid 0); prefer those env values, then project-dir ownership, then userInfo.
+ * Last resort 1000:1000 is a numeric Linux default, not a named account.
  */
 export function resolveHostIdentity(configDir: string): { uid: number; gid: number } {
   const envUid = process.env.WPDEV_HOST_UID?.trim();

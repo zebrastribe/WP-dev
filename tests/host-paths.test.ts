@@ -8,7 +8,7 @@ import {
 
 describe("host-paths", () => {
   it("resolveHostProjectRoot uses configDir on the host", () => {
-    const dir = resolve("/home/jesper/Documents/dev/example");
+    const dir = resolve("/home/dev/projects/example");
     expect(resolveHostProjectRoot(dir)).toBe(dir);
   });
 

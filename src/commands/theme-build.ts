@@ -66,7 +66,7 @@ export async function cmdThemeBuild(
     stdio: "inherit",
   });
 
-  // Terminal/container builds run as root; re-own node_modules for the host user.
+  // Terminal/container builds run as root; re-own node_modules to WPDEV_HOST_UID.
   await chownThemeBuildArtifacts(themeSourcePath, loaded.configDir);
 
   const check = checkThemeBuildArtifacts(deployDir);
