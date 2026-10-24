@@ -9,6 +9,7 @@ import { rsyncPull } from "../services/rsync.js";
 import { ensureBackupDir, timestampedDbName } from "../services/backup.js";
 import {
   assertRemoteWpInstalled,
+  assertNotInTerminalContainerWithoutDocker,
   isLocalWpInstalled,
   wpLocalAlignTablePrefixAfterImport,
   wpLocalDbExportToFile,
@@ -37,6 +38,7 @@ import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
 import { pullExcludePatterns } from "../services/sync-excludes.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
 import { confirmRemoteTarget } from "../utils/confirm.js";
+import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
 
 export type PullOptions = {
   dryRun: boolean;
@@ -86,7 +88,10 @@ export async function cmdPull(
   }
 
   assertHostSyncTools();
+  assertNotInTerminalContainerWithoutDocker();
 
+  const syncLock = acquireSyncLock(configDir, `pull:${env}`);
+  try {
   let prePullBackup: string | undefined;
   if (options.backupLocal) {
     if (await isLocalWpInstalled(configDir, config)) {
@@ -232,4 +237,7 @@ export async function cmdPull(
   console.error(
     `Pull from ${env} complete. Database and files synced; URLs replaced ${remote.url} -> ${config.local.url}.${backupNote}`,
   );
+  } finally {
+    releaseSyncLock(syncLock);
+  }
 }

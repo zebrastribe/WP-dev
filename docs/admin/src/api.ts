@@ -177,7 +177,7 @@ export type TerminalRunnerSecretsResponse =
   | {
       ok: true;
       terminalAuth: string;
-      runnerToken: string;
+      runnerToken?: string | null;
       runnerOrigin: string | null;
       terminalPort: number;
       runnerPort: number;

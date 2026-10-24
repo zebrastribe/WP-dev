@@ -77,7 +77,7 @@ Not end-user documentation. Referenced from developer architecture only.
 - [ ] `CHANGELOG.md` for releases
 - [ ] Automated markdown link check in CI
 - [ ] Playwright E2E doc for wizard flow
-- [x] Online multi-tenant migration plan (corrected audit) → [online-migration-plan.md](./online-migration-plan.md) — **not ready to launch**
+- [x] Hosted/web migration plan kept **out of public git** → [online-migration-plan.md](./online-migration-plan.md) stub only
 
 
 ## CLI as documentation source

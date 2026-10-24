@@ -135,18 +135,21 @@ export async function isLocalWpInstalled(
   return r.exitCode === 0;
 }
 
+/** Fail fast when sync runs inside the terminal container (no Docker socket). */
+export function assertNotInTerminalContainerWithoutDocker(): void {
+  if (existsSync("/.dockerenv") && !existsSync("/var/run/docker.sock")) {
+    throw new Error(
+      "This sync command must run on your host (or a runner with the Docker socket), not inside the browser terminal container. From the project directory on the host: `npm run wp-dev -- pull|push …`.",
+    );
+  }
+}
+
 export async function assertLocalWpInstalled(
   configDir: string,
   config: WpDevConfig,
 ): Promise<void> {
   if (!(await isLocalWpInstalled(configDir, config))) {
-    const inContainerNoDockerSocket =
-      existsSync("/.dockerenv") && !existsSync("/var/run/docker.sock");
-    if (inContainerNoDockerSocket) {
-      throw new Error(
-        "This command must run on your host terminal, not inside the browser terminal container. Open a host shell and run: `npm run wp-dev -- push staging` from the project directory.",
-      );
-    }
+    assertNotInTerminalContainerWithoutDocker();
     throw new Error(
       "Local WordPress is not installed or docker services are not running. Run `wp-dev up` and complete the WordPress install (or pull from remote) first.",
     );

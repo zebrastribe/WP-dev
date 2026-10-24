@@ -52,4 +52,4 @@ Internal RFCs and historical notes live in `purpose/` (not end-user docs).
 - [Project structure](./project-structure.md)
 - [Service manager](../features/service-manager.md)
 - [Filesystem manager](../features/filesystem-manager.md)
-- [Online multi-tenant migration plan](./online-migration-plan.md) (proposal; localhost product today)
+- [Hosted web plan](./online-migration-plan.md) — **private / not published here** (stub only; localhost product today)

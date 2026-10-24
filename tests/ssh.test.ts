@@ -19,6 +19,10 @@ vi.mock("node-ssh", () => ({
 }));
 
 describe("ssh-helpers", () => {
+  beforeEach(() => {
+    process.env.WPDEV_SSH_INSECURE = "1";
+  });
+
   const remote = {
     host: "linux.example.com",
     user: "deploy",
@@ -52,6 +56,7 @@ describe("ssh-helpers", () => {
 
 describe("connectSsh", () => {
   beforeEach(() => {
+    process.env.WPDEV_SSH_INSECURE = "1";
     connectMock.mockReset();
     connectMock.mockResolvedValue(undefined);
   });

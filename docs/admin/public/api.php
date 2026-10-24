@@ -717,8 +717,9 @@ if ($method === 'GET' && $action === 'terminal-runner-secrets') {
         [
             'ok' => true,
             'terminalAuth' => $auth,
-            'runnerToken' => $runnerToken,
-            'runnerOrigin' => is_string($runnerOrigin) ? $runnerOrigin : null,
+            // Runner token stays server-side (PHP proxy). Do not send to the browser.
+            'runnerToken' => null,
+            'runnerOrigin' => null,
             'terminalPort' => $terminalPort,
             'runnerPort' => $runnerPort,
             'syncRunnerPort' => $syncRunnerPort,

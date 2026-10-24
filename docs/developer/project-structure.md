@@ -33,7 +33,7 @@ The folder containing `package.json` and `wp-dev.config.json`.
 
 This repo (**WP-dev**) stays **public**: localhost CLI, Docker, local admin, and (later) shared `packages/sync-engine` + `packages/wpdev-web`.
 
-A separate **private** repo (`WP-dev-cloud`, name TBD) holds the hosted control plane (API, workers, thin cloud web shell, infra). Create it empty before Phase 2 — not required for everyday CLI use. Details: [online-migration-plan.md](./online-migration-plan.md) §27 G/H/K.
+A separate **private** repo (`WP-dev-cloud`, name TBD) will hold the hosted control plane. It is **not** required for everyday CLI use. The detailed hosted/web migration plan is **not published** in this public repo — see [online-migration-plan.md](./online-migration-plan.md) (stub only).
 
 ## Optional: content recovery / import workspace
 

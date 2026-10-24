@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { NodeSSH } from "node-ssh";
 import type { RemoteEnvConfig } from "../config/schema.js";
 import { resolveIdentityFile } from "./remote-config-helpers.js";
+import { assertSshHostPinned, createSshHostVerifier } from "./ssh-host-key.js";
 
 export function expandHomePath(path: string): string {
   if (path === "~") return homedir();
@@ -14,10 +15,13 @@ export function expandHomePath(path: string): string {
 export function buildBaseConnectOptions(
   remote: RemoteEnvConfig,
 ): Parameters<NodeSSH["connect"]>[0] {
+  assertSshHostPinned(remote);
   const opts: Parameters<NodeSSH["connect"]>[0] = {
     host: remote.host,
     username: remote.user,
     tryKeyboard: false,
+    hostHash: "sha256",
+    hostVerifier: createSshHostVerifier(remote),
   };
   if (remote.port != null) opts.port = remote.port;
   return opts;

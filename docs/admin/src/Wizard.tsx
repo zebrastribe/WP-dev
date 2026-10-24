@@ -175,7 +175,10 @@ function parseStagingDbFromConfig(remote: Remote | undefined): Remote["db"] | un
   };
 }
 
-function toJson(data: WizardData): Record<string, unknown> {
+function toJson(
+  data: WizardData,
+  existing: Record<string, unknown> | null = null,
+): Record<string, unknown> {
   const normalizeRemote = (r: Remote): Remote => {
     // Keep DB secrets out of wp-dev.config.json; they are stored in local docker/.env.
     return {
@@ -187,14 +190,16 @@ function toJson(data: WizardData): Record<string, unknown> {
   if (!String(local.composeProjectName ?? "").trim()) {
     delete local.composeProjectName;
   }
-  const o: Record<string, unknown> = {
-    project: data.project.trim(),
-    local,
-    staging: normalizeRemote(data.staging),
-    production: normalizeRemote(data.production),
-  };
+  // Preserve unknown keys (e.g. sync.*) from the on-disk config.
+  const o: Record<string, unknown> = existing ? { ...existing } : {};
+  o.project = data.project.trim();
+  o.local = local;
+  o.staging = normalizeRemote(data.staging);
+  o.production = normalizeRemote(data.production);
   if (data.simply?.account?.trim()) {
     o.simply = { account: data.simply.account.trim().toUpperCase() };
+  } else {
+    delete o.simply;
   }
   return o;
 }
@@ -243,6 +248,8 @@ export function Wizard() {
   } = useRunnerSecrets("Unlock admin and run npm run wp-dev -- up to enable browser deploy.");
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardData>(defaults);
+  /** Full on-disk config so Wizard save does not drop unknown keys (e.g. sync.*). */
+  const [existingConfig, setExistingConfig] = useState<Record<string, unknown> | null>(null);
   const [hasStagingServer, setHasStagingServer] = useState(false);
   const [useProviderIntegration, setUseProviderIntegration] = useState(false);
   const [terminalAuthDraft, setTerminalAuthDraft] = useState("");
@@ -308,6 +315,7 @@ export function Wizard() {
           }
         }
         if (loaded && typeof loaded.project === "string") {
+          setExistingConfig(loaded as Record<string, unknown>);
           const loadedLocalUrl = String((loaded.local as WizardData["local"])?.url ?? defaults().local.url);
           const aligned = alignLocalUrlToCurrentBrowser(loadedLocalUrl);
           if (aligned.changed) {
@@ -715,7 +723,7 @@ export function Wizard() {
       const staging = hasStagingServer
         ? data.staging
         : { ...STAGING_PLACEHOLDER, user: production.user || data.staging.user || "deploy" };
-      const payload = toJson({ ...data, staging, production });
+      const payload = toJson({ ...data, staging, production }, existingConfig);
       const res = await saveWpDevConfig(payload);
       if (!res.ok) {
         const err = "error" in res ? res.error : "unknown";
@@ -1992,7 +2000,7 @@ export function Wizard() {
                   return p;
                 })(),
                 simply: data.simply,
-              }),
+              }, existingConfig),
               null,
               2,
             )}

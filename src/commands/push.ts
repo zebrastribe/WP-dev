@@ -8,6 +8,7 @@ import { connectSsh } from "../services/ssh.js";
 import { rsyncPush } from "../services/rsync.js";
 import {
   assertLocalWpInstalled,
+  assertNotInTerminalContainerWithoutDocker,
   assertRemoteWpInstalled,
   resolveRemoteWpPath,
   wpLocalDbExportToFile,
@@ -25,6 +26,7 @@ import { getUrlVariants } from "../utils/url-variants.js";
 import { verifyRemoteSiteUrls } from "../utils/sync-verify.js";
 import { pushExcludePatterns } from "../services/sync-excludes.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
+import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
 import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
 
 export type PushOptions = {
@@ -105,7 +107,10 @@ export async function cmdPush(
   }
 
   assertHostSyncTools();
+  assertNotInTerminalContainerWithoutDocker();
 
+  const syncLock = acquireSyncLock(configDir, `push:${env}`);
+  try {
   await assertLocalWpInstalled(configDir, config);
   if (env === "staging") {
     if (!remote.db) {
@@ -273,5 +278,8 @@ export async function cmdPush(
     console.error(`Push to ${env} complete. Remote pre-push DB backup: ${prePushBackup}`);
   } else {
     console.error(`Push to ${env} complete.`);
+  }
+  } finally {
+    releaseSyncLock(syncLock);
   }
 }
