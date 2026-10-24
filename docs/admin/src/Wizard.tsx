@@ -449,7 +449,13 @@ export function Wizard() {
   useEffect(() => {
     const t = window.setTimeout(() => {
       try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
+        // Never persist DB passwords or other secrets in the draft.
+        const draft = structuredClone(data) as typeof data;
+        if (draft.staging?.db) draft.staging.db = { ...draft.staging.db, password: "" };
+        if (draft.production?.db) {
+          draft.production.db = { ...draft.production.db, password: "" };
+        }
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
       } catch (e) {
         logAdmin("warn", "Wizard: could not write draft to localStorage", e instanceof Error ? e.message : String(e));
       }

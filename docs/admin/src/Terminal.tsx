@@ -105,7 +105,10 @@ export function TerminalTab() {
         <button
           type="button"
           disabled={busy || !canRun}
-          onClick={() => void run("wpdev_push", { env: "staging" }, "sync")}
+          onClick={() => {
+            if (!window.confirm("Push localhost → staging? This overwrites remote files and DB.")) return;
+            void run("wpdev_push", { env: "staging" }, "sync");
+          }}
           className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
           Push localhost to staging
@@ -113,7 +116,15 @@ export function TerminalTab() {
         <button
           type="button"
           disabled={busy || !canRun}
-          onClick={() => void run("wpdev_push", { env: "production" }, "sync")}
+          onClick={() => {
+            if (
+              !window.confirm(
+                "Push localhost → PRODUCTION? This overwrites live files and database. Type OK mentally, then confirm.",
+              )
+            )
+              return;
+            void run("wpdev_push", { env: "production" }, "sync");
+          }}
           className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
           Push localhost to production
@@ -121,7 +132,15 @@ export function TerminalTab() {
         <button
           type="button"
           disabled={busy || !canRun}
-          onClick={() => void run("wpdev_pull", { env: "production" }, "sync")}
+          onClick={() => {
+            if (
+              !window.confirm(
+                "Pull PRODUCTION → localhost? This overwrites local wordpress/ files and the local database.",
+              )
+            )
+              return;
+            void run("wpdev_pull", { env: "production" }, "sync");
+          }}
           className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
           Pull production to localhost

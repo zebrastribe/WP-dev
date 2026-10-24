@@ -773,7 +773,7 @@ if ($method === 'GET' && $action === 'runner-health') {
 }
 
 if ($method === 'POST' && $action === 'runner-run') {
-    wpdev_require_admin_token($token, 'POST runner-run');
+    wpdev_require_mutation_token($token, 'runner-run');
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
     $input = is_array($in) ? $in : [];
@@ -836,7 +836,7 @@ if ($method === 'GET' && $action === 'runner-status') {
 }
 
 if ($method === 'POST' && $action === 'runner-cancel') {
-    wpdev_require_admin_token($token, 'POST runner-cancel');
+    wpdev_require_mutation_token($token, 'runner-cancel');
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
     $input = is_array($in) ? $in : [];

@@ -402,8 +402,9 @@ async function main(): Promise<void> {
     .action(
       async (opts: {
         dryRun?: boolean;
-        noAdmin?: boolean;
-        noRestart?: boolean;
+        /** Commander --no-admin sets admin=false */
+        admin?: boolean;
+        restart?: boolean;
         skipPull?: boolean;
         preflight?: boolean;
         json?: boolean;
@@ -411,8 +412,8 @@ async function main(): Promise<void> {
         await runWithConfig("update", (loaded) =>
           cmdUpdate(loaded, {
             dryRun: Boolean(opts.dryRun),
-            noAdmin: Boolean(opts.noAdmin),
-            noRestart: Boolean(opts.noRestart),
+            noAdmin: opts.admin === false,
+            noRestart: opts.restart === false,
             skipPull: Boolean(opts.skipPull),
             preflightOnly: Boolean(opts.preflight),
             json: Boolean(opts.json),
