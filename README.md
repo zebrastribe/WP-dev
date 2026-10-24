@@ -20,7 +20,7 @@ This repository is the **public localhost tool** (CLI + optional `/admin/` UI). 
 - Full backups exclude build junk (`node_modules`, `.git`)
 - Bind mounts and `.env` / backup ownership follow the **installing host user** (`WPDEV_HOST_UID`), not a fixed username
 - Service + filesystem managers (ports, health, permissions on up/pull)
-- macOS and Linux
+- **Linux**, **macOS**, and **Windows** (via [WSL2](https://learn.microsoft.com/windows/wsl/) + Docker Desktop)
 
 ---
 
@@ -31,7 +31,9 @@ This repository is the **public localhost tool** (CLI + optional `/admin/` UI). 
 - [ ] **Git**
 - [ ] For sync: server with **SSH**, **rsync**, and **WP-CLI**
 
-Works on **macOS** and **Linux**. On Mac, install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and keep the project under your home folder.
+**Platforms:** Linux, macOS (Intel and Apple Silicon), and Windows through **WSL2** (run wp-dev inside the Linux distro — not native `cmd`/`PowerShell`). Keep the project on a Linux filesystem (`~/…` in WSL), not `/mnt/c/…`.
+
+On Mac or Windows, install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and enable WSL2 integration on Windows.
 
 ---
 

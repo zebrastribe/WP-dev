@@ -16,7 +16,7 @@ WP-dev is its own stack. It does not integrate with LocalWP. You can migrate by 
 
 ## What platforms are supported?
 
-macOS and Linux. Windows: use WSL2 with Linux inside.
+Linux, macOS, and Windows (via WSL2 — run wp-dev inside the Linux distro, not native Windows shells).
 
 ## How do I install?
 

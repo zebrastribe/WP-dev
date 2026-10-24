@@ -424,7 +424,7 @@ async function main(): Promise<void> {
 
   program
     .command("quickstart")
-    .description("macOS/Linux friendly first run: check tools, start Docker, open setup wizard")
+    .description("First run helper (Linux, macOS, Windows/WSL2): check tools, start Docker, open setup wizard")
     .action(async () => {
       await runWithConfig("quickstart", cmdQuickstart);
     });
