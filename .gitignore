@@ -9,6 +9,7 @@ wordpress/*
 !wordpress/.gitkeep
 logs/*
 !logs/.gitkeep
+.wp-dev/
 .DS_Store
 docs/admin/node_modules/
 docs/admin/dist/

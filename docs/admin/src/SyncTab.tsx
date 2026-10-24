@@ -77,7 +77,8 @@ function SyncHelpPanel() {
       <div className="space-y-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-700 dark:border-slate-700 dark:text-slate-300">
         <p>
           This tab sets rules for <strong>full site sync</strong> — files and database together
-          (Push localhost → production, or Pull production → localhost).
+          (push/pull between local and staging or production). A first push to an empty host may
+          seed files before the database import.
         </p>
         <div>
           <p className="font-semibold text-slate-900 dark:text-slate-100">Plugins</p>

@@ -34,8 +34,9 @@ import { isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
 import { getUrlVariants } from "../utils/url-variants.js";
 import { getLocalUrlPortMismatch } from "../utils/published-local-urls.js";
 import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
-import { pushExcludePatterns, pullExcludePatterns } from "../services/sync-excludes.js";
+import { pullExcludePatterns } from "../services/sync-excludes.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
+import { confirmRemoteTarget } from "../utils/confirm.js";
 
 export type PullOptions = {
   dryRun: boolean;
@@ -43,6 +44,8 @@ export type PullOptions = {
   backupLocal: boolean;
   /** When true, skip auto simply setup-staging-dns after pull production. Default false. */
   skipSimplyStagingDns?: boolean;
+  /** Skip interactive SSH-host / production confirmation (browser runner, CI). */
+  yes?: boolean;
 };
 
 export async function cmdPull(
@@ -60,6 +63,16 @@ export async function cmdPull(
       `Refusing to pull: local.url uses port ${portMismatch.localUrlPort}, but docker/.env has WP_PORT=${portMismatch.wpPort}. ` +
         `Update local.url in wp-dev.config.json to http://localhost:${portMismatch.wpPort} (or match your host), then run pull again.`,
     );
+  }
+
+  if (!options.dryRun && !options.yes && process.env.WPDEV_ASSUME_YES !== "1") {
+    const ok = await confirmRemoteTarget(env, remote, "pull");
+    if (!ok) {
+      logInfo(`pull ${env}: user aborted at confirmation`);
+      console.error("Aborted.");
+      process.exitCode = 1;
+      return;
+    }
   }
 
   if (options.dryRun) {

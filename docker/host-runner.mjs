@@ -89,7 +89,7 @@ function commandForAction(action, args) {
   if (action === "wpdev_pull") {
     const env = safeArg(args?.env);
     if (!["staging", "production"].includes(env)) return null;
-    return `npm run wp-dev -- pull ${env}`;
+    return `npm run wp-dev -- pull ${env} --yes`;
   }
   if (action === "wpdev_pull_dry") {
     const env = safeArg(args?.env);

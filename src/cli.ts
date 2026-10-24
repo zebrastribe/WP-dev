@@ -25,7 +25,7 @@ import { cmdServices } from "./commands/services.js";
 import { cmdSyncPreview, cmdSyncRules, cmdSyncScan } from "./commands/sync-preview.js";
 import { cmdUpdate } from "./commands/update.js";
 import { cmdSslDisable, cmdSslEnable } from "./commands/ssl.js";
-import { cmdPhpSet, cmdPhpShow, cmdPhpValidate } from "./commands/php.js";
+import { cmdPhpRollback, cmdPhpSet, cmdPhpShow, cmdPhpValidate } from "./commands/php.js";
 import { cmdImportBuild } from "./commands/import/build.js";
 import { cmdImportIngest } from "./commands/import/ingest.js";
 import { cmdImportPush } from "./commands/import/push.js";
@@ -185,29 +185,70 @@ async function main(): Promise<void> {
       await runWithConfig("ssl disable", cmdSslDisable);
     });
 
-  const php = program.command("php").description("Manage local PHP runtime version for Docker images");
+  const php = program
+    .command("php")
+    .description("Manage PHP version for local Docker or remote hosts (with rollback)");
+
+  const parsePhpEnv = (raw: string | undefined): "local" | "staging" | "production" => {
+    const v = (raw ?? "local").trim().toLowerCase();
+    if (v === "local" || v === "staging" || v === "production") return v;
+    throw new Error(`Invalid --env "${raw}". Use local, staging, or production.`);
+  };
 
   php
     .command("show")
-    .description("Show current local PHP version and allowed values")
-    .action(async () => {
-      await runWithConfig("php show", cmdPhpShow);
+    .description("Show current PHP version / change strategy for an environment")
+    .option("--env <name>", "local | staging | production", "local")
+    .action(async (opts: { env?: string }) => {
+      const env = parsePhpEnv(opts.env);
+      await runWithConfig(`php show --env ${env}`, (loaded) => cmdPhpShow(loaded, { env }));
     });
 
   php
     .command("validate")
-    .description("Validate a PHP version by checking Docker image tags")
+    .description("Validate a PHP version (local Docker tags, or remote host strategy)")
     .argument("<version>", "e.g. 7.4, 8.1, 8.2, 8.3, 8.4")
-    .action(async (version: string) => {
-      await runWithConfig(`php validate ${version}`, (loaded) => cmdPhpValidate(loaded, version));
+    .option("--env <name>", "local | staging | production", "local")
+    .action(async (version: string, opts: { env?: string }) => {
+      const env = parsePhpEnv(opts.env);
+      await runWithConfig(`php validate ${version} --env ${env}`, (loaded) =>
+        cmdPhpValidate(loaded, version, { env }),
+      );
     });
 
   php
     .command("set")
-    .description("Set local PHP version (runs validation first)")
+    .description("Set PHP version (saves rollback snapshot first)")
     .argument("<version>", "e.g. 7.4, 8.1, 8.2, 8.3, 8.4")
-    .action(async (version: string) => {
-      await runWithConfig(`php set ${version}`, (loaded) => cmdPhpSet(loaded, version));
+    .option("--env <name>", "local | staging | production", "local")
+    .option("--restart", "Local only: down+up after changing docker/.env")
+    .option("--yes", "Skip production confirmation")
+    .action(async (version: string, opts: { env?: string; restart?: boolean; yes?: boolean }) => {
+      const env = parsePhpEnv(opts.env);
+      await runWithConfig(`php set ${version} --env ${env}`, (loaded) =>
+        cmdPhpSet(loaded, version, {
+          env,
+          restart: Boolean(opts.restart),
+          yes: Boolean(opts.yes),
+        }),
+      );
+    });
+
+  php
+    .command("rollback")
+    .description("Restore previous PHP selector / docker PHP version after a failed set")
+    .option("--env <name>", "local | staging | production", "local")
+    .option("--restart", "Local only: down+up after restore")
+    .option("--yes", "Skip production confirmation")
+    .action(async (opts: { env?: string; restart?: boolean; yes?: boolean }) => {
+      const env = parsePhpEnv(opts.env);
+      await runWithConfig(`php rollback --env ${env}`, (loaded) =>
+        cmdPhpRollback(loaded, {
+          env,
+          restart: Boolean(opts.restart),
+          yes: Boolean(opts.yes),
+        }),
+      );
     });
 
   program
@@ -433,21 +474,25 @@ async function main(): Promise<void> {
         "--skip-simply-staging-dns",
         "After pull production, skip auto simply setup-staging-dns when staging is still a placeholder",
       )
+      .option("--yes", "Skip interactive confirmation (used by admin runner / CI)")
       .action(
         async (opts: {
           dryRun?: boolean;
           backupLocal?: boolean;
           skipSimplyStagingDns?: boolean;
+          yes?: boolean;
         }) => {
           const dry = Boolean(opts.dryRun);
           const backupLocal = Boolean(opts.backupLocal);
           const skipSimplyStagingDns = Boolean(opts.skipSimplyStagingDns);
-          const label = `pull ${envName}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}`;
+          const yes = Boolean(opts.yes);
+          const label = `pull ${envName}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}${yes ? " --yes" : ""}`;
           await runWithConfig(label, (loaded) =>
             cmdPull(loaded, envName, {
               dryRun: dry,
               backupLocal,
               skipSimplyStagingDns,
+              yes,
             }),
           );
         },

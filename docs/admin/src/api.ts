@@ -258,7 +258,11 @@ export async function loadLocalStatus(): Promise<LocalStatusResponse> {
   const t0 = performance.now();
   logAdmin("info", "loadLocalStatus: request started", url);
   try {
-    const res = await fetch(url, { method: "GET", credentials: "same-origin" });
+    const res = await fetch(url, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: buildAdminApiHeaders(),
+    });
     const ms = Math.round(performance.now() - t0);
     let data: unknown;
     try {
@@ -380,6 +384,7 @@ export async function loadSimplyStatus(): Promise<SimplyStatusResponse> {
     const res = await fetch(apiPhpUrl("simply-status"), {
       method: "GET",
       credentials: "same-origin",
+      headers: buildAdminApiHeaders(),
     });
     const ms = Math.round(performance.now() - t0);
     const data = (await res.json()) as unknown;
@@ -407,6 +412,7 @@ export async function loadDockerEnvPublic(): Promise<DockerEnvPublicResponse> {
     const res = await fetch(apiPhpUrl("docker-env-public"), {
       method: "GET",
       credentials: "same-origin",
+      headers: buildAdminApiHeaders(),
     });
     const data = (await res.json()) as unknown;
     if (!data || typeof data !== "object") {

@@ -11,7 +11,7 @@ WP-dev does **not** host your live servers — it only syncs with servers you al
 - Local WordPress in Docker (MySQL + Apache)
 - **Pull** / **push** database and files via SSH and rsync
 - Browser **setup wizard** at `/admin/`
-- Automatic **backups** before sync
+- **DB backups** before sync when WordPress is already installed (first pull / bootstrap may skip)
 - **Theme-only** deploy (without overwriting production database)
 - **Service manager** — ports, health, lifecycle
 - **Filesystem manager** — permissions fixed automatically on up/pull
