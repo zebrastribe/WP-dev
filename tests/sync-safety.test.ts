@@ -30,8 +30,8 @@ describe("siteUrlsMatchExpected", () => {
 
 describe("backup timestamp names", () => {
   it("uses distinct prefixes", () => {
-    expect(timestampedDbName()).toMatch(/^db-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.sql$/);
-    expect(timestampedFullName()).toMatch(/^full-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.tar\.gz$/);
-    expect(timestampedPreRestoreName()).toMatch(/^pre-restore-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.sql$/);
+    expect(timestampedDbName()).toMatch(/^db-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{3}-[a-z0-9]+\.sql$/);
+    expect(timestampedFullName()).toMatch(/^full-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{3}-[a-z0-9]+\.tar\.gz$/);
+    expect(timestampedPreRestoreName()).toMatch(/^pre-restore-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{3}-[a-z0-9]+\.sql$/);
   });
 });

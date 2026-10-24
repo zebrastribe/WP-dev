@@ -18,6 +18,8 @@ import {
 } from "./docker-compose.js";
 import { resolveFromConfigDir } from "../config/load.js";
 import { persistEnvContent, setEnvValueInContent, writeEnvFile } from "../utils/compose-env.js";
+import { posixShellArg, posixShellQuote } from "../utils/shell-quote.js";
+import { sanitizeCliError } from "../utils/sanitize-cli-error.js";
 
 const CONTAINER_WP_PATH = "/var/www/html";
 
@@ -133,34 +135,39 @@ export async function isLocalWpInstalled(
   return r.exitCode === 0;
 }
 
+/** Fail fast when sync runs inside the terminal container (no Docker socket). */
+export function assertNotInTerminalContainerWithoutDocker(): void {
+  if (existsSync("/.dockerenv") && !existsSync("/var/run/docker.sock")) {
+    throw new Error(
+      "This sync command must run on your host (or a runner with the Docker socket), not inside the browser terminal container. From the project directory on the host: `npm run wp-dev -- pull|push …`.",
+    );
+  }
+}
+
 export async function assertLocalWpInstalled(
   configDir: string,
   config: WpDevConfig,
 ): Promise<void> {
   if (!(await isLocalWpInstalled(configDir, config))) {
-    const inContainerNoDockerSocket =
-      existsSync("/.dockerenv") && !existsSync("/var/run/docker.sock");
-    if (inContainerNoDockerSocket) {
-      throw new Error(
-        "This command must run on your host terminal, not inside the browser terminal container. Open a host shell and run: `npm run wp-dev -- push staging` from the project directory.",
-      );
-    }
+    assertNotInTerminalContainerWithoutDocker();
     throw new Error(
       "Local WordPress is not installed or docker services are not running. Run `wp-dev up` and complete the WordPress install (or pull from remote) first.",
     );
   }
 }
 
+/** Assert remote WP is installed; returns the resolved install path (may differ from config). */
 export async function assertRemoteWpInstalled(
   ssh: SshSession,
   remotePath: string,
-): Promise<void> {
+): Promise<string> {
   const check = await resolveRemoteWpPath(ssh, remotePath);
-  if (!check.installed) {
+  if (!check.installed || !check.path) {
     throw new Error(
       `Remote WordPress not found or WP-CLI failed at path: ${remotePath}. stderr: ${check.stderr ?? ""}${check.hint ?? ""}`,
     );
   }
+  return check.path;
 }
 
 export async function resolveRemoteWpPath(
@@ -190,16 +197,12 @@ export async function resolveRemoteWpPath(
   };
 }
 
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
 /**
  * Remote `wp --path=…` fragment. Single-quoted POSIX paths only; never wrap in double quotes
  * or WP-CLI receives quote characters inside the path value.
  */
 export function remoteWpPathFlag(remotePath: string): string {
-  return `--path=${shellQuote(remotePath)}`;
+  return `--path=${posixShellQuote(remotePath)}`;
 }
 
 export async function wpRemoteExec(
@@ -207,13 +210,8 @@ export async function wpRemoteExec(
   remotePath: string,
   wpArgs: string[],
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
-  const inner = wpArgs.map(shellArg).join(" ");
+  const inner = wpArgs.map(posixShellArg).join(" ");
   return ssh.exec(`wp ${inner} ${remoteWpPathFlag(remotePath)}`);
-}
-
-function shellArg(s: string): string {
-  if (/^[a-zA-Z0-9/._:-]+$/.test(s)) return s;
-  return shellQuote(s);
 }
 
 export async function wpRemoteDbExport(
@@ -331,7 +329,7 @@ export async function wpRemoteBootstrapConfigFromRemoteDb(
       "--force",
     ]);
     if (r.code === 0) return p;
-    lastErr = r.stderr || r.stdout;
+    lastErr = sanitizeCliError(r.stderr || r.stdout);
   }
   throw new Error(
     `Remote wp config create failed at ${remotePath}: ${lastErr}. ` +

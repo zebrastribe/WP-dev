@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -99,5 +99,12 @@ describe("fs update-lock", () => {
     expect(acquireUpdateLock(dir)).toBe(true);
     releaseUpdateLock(dir);
     expect(existsSync(join(dir, "logs", "wp-dev-update.lock"))).toBe(false);
+  });
+
+  it("treats corrupt update lock as stale and re-acquires", () => {
+    mkdirSync(join(dir, "logs"), { recursive: true });
+    writeFileSync(join(dir, "logs", "wp-dev-update.lock"), "{not-json", "utf8");
+    expect(acquireUpdateLock(dir)).toBe(true);
+    releaseUpdateLock(dir);
   });
 });

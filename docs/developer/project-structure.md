@@ -29,6 +29,16 @@ WP-dev/
 
 The folder containing `package.json` and `wp-dev.config.json`.
 
+## Public vs private (hosted web)
+
+This repo (**WP-dev**) stays **public**: localhost CLI, Docker, local admin, and (later) shared `packages/sync-engine` + `packages/wpdev-web`.
+
+A separate **private** repo ([zebrastribe/WP-dev-cloud](https://github.com/zebrastribe/WP-dev-cloud)) holds hosted/control-plane planning (and later code). It is **not** required for everyday CLI use. See the public stub [online-migration-plan.md](./online-migration-plan.md).
+
+## Optional: content recovery / import workspace
+
+`content-recovery-workspace/` and `wp-dev import *` are **site-specific** Wayback→WordPress import tooling. They are not part of the core Dev→Staging→Production sync product. Runtime SQLite under `content-recovery-workspace/storage/` is gitignored.
+
 ## Gitignored (typical)
 
 - `wp-dev.config.json`
@@ -36,6 +46,7 @@ The folder containing `package.json` and `wp-dev.config.json`.
 - `wordpress/*` (site content)
 - `logs/*.log`
 - `local-commands.md` (private snippets; use `local-commands.example.md` as template)
+- `content-recovery-workspace/storage/**/*.sqlite`
 
 ## Related
 

@@ -27,16 +27,18 @@ describe("backup service", () => {
     );
   });
 
-  it("timestampedDbName uses stable format", () => {
-    expect(timestampedDbName()).toBe("db-2026-06-17-14-05.sql");
+  it("timestampedDbName includes seconds and a unique suffix", () => {
+    const name = timestampedDbName();
+    expect(name).toMatch(/^db-2026-06-17-14-05-\d{2}-\d{3}-[a-z0-9]+\.sql$/);
   });
 
   it("timestampedFullName uses tar.gz suffix", () => {
-    expect(timestampedFullName()).toBe("full-2026-06-17-14-05.tar.gz");
+    expect(timestampedFullName()).toMatch(/^full-2026-06-17-14-05-\d{2}-\d{3}-[a-z0-9]+\.tar\.gz$/);
   });
 
   it("timestampedPreRestoreName is distinct", () => {
-    expect(timestampedPreRestoreName()).toBe("pre-restore-2026-06-17-14-05.sql");
+    expect(timestampedPreRestoreName()).toMatch(/^pre-restore-2026-06-17-14-05-\d{2}-\d{3}-[a-z0-9]+\.sql$/);
+    expect(timestampedDbName()).not.toBe(timestampedDbName());
   });
 
   it("assertBackupFileExists throws when missing", () => {

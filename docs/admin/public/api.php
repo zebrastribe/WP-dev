@@ -17,11 +17,12 @@ wpdev_enforce_local_admin_only();
 
 header('Content-Type: application/json; charset=utf-8');
 
-$configPath = '/wp-dev-repo/wp-dev.config.json';
-$dockerDir = '/wp-dev-repo/docker';
+$repoRoot = '/wp-dev-repo';
+$configPath = $repoRoot . '/wp-dev.config.json';
+$dockerDir = $repoRoot . '/docker';
 $dockerEnvPath = $dockerDir . '/.env';
 $dockerEnvExamplePath = $dockerDir . '/.env.example';
-$logDir = '/wp-dev-repo/logs';
+$logDir = $repoRoot . '/logs';
 $logFile = $logDir . '/wp-dev-admin-api.log';
 $schemaPath = __DIR__ . '/wp-dev.config.schema.json';
 
@@ -550,6 +551,14 @@ if ($method === 'POST' && $action === 'auth-bootstrap') {
         wpdev_admin_api_log('POST auth-bootstrap 403 not_local');
         exit;
     }
+    // Require loopback REMOTE_ADDR so Host-header spoofing alone cannot bootstrap.
+    $remoteAddr = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    $loopbackAddrs = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+    if (!in_array($remoteAddr, $loopbackAddrs, true)) {
+        wpdev_json_error(403, 'forbidden', 'Auto unlock requires a loopback client address.');
+        wpdev_admin_api_log('POST auth-bootstrap 403 not_loopback_addr remote=' . $remoteAddr);
+        exit;
+    }
     $resolved = $token;
     if ($resolved === '') {
         $resolved = wpdev_generate_admin_save_token();
@@ -597,6 +606,7 @@ if ($method === 'POST' && $action === 'logout') {
 }
 
 if ($method === 'GET' && $action === 'load') {
+    wpdev_require_admin_token($token, 'GET load');
     if (!is_file($configPath) || !is_readable($configPath)) {
         http_response_code(404);
         echo json_encode(['ok' => false, 'error' => 'not_found'], JSON_UNESCAPED_SLASHES);
@@ -617,6 +627,7 @@ if ($method === 'GET' && $action === 'load') {
 }
 
 if ($method === 'GET' && $action === 'local-status') {
+    wpdev_require_admin_token($token, 'GET local-status');
     $status = wpdev_local_status();
     wpdev_admin_api_log('GET local-status 200');
     echo json_encode(['ok' => true, ...$status], JSON_UNESCAPED_SLASHES);
@@ -624,6 +635,7 @@ if ($method === 'GET' && $action === 'local-status') {
 }
 
 if ($method === 'GET' && $action === 'simply-status') {
+    wpdev_require_admin_token($token, 'GET simply-status');
     $key = wpdev_simply_api_key();
     $cfgRaw = is_file($configPath) && is_readable($configPath) ? file_get_contents($configPath) : false;
     $account = null;
@@ -649,6 +661,7 @@ if ($method === 'GET' && $action === 'simply-status') {
 }
 
 if ($method === 'GET' && $action === 'docker-env-public') {
+    wpdev_require_admin_token($token, 'GET docker-env-public');
     $phpVersion = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_PHP_VERSION');
     if (!is_string($phpVersion) || preg_match('/^(7\.4|8\.[0-4])$/', $phpVersion) !== 1) {
         $phpVersion = '8.2';
@@ -704,8 +717,9 @@ if ($method === 'GET' && $action === 'terminal-runner-secrets') {
         [
             'ok' => true,
             'terminalAuth' => $auth,
-            'runnerToken' => $runnerToken,
-            'runnerOrigin' => is_string($runnerOrigin) ? $runnerOrigin : null,
+            // Runner token stays server-side (PHP proxy). Do not send to the browser.
+            'runnerToken' => null,
+            'runnerOrigin' => null,
             'terminalPort' => $terminalPort,
             'runnerPort' => $runnerPort,
             'syncRunnerPort' => $syncRunnerPort,
@@ -760,7 +774,7 @@ if ($method === 'GET' && $action === 'runner-health') {
 }
 
 if ($method === 'POST' && $action === 'runner-run') {
-    wpdev_require_admin_token($token, 'POST runner-run');
+    wpdev_require_mutation_token($token, 'runner-run');
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
     $input = is_array($in) ? $in : [];
@@ -823,7 +837,7 @@ if ($method === 'GET' && $action === 'runner-status') {
 }
 
 if ($method === 'POST' && $action === 'runner-cancel') {
-    wpdev_require_admin_token($token, 'POST runner-cancel');
+    wpdev_require_mutation_token($token, 'runner-cancel');
     $body = file_get_contents('php://input');
     $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
     $input = is_array($in) ? $in : [];
@@ -1141,254 +1155,6 @@ if ($method === 'POST' && $action === 'save-docker-env') {
 if ($method === 'POST' && $action === 'simply-setup-staging') {
     wpdev_json_error(410, 'gone', 'This endpoint is deprecated and disabled.');
     wpdev_admin_api_log('POST simply-setup-staging 410 gone');
-    exit;
-}
-
-if (false && $method === 'POST' && $action === 'simply-setup-staging') {
-    $body = file_get_contents('php://input');
-    $in = is_string($body) && trim($body) !== '' ? json_decode($body, true) : null;
-    $input = is_array($in) ? $in : [];
-
-    if (!is_file($configPath) || !is_readable($configPath)) {
-        wpdev_json_error(400, 'missing_config');
-        wpdev_admin_api_log('POST simply-setup-staging 400 missing_config');
-        exit;
-    }
-    $cfgRaw = file_get_contents($configPath);
-    $cfg = is_string($cfgRaw) && $cfgRaw !== '' ? json_decode($cfgRaw, true) : null;
-    if (!is_array($cfg)) {
-        wpdev_json_error(400, 'invalid_config');
-        wpdev_admin_api_log('POST simply-setup-staging 400 invalid_config');
-        exit;
-    }
-    $simply = isset($cfg['simply']) && is_array($cfg['simply']) ? $cfg['simply'] : [];
-    $account = null;
-    $inAccount = $input['account'] ?? null;
-    if (is_string($inAccount) && trim($inAccount) !== '') {
-        $account = trim($inAccount);
-        $cfg['simply'] = ['account' => $account];
-    } else {
-        $acc = $simply['account'] ?? null;
-        if (is_string($acc) && trim($acc) !== '') {
-            $account = trim($acc);
-        }
-    }
-    if ($account === null) {
-        wpdev_json_error(400, 'missing_simply_account');
-        wpdev_admin_api_log('POST simply-setup-staging 400 missing_simply_account');
-        exit;
-    }
-    $key = null;
-    $inKey = $input['apiKey'] ?? null;
-    if (is_string($inKey) && trim($inKey) !== '') {
-        $key = trim($inKey);
-    } else {
-        $key = wpdev_simply_api_key();
-    }
-    if ($key === null) {
-        wpdev_json_error(400, 'no_api_key');
-        wpdev_admin_api_log('POST simply-setup-staging 400 no_api_key');
-        exit;
-    }
-
-    $apex = null;
-    $inApex = $input['apex'] ?? null;
-    if (is_string($inApex) && trim($inApex) !== '') {
-        $apex = wpdev_parse_main_domain($inApex);
-    } else {
-        $prodUrl = is_array($cfg['production'] ?? null) ? ($cfg['production']['url'] ?? '') : '';
-        $apex = is_string($prodUrl) ? wpdev_parse_main_domain($prodUrl) : null;
-    }
-    if ($apex === null) {
-        wpdev_json_error(400, 'missing_apex', 'Set production.url or pass apex.');
-        wpdev_admin_api_log('POST simply-setup-staging 400 missing_apex');
-        exit;
-    }
-    $label = 'staging';
-    $inLabel = $input['stagingLabel'] ?? null;
-    if (is_string($inLabel) && trim($inLabel) !== '') {
-        $label = strtolower(trim($inLabel));
-    }
-    if (preg_match('/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/', $label) !== 1) {
-        wpdev_json_error(400, 'invalid_staging_label');
-        wpdev_admin_api_log('POST simply-setup-staging 400 invalid_staging_label');
-        exit;
-    }
-    $keepExisting = (bool) ($input['keepExistingDns'] ?? false);
-    $stagingFqdn = $label . '.' . strtolower($apex);
-
-    $lines = [];
-    $products = wpdev_simply_json($account, $key, 'GET', '/my/products/', null);
-    if ($products['ok'] !== true) {
-        wpdev_json_error($products['status'], 'simply_products_failed', $products['detail']);
-        wpdev_admin_api_log('POST simply-setup-staging products_failed');
-        exit;
-    }
-    $plist = $products['json']['products'] ?? [];
-    if (!is_array($plist)) {
-        $plist = [];
-    }
-    $product = null;
-    foreach ($plist as $p) {
-        if (!is_array($p)) {
-            continue;
-        }
-        if (!empty($p['cancelled'])) {
-            continue;
-        }
-        $dname = is_array($p['domain'] ?? null) ? ($p['domain']['name'] ?? null) : null;
-        $obj = $p['object'] ?? null;
-        $cand = is_string($dname) ? strtolower($dname) : (is_string($obj) ? strtolower($obj) : '');
-        if ($cand === strtolower($apex)) {
-            $product = $p;
-            break;
-        }
-    }
-    if (!is_array($product)) {
-        wpdev_json_error(400, 'simply_product_not_found', 'No Simply product matched apex ' . $apex);
-        wpdev_admin_api_log('POST simply-setup-staging product_not_found');
-        exit;
-    }
-    $object = is_string($product['object'] ?? null) ? $product['object'] : '';
-    if ($object === '') {
-        wpdev_json_error(400, 'simply_product_invalid');
-        wpdev_admin_api_log('POST simply-setup-staging product_invalid');
-        exit;
-    }
-    $lines[] = 'Simply: using DNS zone product "' . $object . '"';
-    $recordsPath = '/my/products/' . rawurlencode($object) . '/dns/records/';
-    $recordsRes = wpdev_simply_json($account, $key, 'GET', $recordsPath, null);
-    if ($recordsRes['ok'] !== true) {
-        wpdev_json_error($recordsRes['status'], 'simply_records_failed', $recordsRes['detail']);
-        wpdev_admin_api_log('POST simply-setup-staging records_failed');
-        exit;
-    }
-    $records = $recordsRes['json']['records'] ?? [];
-    if (!is_array($records)) {
-        $records = [];
-    }
-
-    $ip = null;
-    $servers = is_array($product['servers'] ?? null) ? $product['servers'] : [];
-    $webserver = is_array($servers['webserver'] ?? null) ? $servers['webserver'] : [];
-    $sshserver = is_array($servers['sshserver'] ?? null) ? $servers['sshserver'] : [];
-    $wip = $webserver['ip'] ?? null;
-    $sip = $sshserver['ip'] ?? null;
-    if (wpdev_is_ipv4(is_string($wip) ? $wip : null)) {
-        $ip = trim((string) $wip);
-    } elseif (wpdev_is_ipv4(is_string($sip) ? $sip : null)) {
-        $ip = trim((string) $sip);
-    } else {
-        $wantA = [wpdev_normalize_dns_name($apex), wpdev_normalize_dns_name('www.' . $apex)];
-        foreach ($records as $r) {
-            if (!is_array($r)) {
-                continue;
-            }
-            $t = strtoupper((string) ($r['type'] ?? ''));
-            $name = wpdev_normalize_dns_name((string) ($r['name'] ?? ''));
-            $data = (string) ($r['data'] ?? '');
-            if ($t === 'A' && in_array($name, $wantA, true) && wpdev_is_ipv4($data)) {
-                $ip = trim($data);
-                break;
-            }
-        }
-    }
-    if ($ip === null) {
-        wpdev_json_error(400, 'staging_ip_not_found', 'No IPv4 available for staging DNS target.');
-        wpdev_admin_api_log('POST simply-setup-staging ip_not_found');
-        exit;
-    }
-
-    $existingAtName = null;
-    $existingA = null;
-    foreach ($records as $r) {
-        if (!is_array($r)) {
-            continue;
-        }
-        $nameRaw = (string) ($r['name'] ?? '');
-        if (!wpdev_dns_name_matches_fqdn($nameRaw, $stagingFqdn, $apex)) {
-            continue;
-        }
-        $existingAtName = $r;
-        if (strtoupper((string) ($r['type'] ?? '')) === 'A') {
-            $existingA = $r;
-        }
-        break;
-    }
-    if (is_array($existingA)) {
-        $existingData = trim((string) ($existingA['data'] ?? ''));
-        if ($existingData === $ip) {
-            $lines[] = 'Simply: A record ' . $stagingFqdn . ' → ' . $ip . ' already present.';
-        } elseif (!$keepExisting) {
-            wpdev_json_error(409, 'dns_conflict', 'Existing A record at ' . $stagingFqdn . ' → ' . $existingData);
-            wpdev_admin_api_log('POST simply-setup-staging dns_conflict_a');
-            exit;
-        } else {
-            $lines[] = 'Simply: keeping existing A at ' . $stagingFqdn . ' → ' . $existingData . ' (config only).';
-        }
-    } elseif (is_array($existingAtName)) {
-        $typ = strtoupper((string) ($existingAtName['type'] ?? ''));
-        $data = trim((string) ($existingAtName['data'] ?? ''));
-        if (!$keepExisting) {
-            wpdev_json_error(409, 'dns_conflict', 'Existing ' . $typ . ' record at ' . $stagingFqdn);
-            wpdev_admin_api_log('POST simply-setup-staging dns_conflict_other');
-            exit;
-        } else {
-            $lines[] = 'Simply: keeping existing ' . $typ . ' at ' . $stagingFqdn . ' → ' . $data . ' (config only).';
-        }
-    } else {
-        $post = wpdev_simply_json($account, $key, 'POST', $recordsPath, [
-            'type' => 'A',
-            'name' => $stagingFqdn,
-            'data' => $ip,
-        ]);
-        if ($post['ok'] !== true) {
-            wpdev_json_error($post['status'], 'dns_create_failed', $post['detail']);
-            wpdev_admin_api_log('POST simply-setup-staging dns_create_failed');
-            exit;
-        }
-        $lines[] = 'Simply: created A record ' . $stagingFqdn . ' → ' . $ip;
-    }
-
-    $staging = is_array($cfg['staging'] ?? null) ? $cfg['staging'] : [];
-    $stagingHost = is_string($staging['host'] ?? null) ? (string) $staging['host'] : '';
-    $stagingPath = is_string($staging['path'] ?? null) ? (string) $staging['path'] : '';
-    $sshHost = is_string($sshserver['hostname'] ?? null) ? trim((string) $sshserver['hostname']) : '';
-    if ($sshHost !== '' && str_ends_with(strtolower(trim($stagingHost)), '.invalid')) {
-        $staging['host'] = $sshHost;
-        $lines[] = 'Config: staging.host set to ' . $sshHost;
-    }
-    $legacyGuess = '/var/www/' . wpdev_domain_slug($apex) . '/public_html';
-    if ($stagingPath === '/var/www/staging-not-used') {
-        $guess = '/' . $label;
-        $staging['path'] = $guess;
-        $lines[] = 'Config: staging.path set to ' . $guess . ' (Simply subdomain folder; verify in hosting panel).';
-    } elseif ($stagingPath === $legacyGuess) {
-        $guess = '/' . $label;
-        $staging['path'] = $guess;
-        $lines[] = 'Config: staging.path migrated from legacy ' . $legacyGuess . ' to ' . $guess . ' (Simply subdomain folder).';
-    }
-    $staging['url'] = 'https://' . $stagingFqdn;
-    $cfg['staging'] = $staging;
-    $lines[] = 'Config: staging.url set to https://' . $stagingFqdn;
-    $lines[] = 'Note: Simply subdomain folder mapping is separate from DNS. Ensure subdomain "' . $stagingFqdn . '" exists in Subdomains and points to ' . ($staging['path'] ?? ('/' . $label)) . '.';
-
-    $encoded = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-    if (!is_string($encoded) || file_put_contents($configPath, $encoded, LOCK_EX) === false) {
-        wpdev_json_error(500, 'write_config_failed');
-        wpdev_admin_api_log('POST simply-setup-staging 500 write_config_failed');
-        exit;
-    }
-
-    wpdev_admin_api_log('POST simply-setup-staging 200 ok');
-    echo json_encode(
-        [
-            'ok' => true,
-            'lines' => $lines,
-            'staging' => $cfg['staging'],
-        ],
-        JSON_UNESCAPED_SLASHES
-    );
     exit;
 }
 

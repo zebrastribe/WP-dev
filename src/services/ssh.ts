@@ -1,6 +1,9 @@
 import { NodeSSH } from "node-ssh";
+import { statSync } from "node:fs";
 import type { RemoteEnvConfig } from "../config/schema.js";
 import { buildSshConnectAttempts } from "../utils/ssh-helpers.js";
+
+const SSH_READY_TIMEOUT_MS = 20_000;
 
 export type SshSession = {
   exec(
@@ -19,7 +22,7 @@ export async function connectSsh(remote: RemoteEnvConfig): Promise<SshSession> {
   const errors: string[] = [];
   for (const a of attempts) {
     try {
-      await ssh.connect(a.opts);
+      await ssh.connect({ ...a.opts, readyTimeout: SSH_READY_TIMEOUT_MS });
       errors.length = 0;
       break;
     } catch (e) {
@@ -47,7 +50,14 @@ export async function connectSsh(remote: RemoteEnvConfig): Promise<SshSession> {
       };
     },
     getFile(remotePath, localPath) {
-      return ssh.getFile(localPath, remotePath);
+      return ssh.getFile(localPath, remotePath).then(() => {
+        const stat = statSync(localPath);
+        if (!stat.isFile() || stat.size === 0) {
+          throw new Error(
+            `SSH download failed or empty file: ${remotePath} -> ${localPath}`,
+          );
+        }
+      });
     },
     putFile(localPath, remotePath) {
       return ssh.putFile(localPath, remotePath);

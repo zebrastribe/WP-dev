@@ -9,6 +9,7 @@ import { rsyncPull } from "../services/rsync.js";
 import { ensureBackupDir, timestampedDbName } from "../services/backup.js";
 import {
   assertRemoteWpInstalled,
+  assertNotInTerminalContainerWithoutDocker,
   isLocalWpInstalled,
   wpLocalAlignTablePrefixAfterImport,
   wpLocalDbExportToFile,
@@ -18,6 +19,8 @@ import {
   wpRemoteDbExport,
 } from "../services/wpcli.js";
 import { logInfo } from "../utils/logger.js";
+import { assertValidSqlDump } from "../utils/sql-dump-validate.js";
+import { remoteRmFile } from "../utils/shell-quote.js";
 import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
 import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
 import {
@@ -32,8 +35,10 @@ import { isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
 import { getUrlVariants } from "../utils/url-variants.js";
 import { getLocalUrlPortMismatch } from "../utils/published-local-urls.js";
 import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
-import { pushExcludePatterns, pullExcludePatterns } from "../services/sync-excludes.js";
+import { pullExcludePatterns } from "../services/sync-excludes.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
+import { confirmRemoteTarget } from "../utils/confirm.js";
+import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
 
 export type PullOptions = {
   dryRun: boolean;
@@ -41,6 +46,8 @@ export type PullOptions = {
   backupLocal: boolean;
   /** When true, skip auto simply setup-staging-dns after pull production. Default false. */
   skipSimplyStagingDns?: boolean;
+  /** Skip interactive SSH-host / production confirmation (browser runner, CI). */
+  yes?: boolean;
 };
 
 export async function cmdPull(
@@ -60,6 +67,16 @@ export async function cmdPull(
     );
   }
 
+  if (!options.dryRun && !options.yes && process.env.WPDEV_ASSUME_YES !== "1") {
+    const ok = await confirmRemoteTarget(env, remote, "pull");
+    if (!ok) {
+      logInfo(`pull ${env}: user aborted at confirmation`);
+      console.error("Aborted.");
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   if (options.dryRun) {
     logInfo(`pull ${env} dry-run: rsync only`);
     console.error("[dry-run] Would: validate SSH, export remote DB, rsync files, import DB, search-replace URLs.");
@@ -71,7 +88,10 @@ export async function cmdPull(
   }
 
   assertHostSyncTools();
+  assertNotInTerminalContainerWithoutDocker();
 
+  const syncLock = acquireSyncLock(configDir, `pull:${env}`);
+  try {
   let prePullBackup: string | undefined;
   if (options.backupLocal) {
     if (await isLocalWpInstalled(configDir, config)) {
@@ -89,18 +109,21 @@ export async function cmdPull(
   logInfo(`pull ${env}: connect ssh ${remote.user}@${remote.host}`);
   const ssh = await connectSsh(remote);
   try {
-    await assertRemoteWpInstalled(ssh, remote.path);
+    const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
+    if (wpPath !== remote.path) {
+      logInfo(`pull ${env}: using remote wp path ${wpPath} (configured: ${remote.path})`);
+    }
 
     const remoteDump = `/tmp/wp-dev-pull-${Date.now()}.sql`;
     logInfo(`pull ${env}: remote wp db export`);
-    await wpRemoteDbExport(ssh, remote.path, remoteDump);
+    await wpRemoteDbExport(ssh, wpPath, remoteDump);
 
     const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-pull-"));
     const tempId = registerTempDir(loaded, tmpDir, `pull-${env}`);
     const localDump = join(tmpDir, "dump.sql");
     try {
       await ssh.getFile(remoteDump, localDump);
-      await ssh.exec(`rm -f ${remoteDump.replace(/'/g, `'\\''`)}`);
+      await ssh.exec(remoteRmFile(remoteDump));
 
       logInfo(`pull ${env}: rsync files -> ${localWpRoot}`);
       try {
@@ -115,12 +138,11 @@ export async function cmdPull(
         await rsyncPull(remote, localWpRoot, {
           dryRun: false,
           excludes: pullExcludePatterns(configDir, config),
+          remotePath: wpPath,
         });
 
         const sql = readFileSync(localDump, "utf8");
-        if (!/CREATE TABLE|INSERT INTO/i.test(sql)) {
-          throw new Error("Downloaded SQL dump looks empty or invalid.");
-        }
+        assertValidSqlDump(sql, "Downloaded SQL dump");
         const tablePrefix = detectTablePrefixFromSqlDump(sql);
 
         logInfo(`pull ${env}: local wp db import`);
@@ -215,4 +237,7 @@ export async function cmdPull(
   console.error(
     `Pull from ${env} complete. Database and files synced; URLs replaced ${remote.url} -> ${config.local.url}.${backupNote}`,
   );
+  } finally {
+    releaseSyncLock(syncLock);
+  }
 }

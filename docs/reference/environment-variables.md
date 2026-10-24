@@ -30,7 +30,17 @@ WP-dev auto-generates security tokens on first `wp-dev up`.
 |----------|---------|-------------|
 | `WPDEV_PHP_VERSION` | 8.2 | Docker image tag (`7.4`–`8.4`) |
 
-Change with `wp-dev php set <version>`, then `down` and `up`.
+```bash
+npm run wp-dev -- php show --env local
+npm run wp-dev -- php set 8.3 --env local --restart   # saves rollback snapshot
+npm run wp-dev -- php rollback --env local --restart  # if something breaks
+
+npm run wp-dev -- php show --env staging
+npm run wp-dev -- php set 8.2 --env staging           # only if host supports .php-version / htaccess
+npm run wp-dev -- php rollback --env staging
+```
+
+Local uses Docker image tags. Staging/production only when the host honors `.php-version` or AddHandler in `.htaccess`; otherwise change PHP in the panel.
 
 ## HTTPS
 

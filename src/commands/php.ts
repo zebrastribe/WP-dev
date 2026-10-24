@@ -1,69 +1,134 @@
-import { execa } from "execa";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { LoadedConfig } from "../config/load.js";
-import { persistEnvContent, setEnvValueInContent } from "../utils/compose-env.js";
+import type { RemoteEnvName } from "../config/schema.js";
+import {
+  assertLocalDockerTags,
+  assertSupportedPhpVersion,
+  detectPhp,
+  type PhpEnvTarget,
+  readPhpRollback,
+  rollbackPhpVersion,
+  setLocalPhpVersion,
+  setRemotePhpVersion,
+  SUPPORTED_PHP_VERSIONS,
+} from "../services/php-version.js";
+import { confirmProduction } from "../utils/confirm.js";
 
-const SUPPORTED_PHP_VERSIONS = ["7.4", "8.0", "8.1", "8.2", "8.3", "8.4"] as const;
-type SupportedPhpVersion = (typeof SUPPORTED_PHP_VERSIONS)[number];
+export type PhpCommandOptions = {
+  env?: PhpEnvTarget;
+  restart?: boolean;
+  yes?: boolean;
+  json?: boolean;
+};
 
-function composeEnvPath(loaded: LoadedConfig): string {
-  return join(loaded.configDir, loaded.config.local.path, ".env");
+function resolveEnv(options: PhpCommandOptions): PhpEnvTarget {
+  return options.env ?? "local";
 }
 
-function readEnvValue(content: string, key: string): string {
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const m = content.match(new RegExp(`^${escaped}=(.*)$`, "m"));
-  if (!m) return "";
-  return (m[1] || "").trim();
+export async function cmdPhpValidate(
+  _loaded: LoadedConfig,
+  version: string,
+  options: PhpCommandOptions = {},
+): Promise<void> {
+  assertSupportedPhpVersion(version);
+  const env = resolveEnv(options);
+  if (env === "local") {
+    await assertLocalDockerTags(version);
+    console.error(`PHP ${version} is valid for local Docker use.`);
+    console.error(`- wordpress:php${version}-apache`);
+    console.error(`- wordpress:cli-php${version}`);
+    return;
+  }
+  const detect = await detectPhp(_loaded, env);
+  console.error(`Remote ${env}: strategy=${detect.strategy} supported=${detect.supported}`);
+  console.error(detect.detail);
+  if (!detect.supported) {
+    throw new Error(`Host does not support automated PHP changes for ${env}.`);
+  }
+  console.error(`PHP ${version} is in the allowed list (${SUPPORTED_PHP_VERSIONS.join(", ")}).`);
 }
 
-function setEnvValue(content: string, key: string, value: string): string {
-  return setEnvValueInContent(content, key, value);
-}
-
-function assertSupported(version: string): asserts version is SupportedPhpVersion {
-  if (!SUPPORTED_PHP_VERSIONS.includes(version as SupportedPhpVersion)) {
-    throw new Error(
-      `Unsupported PHP version "${version}". Allowed: ${SUPPORTED_PHP_VERSIONS.join(", ")}`,
+export async function cmdPhpShow(
+  loaded: LoadedConfig,
+  options: PhpCommandOptions = {},
+): Promise<void> {
+  const env = resolveEnv(options);
+  const detect = await detectPhp(loaded, env);
+  const rb = readPhpRollback(loaded.configDir, env);
+  if (options.json) {
+    console.log(
+      JSON.stringify(
+        {
+          env,
+          currentVersion: detect.currentVersion,
+          strategy: detect.strategy,
+          supported: detect.supported,
+          detail: detect.detail,
+          allowed: [...SUPPORTED_PHP_VERSIONS],
+          rollback: rb
+            ? {
+                previousVersion: rb.previousVersion,
+                at: rb.at,
+                strategy: rb.strategy,
+              }
+            : null,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+  console.error(`Environment: ${env}`);
+  console.error(`Current PHP (best effort): ${detect.currentVersion ?? "unknown"}`);
+  console.error(`Change strategy: ${detect.strategy}${detect.supported ? "" : " (manual panel only)"}`);
+  console.error(`Detail: ${detect.detail}`);
+  console.error(`Allowed values: ${SUPPORTED_PHP_VERSIONS.join(", ")}`);
+  if (rb) {
+    console.error(
+      `Rollback available → ${rb.previousVersion ?? "prior files"} (saved ${rb.at}). Run: wp-dev php rollback --env ${env}`,
     );
   }
 }
 
-async function assertDockerTagExists(tag: string): Promise<void> {
-  try {
-    await execa("docker", ["manifest", "inspect", tag], { stdio: "pipe" });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`Docker image tag not available: ${tag}\n${msg}`);
+export async function cmdPhpSet(
+  loaded: LoadedConfig,
+  version: string,
+  options: PhpCommandOptions = {},
+): Promise<void> {
+  assertSupportedPhpVersion(version);
+  const env = resolveEnv(options);
+
+  if (env === "production" && !options.yes && process.env.WPDEV_ASSUME_YES !== "1") {
+    const ok = await confirmProduction(
+      `You are about to change PRODUCTION PHP to ${version}.`,
+    );
+    if (!ok) {
+      console.error("Aborted.");
+      process.exitCode = 1;
+      return;
+    }
   }
+
+  if (env === "local") {
+    await setLocalPhpVersion(loaded, version, { restart: Boolean(options.restart) });
+    return;
+  }
+
+  await setRemotePhpVersion(loaded, env as RemoteEnvName, version);
 }
 
-export async function cmdPhpValidate(_loaded: LoadedConfig, version: string): Promise<void> {
-  assertSupported(version);
-  const wpTag = `wordpress:php${version}-apache`;
-  const cliTag = `wordpress:cli-php${version}`;
-  await assertDockerTagExists(wpTag);
-  await assertDockerTagExists(cliTag);
-  console.error(`PHP ${version} is valid for local use.`);
-  console.error(`- ${wpTag}`);
-  console.error(`- ${cliTag}`);
-}
-
-export async function cmdPhpSet(loaded: LoadedConfig, version: string): Promise<void> {
-  await cmdPhpValidate(loaded, version);
-  const envPath = composeEnvPath(loaded);
-  const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-  const next = setEnvValue(current, "WPDEV_PHP_VERSION", version);
-  persistEnvContent(envPath, next, loaded);
-  console.error(`Set WPDEV_PHP_VERSION=${version} in ${envPath}.`);
-  console.error("Run: npm run wp-dev -- down && npm run wp-dev -- up");
-}
-
-export async function cmdPhpShow(loaded: LoadedConfig): Promise<void> {
-  const envPath = composeEnvPath(loaded);
-  const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-  const version = readEnvValue(current, "WPDEV_PHP_VERSION") || "8.2";
-  console.error(`Current local PHP version: ${version}`);
-  console.error(`Allowed values: ${SUPPORTED_PHP_VERSIONS.join(", ")}`);
+export async function cmdPhpRollback(
+  loaded: LoadedConfig,
+  options: PhpCommandOptions = {},
+): Promise<void> {
+  const env = resolveEnv(options);
+  if (env === "production" && !options.yes && process.env.WPDEV_ASSUME_YES !== "1") {
+    const ok = await confirmProduction("You are about to ROLL BACK PRODUCTION PHP selector files.");
+    if (!ok) {
+      console.error("Aborted.");
+      process.exitCode = 1;
+      return;
+    }
+  }
+  await rollbackPhpVersion(loaded, env, { restart: Boolean(options.restart) });
 }

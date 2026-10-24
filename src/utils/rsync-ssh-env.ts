@@ -1,15 +1,32 @@
 import type { RemoteEnvConfig } from "../config/schema.js";
 import { resolveIdentityFile } from "./remote-config-helpers.js";
 
+/** Allowlist aligned with docker/runner-remote-env.mjs SAFE. */
+const SAFE_SSH_FIELD = /^[a-zA-Z0-9._:@~/-]+$/;
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function assertSafeSshField(label: string, value: string): void {
+  if (!SAFE_SSH_FIELD.test(value)) {
+    throw new Error(`Unsafe SSH ${label} for rsync -e (disallowed characters): ${value}`);
+  }
+}
+
 /** SSH options passed to rsync via `-e` (BatchMode, identity file, port). */
 export function buildSshRsyncEnv(remote: RemoteEnvConfig): string {
+  assertSafeSshField("host", remote.host);
+  assertSafeSshField("user", remote.user);
+  assertSafeSshField("path", remote.path);
   const parts = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"];
   if (remote.port != null) {
     parts.push("-p", String(remote.port));
   }
   const key = resolveIdentityFile(remote.identityFile);
   if (key) {
-    parts.push("-i", key);
+    assertSafeSshField("identityFile", key);
+    parts.push("-i", shellQuote(key));
   }
   return parts.join(" ");
 }
@@ -21,13 +38,19 @@ export function canRetryPullWithRelativePath(remotePath: string, stderr: string)
   );
 }
 
+/**
+ * Only retry absolute→relative when the *destination root* itself cannot be created.
+ * Mid-tree mkdir failures must not strip leading `/` (files could land under $HOME).
+ */
 export function canRetryPushWithRelativePath(remotePath: string, stderr: string): boolean {
-  return (
-    remotePath.startsWith("/") &&
-    /mkdir .* failed: Permission denied|recv_generator: mkdir .* failed: Permission denied/i.test(
-      stderr,
-    )
+  if (!remotePath.startsWith("/")) return false;
+  const normalized = remotePath.replace(/\/$/, "");
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rootMkdir = new RegExp(
+    `(?:recv_generator:\\s*)?mkdir\\s+["']?${escaped}["']?\\s+failed:\\s*Permission denied`,
+    "i",
   );
+  return rootMkdir.test(stderr);
 }
 
 export function pullRsyncFailureHint(stderr: string): string {

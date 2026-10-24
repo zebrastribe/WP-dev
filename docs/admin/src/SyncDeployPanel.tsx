@@ -41,13 +41,28 @@ export function SyncDeployPanel({
   const busy = isRunning;
 
   const runDeploy = async (dryRun: boolean) => {
-    if (
-      !dryRun &&
-      activeDirection === "push" &&
-      activeEnv === "production" &&
-      !window.confirm("Push to PRODUCTION replaces remote files and database. Continue?")
-    ) {
-      return;
+    if (!dryRun) {
+      if (
+        activeDirection === "push" &&
+        activeEnv === "production" &&
+        !window.confirm("Push to PRODUCTION replaces remote files and database. Continue?")
+      ) {
+        return;
+      }
+      if (
+        activeDirection === "pull" &&
+        activeEnv === "production" &&
+        !window.confirm("Pull PRODUCTION → localhost replaces local files and database. Continue?")
+      ) {
+        return;
+      }
+      if (
+        activeDirection === "push" &&
+        activeEnv === "staging" &&
+        !window.confirm("Push localhost → staging replaces remote files and database. Continue?")
+      ) {
+        return;
+      }
     }
 
     if (onBeforeRun) {

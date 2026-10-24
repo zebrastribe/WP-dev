@@ -14,6 +14,7 @@ import {
   wpRemoteDbExport,
 } from "../services/wpcli.js";
 import { logInfo } from "../utils/logger.js";
+import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
 
 export type BackupTarget = RemoteEnvName | "local";
 
@@ -21,10 +22,6 @@ export type BackupOptions = {
   /** When true, backup wp-content + DB as a .tar.gz. */
   files?: boolean;
 };
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
 export function listRecentBackups(
   project: string,
@@ -68,11 +65,11 @@ export async function cmdBackup(
   const remote = getRemoteEnv(config, env);
   const ssh = await connectSsh(remote);
   try {
-    await assertRemoteWpInstalled(ssh, remote.path);
+    const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
     const remoteDump = `/tmp/wp-dev-backup-${Date.now()}.sql`;
-    await wpRemoteDbExport(ssh, remote.path, remoteDump);
+    await wpRemoteDbExport(ssh, wpPath, remoteDump);
     await ssh.getFile(remoteDump, outPath);
-    await ssh.exec(`rm -f ${remoteDump}`);
+    await ssh.exec(remoteRmFile(remoteDump));
   } finally {
     ssh.dispose();
   }
@@ -118,10 +115,10 @@ async function cmdBackupFull(
   const stamp = Date.now();
   const remoteDir = `/tmp/wp-dev-full-${env}-${stamp}`;
   const remoteTar = `${remoteDir}/full.tar.gz`;
-  const wpPath = shellQuote(remote.path);
   try {
-    await assertRemoteWpInstalled(ssh, remote.path);
-    await ssh.exec(
+    const resolvedPath = await assertRemoteWpInstalled(ssh, remote.path);
+    const wpPath = posixShellQuote(resolvedPath);
+    const packed = await ssh.exec(
       [
         "set -e",
         `mkdir -p ${remoteDir}`,
@@ -130,8 +127,13 @@ async function cmdBackupFull(
         `tar -czf ${remoteTar} -C ${wpPath} wp-content -C ${remoteDir} db.sql`,
       ].join("; "),
     );
+    if (packed.code !== 0) {
+      throw new Error(
+        `Remote full backup failed (exit ${packed.code}): ${packed.stderr || packed.stdout}`,
+      );
+    }
     await ssh.getFile(remoteTar, outPath);
-    await ssh.exec(`rm -rf ${remoteDir}`);
+    await ssh.exec(remoteRmRf(remoteDir));
   } finally {
     ssh.dispose();
   }

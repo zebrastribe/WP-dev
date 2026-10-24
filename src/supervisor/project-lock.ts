@@ -34,8 +34,11 @@ export function readLockData(configDir: string): ProjectLockData | null {
 }
 
 export function isLockStale(configDir: string): boolean {
+  const path = lockPath(configDir);
+  if (!existsSync(path)) return false;
   const data = readLockData(configDir);
-  if (!data) return false;
+  // Corrupt/unreadable lock must not block acquire forever (wx EEXIST).
+  if (!data) return true;
   return !isPidAlive(data.pid);
 }
 

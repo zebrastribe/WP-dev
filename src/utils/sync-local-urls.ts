@@ -21,6 +21,44 @@ export function isLoopbackHostname(host: string): boolean {
   return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
 }
 
+/** @deprecated Prefer isLoopbackHostname — kept for callers/tests that used the services/ name. */
+export const isLoopbackHost = isLoopbackHostname;
+
+/** Normalizes loopback site URLs for comparison (localhost, no trailing slash). */
+export function normalizeLoopbackSiteUrl(raw: string): string | undefined {
+  const u = tryParseUrl(raw);
+  if (!u || !isLoopbackHostname(u.hostname)) return undefined;
+  u.hostname = "localhost";
+  u.hash = "";
+  u.search = "";
+  if ((u.protocol === "http:" && u.port === "80") || (u.protocol === "https:" && u.port === "443")) {
+    u.port = "";
+  }
+  return normalizeSiteUrl(u.toString());
+}
+
+export function shouldSyncLocalWordPressUrl(current: string, target: string): boolean {
+  const normCurrent = normalizeLoopbackSiteUrl(current);
+  const normTarget = normalizeLoopbackSiteUrl(target);
+  if (!normCurrent || !normTarget) return false;
+  return normCurrent !== normTarget;
+}
+
+/** Distinct loopback URL strings suitable for wp search-replace (with and without trailing slash). */
+export function collectLoopbackUrlVariants(...urls: (string | undefined)[]): string[] {
+  const out = new Set<string>();
+  for (const raw of urls) {
+    if (!raw?.trim()) continue;
+    const u = tryParseUrl(raw);
+    if (!u || !isLoopbackHostname(u.hostname)) continue;
+    u.hostname = "localhost";
+    const base = normalizeSiteUrl(u.toString());
+    out.add(base);
+    out.add(`${base}/`);
+  }
+  return [...out];
+}
+
 export function urlPort(u: URL): number {
   if (u.port.length > 0) return Number.parseInt(u.port, 10);
   return u.protocol === "https:" ? 443 : 80;

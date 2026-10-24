@@ -37,7 +37,7 @@ export function useRunnerSecrets(prefix = "Runner credentials are not initialize
         return;
       }
       setTerminalAuth(secrets.terminalAuth);
-      setRunnerToken(secrets.runnerToken);
+      setRunnerToken(secrets.runnerToken ?? "");
       setTerminalPort(secrets.terminalPort);
 
       const health = await fetchRunnerHealth();

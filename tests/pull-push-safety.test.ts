@@ -29,6 +29,8 @@ describe("pull/push safety guards", () => {
     const wpcli = readFileSync(join(process.cwd(), "src/services/wpcli.ts"), "utf8");
     expect(pull).toContain("rolling back local DB");
     expect(pull).toContain("verifyLocalSiteUrls");
+    expect(pull).toContain("confirmRemoteTarget");
+    expect(pull).toContain("!options.yes");
     expect(wpcli).toContain("--precise");
   });
 

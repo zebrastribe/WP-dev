@@ -31,6 +31,7 @@ Welcome. This is the full manual for [WP-dev](../README.md). The [README](../REA
 - [Browser admin and wizard](./guides/browser-admin.md)
 - [Theme-only deploy](./guides/theme-deploy.md)
 - [Shared hosting (Simply, UnoEuro-style)](./guides/shared-hosting.md)
+- [PHP versions (local / staging / production)](./guides/php-versions.md)
 
 ### Features
 

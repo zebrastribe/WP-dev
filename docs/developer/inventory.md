@@ -77,6 +77,8 @@ Not end-user documentation. Referenced from developer architecture only.
 - [ ] `CHANGELOG.md` for releases
 - [ ] Automated markdown link check in CI
 - [ ] Playwright E2E doc for wizard flow
+- [x] Hosted/web migration plan kept **out of public git** → [online-migration-plan.md](./online-migration-plan.md) stub — full plan in private [WP-dev-cloud](https://github.com/zebrastribe/WP-dev-cloud)
+
 
 ## CLI as documentation source
 

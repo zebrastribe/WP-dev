@@ -10,6 +10,7 @@ import {
   isPlaceholderRemoteHost,
   isStagingRemotePlaceholder,
 } from "../../utils/remote-placeholder.js";
+import { posixShellQuote } from "../../utils/shell-quote.js";
 
 export async function cmdImportPush(
   loaded: LoadedConfig,
@@ -57,15 +58,21 @@ export async function cmdImportPush(
   const remoteStorage = `${remoteImport}/storage/${loaded.config.project}`;
 
   const basicAuth = loadImportBasicAuth(loaded.configDir);
+  const importToken = (process.env.WPDEV_IMPORT_TOKEN ?? "").trim();
   writeImportRemoteConfig(importDir, loaded.config.project, basicAuth);
+  if (!dryRun && !basicAuth && !importToken) {
+    throw new Error(
+      "Refusing to deploy /import/ without auth.\n" +
+        "Set WPDEV_IMPORT_TOKEN (required by the import API) and/or copy import.auth.env.example to import.auth.env for HTTP Basic Auth.",
+    );
+  }
   if (basicAuth) {
     console.log(
       `[wp-dev] import push ${env}: PHP HTTP Basic Auth enabled for user ${basicAuth.user}`,
     );
-  } else if (!dryRun) {
-    console.warn(
-      "[wp-dev] import push: no import.auth.env — /import/ will be open. Copy import.auth.env.example to import.auth.env",
-    );
+  }
+  if (importToken) {
+    console.log("[wp-dev] import push: WPDEV_IMPORT_TOKEN is set (ensure the same value is on the remote PHP env)");
   }
 
   console.log(`[wp-dev] import push ${env}: ${importDir} → ${remoteImport}/`);
@@ -74,7 +81,7 @@ export async function cmdImportPush(
   if (!dryRun) {
     const ssh = await connectSsh(remote);
     try {
-      const mkdir = await ssh.exec(`mkdir -p ${shellQuote(remoteStorage)}`);
+      const mkdir = await ssh.exec(`mkdir -p ${posixShellQuote(remoteStorage)}`);
       if (mkdir.code !== 0) {
         throw new Error(
           `Failed to create remote storage directory ${remoteStorage}: ${mkdir.stderr || mkdir.stdout}`,
@@ -87,8 +94,4 @@ export async function cmdImportPush(
 
   console.log(`[wp-dev] import push ${env}: storage → ${remoteStorage}/`);
   await rsyncPushToPath(remote, storageDir, remoteStorage, { dryRun });
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
 }

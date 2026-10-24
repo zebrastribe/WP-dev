@@ -97,7 +97,7 @@ function commandForAction(action, args) {
   if (action === "wpdev_pull") {
     const env = safeArg(args?.env);
     if (!["staging", "production"].includes(env)) return null;
-    return `npm run wp-dev -- pull ${env}`;
+    return `npm run wp-dev -- pull ${env} --yes`;
   }
   if (action === "wpdev_pull_dry") {
     const env = safeArg(args?.env);
@@ -136,6 +136,27 @@ function commandForAction(action, args) {
   }
   if (action === "wpdev_update_preflight") {
     return `npm run wp-dev -- update --preflight --json`;
+  }
+  if (action === "wpdev_php_show") {
+    const env = safeArg(args?.env) || "local";
+    if (!["local", "staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- php show --env ${env} --json`;
+  }
+  if (action === "wpdev_php_set") {
+    const env = safeArg(args?.env) || "local";
+    const version = safeArg(args?.version);
+    if (!["local", "staging", "production"].includes(env)) return null;
+    if (!/^\d+\.\d+$/.test(version)) return null;
+    const flags = [`--env ${env}`, "--yes"];
+    if (env === "local" && safeArg(args?.restart) === "1") flags.push("--restart");
+    return `npm run wp-dev -- php set ${version} ${flags.join(" ")}`;
+  }
+  if (action === "wpdev_php_rollback") {
+    const env = safeArg(args?.env) || "local";
+    if (!["local", "staging", "production"].includes(env)) return null;
+    const flags = [`--env ${env}`, "--yes"];
+    if (env === "local" && safeArg(args?.restart) === "1") flags.push("--restart");
+    return `npm run wp-dev -- php rollback ${flags.join(" ")}`;
   }
   if (action === "backup_create") {
     const env = safeArg(args?.env);
@@ -207,33 +228,28 @@ function commandForAction(action, args) {
     const file = safeArg(args?.file);
     const confirm = safeArg(args?.confirm);
     if (!["local", "staging", "production"].includes(env) || !file) return null;
+    if (file.includes("..")) return null;
     if (env === "production" && confirm !== "RESTORE_PRODUCTION") return null;
+    // Only allow restores from ~/.wp-dev/backups (no arbitrary path / traversal).
+    const backupGuard = [
+      `FILE_REAL="$(realpath -e ${file} 2>/dev/null || true)"`,
+      'test -n "$FILE_REAL" || { echo "Backup file not found or unreadable."; exit 1; }',
+      'case "$FILE_REAL" in "$HOME"/.wp-dev/backups/*) ;; *) echo "Restore refused: file must be under ~/.wp-dev/backups/"; exit 1;; esac',
+    ].join("; ");
     if (env === "local") {
       return [
-        `test -f ${file} || { echo "Backup file not found: ${file}"; exit 1; }`,
+        backupGuard,
         'test -n "$MYSQL_DATABASE" || { echo "Missing MYSQL_DATABASE in terminal environment."; exit 1; }',
         'test -n "$MYSQL_USER" || { echo "Missing MYSQL_USER in terminal environment."; exit 1; }',
         'test -n "$MYSQL_PASSWORD" || { echo "Missing MYSQL_PASSWORD in terminal environment."; exit 1; }',
-        `case ${file} in *.tar.gz) TMPDIR="$(mktemp -d)"; tar -xzf ${file} -C "$TMPDIR" || { rm -rf "$TMPDIR"; exit 1; }; test -f "$TMPDIR/db.sql" || { echo "Invalid full backup archive: missing db.sql"; rm -rf "$TMPDIR"; exit 1; }; test -d "$TMPDIR/wp-content" || { echo "Invalid full backup archive: missing wp-content"; rm -rf "$TMPDIR"; exit 1; }; mysql -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < "$TMPDIR/db.sql" || { rm -rf "$TMPDIR"; exit 1; }; mkdir -p /workspace/wordpress/wp-content; rsync -a --delete "$TMPDIR/wp-content/" /workspace/wordpress/wp-content/ || { rm -rf "$TMPDIR"; exit 1; }; rm -rf "$TMPDIR"; echo "Local full restore completed (database + wp-content).";; *) mysql -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < ${file} && echo "Local database restore completed.";; esac`,
+        'case "$FILE_REAL" in *.tar.gz) TMPDIR="$(mktemp -d)"; tar -xzf "$FILE_REAL" -C "$TMPDIR" || { rm -rf "$TMPDIR"; exit 1; }; test -f "$TMPDIR/db.sql" || { echo "Invalid full backup archive: missing db.sql"; rm -rf "$TMPDIR"; exit 1; }; test -d "$TMPDIR/wp-content" || { echo "Invalid full backup archive: missing wp-content"; rm -rf "$TMPDIR"; exit 1; }; PRE="$HOME/.wp-dev/backups/pre-ui-restore-$(date +%s).sql"; mkdir -p "$(dirname "$PRE")"; mysqldump --no-tablespaces -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" > "$PRE" || { rm -rf "$TMPDIR"; exit 1; }; mysql -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < "$TMPDIR/db.sql" || { rm -rf "$TMPDIR"; exit 1; }; mkdir -p /workspace/wordpress/wp-content; rsync -a --delete "$TMPDIR/wp-content/" /workspace/wordpress/wp-content/ || { rm -rf "$TMPDIR"; exit 1; }; rm -rf "$TMPDIR"; echo "Local full restore completed (pre-restore DB: $PRE).";; *) PRE="$HOME/.wp-dev/backups/pre-ui-restore-$(date +%s).sql"; mkdir -p "$(dirname "$PRE")"; mysqldump --no-tablespaces -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" > "$PRE" || exit 1; mysql -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < "$FILE_REAL" && echo "Local database restore completed (pre-restore DB: $PRE).";; esac',
       ].join("; ");
     }
     if (safeArg(file).endsWith(".tar.gz")) {
-      return [
-        "set -e",
-        `eval "$(node /workspace/docker/runner-remote-env.mjs ${env})"`,
-        `test -n "$HOST" && test -n "$USER" && test -n "$REMOTE_PATH" || { echo "Missing ${env} SSH settings in wp-dev.config.json"; exit 1; }`,
-        `test -f ${file} || { echo "Backup file not found: ${file}"; exit 1; }`,
-        `STAMP="$(date +%s)"`,
-        `REMOTE_DIR="/tmp/wp-dev-restore-full-${env}-$STAMP"`,
-        `ssh $SSH_OPTS "$USER@$HOST" "mkdir -p \\"$REMOTE_DIR\\""`,
-        `scp $SSH_OPTS ${file} "$USER@$HOST:$REMOTE_DIR/full.tar.gz"`,
-        `ssh $SSH_OPTS "$USER@$HOST" "set -e; tar -xzf \\"$REMOTE_DIR/full.tar.gz\\" -C \\"$REMOTE_DIR\\"; test -f \\"$REMOTE_DIR/db.sql\\"; test -d \\"$REMOTE_DIR/wp-content\\"; cd \\"$REMOTE_PATH\\"; wp db import \\"$REMOTE_DIR/db.sql\\" --allow-root >/dev/null; mkdir -p \\"$REMOTE_PATH/wp-content\\"; rsync -a --delete \\"$REMOTE_DIR/wp-content/\\" \\"$REMOTE_PATH/wp-content/\\""`,
-        `ssh $SSH_OPTS "$USER@$HOST" "rm -rf \\"$REMOTE_DIR\\""`,
-        `echo "${env} full restore completed (database + wp-content)."`,
-      ].join("; ");
+      return `${backupGuard}; echo "Full archive restore to ${env} via the browser runner is disabled (no safe pre-backup + URL rewrite). Use host CLI after backing up." >&2; exit 1`;
     }
     const yesFlag = env === "production" ? " --yes" : "";
-    return `test -f ${file} || { echo "Backup file not found: ${file}"; exit 1; }; npm run wp-dev -- restore ${env} ${file}${yesFlag}`;
+    return `${backupGuard}; npm run wp-dev -- restore ${env} "$FILE_REAL"${yesFlag}`;
   }
   if (action === "git_status") {
     return "git -c safe.directory=/workspace status --short";

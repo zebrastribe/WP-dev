@@ -13,22 +13,23 @@ export function ensureBackupDir(project: string, env: RemoteEnvName | "local"): 
   return dir;
 }
 
-export function timestampedDbName(): string {
-  const d = new Date();
+function stampParts(d = new Date()): string {
   const p = (n: number) => String(n).padStart(2, "0");
-  return `db-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}.sql`;
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}-${ms}-${rand}`;
+}
+
+export function timestampedDbName(): string {
+  return `db-${stampParts()}.sql`;
 }
 
 export function timestampedFullName(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `full-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}.tar.gz`;
+  return `full-${stampParts()}.tar.gz`;
 }
 
 export function timestampedPreRestoreName(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `pre-restore-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}.sql`;
+  return `pre-restore-${stampParts()}.sql`;
 }
 
 export function assertBackupFileExists(path: string): void {

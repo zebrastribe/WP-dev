@@ -44,7 +44,9 @@ describe("sync-excludes", () => {
     for (const safe of SAFE_SYNC_EXCLUDES) {
       expect(patterns).toContain(safe);
     }
-    expect(patterns).toContain("admin");
+    expect(patterns).toContain("/admin");
+    expect(patterns).not.toContain("admin");
+    // Basename "admin" would also strip wp-content/plugins/*/admin — must stay root-anchored.
   });
 
   it("adds local-only plugin via sync.plugins", () => {
