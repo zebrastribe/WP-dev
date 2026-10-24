@@ -8,8 +8,15 @@ import {
 
 describe("host-paths", () => {
   it("resolveHostProjectRoot uses configDir on the host", () => {
-    const dir = resolve("/home/dev/projects/example");
-    expect(resolveHostProjectRoot(dir)).toBe(dir);
+    const prev = process.env.WPDEV_HOST_PROJECT_ROOT;
+    delete process.env.WPDEV_HOST_PROJECT_ROOT;
+    try {
+      const dir = resolve("/home/dev/projects/example");
+      expect(resolveHostProjectRoot(dir)).toBe(dir);
+    } finally {
+      if (prev === undefined) delete process.env.WPDEV_HOST_PROJECT_ROOT;
+      else process.env.WPDEV_HOST_PROJECT_ROOT = prev;
+    }
   });
 
   it("resolveHostProjectRoot prefers WPDEV_HOST_PROJECT_ROOT", () => {
