@@ -1,6 +1,10 @@
 # Content Recovery Workspace
 
+**Optional / site-specific** — not part of core WP-dev Dev→Staging→Production sync. Most users can ignore this folder.
+
 Normalization and approval layer between Wayback recovery (`knowledge-base/`) and WordPress import.
+
+Runtime SQLite under `storage/` is gitignored; do not commit recovery databases.
 
 **URL:** `http://localhost:<WP_PORT>/import/`
 

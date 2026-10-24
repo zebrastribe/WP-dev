@@ -4,6 +4,8 @@ Run **WordPress on your computer** with Docker, then **pull** and **push** your 
 
 WP-dev does **not** host your live servers — it only syncs with servers you already have.
 
+This repository is the **public localhost tool** (CLI + optional `/admin/` UI). A future **private** cloud control plane (if used) is a separate repo — you do not need it to run WP-dev locally. See [docs/developer/project-structure.md](docs/developer/project-structure.md).
+
 ---
 
 ## Features
@@ -197,6 +199,8 @@ npm run wp-dev -- up --reclaim-ports
 | Configuration | [reference/configuration.md](docs/reference/configuration.md) |
 | Environment variables | [reference/environment-variables.md](docs/reference/environment-variables.md) |
 | Contribute | [developer/contributing.md](docs/developer/contributing.md) |
+| Repo layout (public vs private cloud) | [developer/project-structure.md](docs/developer/project-structure.md) |
+| Optional import / content recovery | [content-recovery-workspace/README.md](content-recovery-workspace/README.md) |
 
 ---
 
