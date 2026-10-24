@@ -89,11 +89,14 @@ export async function cmdPull(
   logInfo(`pull ${env}: connect ssh ${remote.user}@${remote.host}`);
   const ssh = await connectSsh(remote);
   try {
-    await assertRemoteWpInstalled(ssh, remote.path);
+    const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
+    if (wpPath !== remote.path) {
+      logInfo(`pull ${env}: using remote wp path ${wpPath} (configured: ${remote.path})`);
+    }
 
     const remoteDump = `/tmp/wp-dev-pull-${Date.now()}.sql`;
     logInfo(`pull ${env}: remote wp db export`);
-    await wpRemoteDbExport(ssh, remote.path, remoteDump);
+    await wpRemoteDbExport(ssh, wpPath, remoteDump);
 
     const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-pull-"));
     const tempId = registerTempDir(loaded, tmpDir, `pull-${env}`);
@@ -115,6 +118,7 @@ export async function cmdPull(
         await rsyncPull(remote, localWpRoot, {
           dryRun: false,
           excludes: pullExcludePatterns(configDir, config),
+          remotePath: wpPath,
         });
 
         const sql = readFileSync(localDump, "utf8");

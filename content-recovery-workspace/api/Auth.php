@@ -7,7 +7,11 @@ final class Auth
     {
         $expected = getenv('WPDEV_IMPORT_TOKEN') ?: '';
         if ($expected === '') {
-            return;
+            crw_json_response([
+                'ok' => false,
+                'error' => 'token_not_configured',
+                'detail' => 'Set WPDEV_IMPORT_TOKEN on the server before exposing /import/.',
+            ], 503);
         }
 
         $header = $_SERVER['HTTP_X_WP_DEV_IMPORT_TOKEN'] ?? '';

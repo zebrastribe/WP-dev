@@ -221,14 +221,16 @@ async function checkOneRemote(
     logInfo(`doctor ${env}: ssh connect`);
     const ssh = await connectSsh(remote);
     try {
-      await assertRemoteWpInstalled(ssh, remote.path);
+      const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
       console.error(
-        `SSH + WP-CLI: OK (remote WordPress detected at ${remote.path})`,
+        `SSH + WP-CLI: OK (remote WordPress detected at ${wpPath}` +
+          (wpPath !== remote.path ? `; configured ${remote.path}` : "") +
+          ")",
       );
       if (rsyncDryRun) {
         const localWp = resolveFromConfigDir(loaded.configDir, loaded.config.local.wpRoot);
         console.error("rsync: running pull --dry-run (no files written)…");
-        await rsyncPull(remote, localWp, { dryRun: true });
+        await rsyncPull(remote, localWp, { dryRun: true, remotePath: wpPath });
         console.error("rsync: OK (dry-run completed)");
       }
     } finally {

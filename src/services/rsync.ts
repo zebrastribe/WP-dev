@@ -13,6 +13,8 @@ import {
 export type RsyncOptions = {
   dryRun: boolean;
   excludes?: string[];
+  /** Override remote.path — use resolved WP install path when it differs from config. */
+  remotePath?: string;
 };
 
 export async function rsyncPull(
@@ -42,18 +44,19 @@ export async function rsyncPull(
     });
   };
 
-  const first = await runPull(remote.path);
+  const sourcePath = options.remotePath ?? remote.path;
+  const first = await runPull(sourcePath);
   if (first.stderr) process.stderr.write(first.stderr);
   if (first.exitCode === 0) return;
 
   const firstErr = first.stderr ?? "";
-  if (canRetryPullWithRelativePath(remote.path, firstErr)) {
-    const relPath = remote.path.replace(/^\/+/, "");
+  if (canRetryPullWithRelativePath(sourcePath, firstErr)) {
+    const relPath = sourcePath.replace(/^\/+/, "");
     const retry = await runPull(relPath);
     if (retry.stderr) process.stderr.write(retry.stderr);
     if (retry.exitCode === 0) {
       process.stderr.write(
-        `\n[wp-dev] pull retry succeeded using relative remote path "${relPath}" instead of "${remote.path}".\n` +
+        `\n[wp-dev] pull retry succeeded using relative remote path "${relPath}" instead of "${sourcePath}".\n` +
           `Update your config path to "${relPath}" for shared hosting compatibility.\n`,
       );
       return;
@@ -98,10 +101,7 @@ export async function rsyncPushToPath(
   if (first.exitCode === 0) return;
 
   const firstErr = first.stderr ?? "";
-  const canRetryRelative =
-    remoteTargetPath.startsWith("/") &&
-    /mkdir .* failed: Permission denied|recv_generator: mkdir .* failed: Permission denied/i.test(firstErr);
-  if (canRetryRelative) {
+  if (canRetryPushWithRelativePath(remoteTargetPath, firstErr)) {
     const relPath = remoteTargetPath.replace(/^\/+/, "");
     const retry = await runPush(relPath);
     if (retry.stderr) process.stderr.write(retry.stderr);
@@ -143,18 +143,19 @@ export async function rsyncPush(
     });
   };
 
-  const first = await runPush(remote.path);
+  const destPath = options.remotePath ?? remote.path;
+  const first = await runPush(destPath);
   if (first.stderr) process.stderr.write(first.stderr);
   if (first.exitCode === 0) return;
 
   const firstErr = first.stderr ?? "";
-  if (canRetryPushWithRelativePath(remote.path, firstErr)) {
-    const relPath = remote.path.replace(/^\/+/, "");
+  if (canRetryPushWithRelativePath(destPath, firstErr)) {
+    const relPath = destPath.replace(/^\/+/, "");
     const retry = await runPush(relPath);
     if (retry.stderr) process.stderr.write(retry.stderr);
     if (retry.exitCode === 0) {
       process.stderr.write(
-        `\n[wp-dev] push retry succeeded using relative remote path "${relPath}" instead of "${remote.path}".\n` +
+        `\n[wp-dev] push retry succeeded using relative remote path "${relPath}" instead of "${destPath}".\n` +
           `Update your config path to "${relPath}" for shared hosting compatibility.\n`,
       );
       return;
@@ -166,7 +167,7 @@ export async function rsyncPush(
   }
 
   throw new Error(
-    `rsync push failed with exit code ${first.exitCode}${pushRsyncFailureHintAbsolutePath(firstErr, remote.path)}`,
+    `rsync push failed with exit code ${first.exitCode}${pushRsyncFailureHintAbsolutePath(firstErr, destPath)}`,
   );
 }
 

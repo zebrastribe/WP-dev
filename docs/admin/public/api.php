@@ -17,11 +17,12 @@ wpdev_enforce_local_admin_only();
 
 header('Content-Type: application/json; charset=utf-8');
 
-$configPath = '/wp-dev-repo/wp-dev.config.json';
-$dockerDir = '/wp-dev-repo/docker';
+$repoRoot = '/wp-dev-repo';
+$configPath = $repoRoot . '/wp-dev.config.json';
+$dockerDir = $repoRoot . '/docker';
 $dockerEnvPath = $dockerDir . '/.env';
 $dockerEnvExamplePath = $dockerDir . '/.env.example';
-$logDir = '/wp-dev-repo/logs';
+$logDir = $repoRoot . '/logs';
 $logFile = $logDir . '/wp-dev-admin-api.log';
 $schemaPath = __DIR__ . '/wp-dev.config.schema.json';
 
@@ -550,6 +551,14 @@ if ($method === 'POST' && $action === 'auth-bootstrap') {
         wpdev_admin_api_log('POST auth-bootstrap 403 not_local');
         exit;
     }
+    // Require loopback REMOTE_ADDR so Host-header spoofing alone cannot bootstrap.
+    $remoteAddr = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    $loopbackAddrs = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+    if (!in_array($remoteAddr, $loopbackAddrs, true)) {
+        wpdev_json_error(403, 'forbidden', 'Auto unlock requires a loopback client address.');
+        wpdev_admin_api_log('POST auth-bootstrap 403 not_loopback_addr remote=' . $remoteAddr);
+        exit;
+    }
     $resolved = $token;
     if ($resolved === '') {
         $resolved = wpdev_generate_admin_save_token();
@@ -597,6 +606,7 @@ if ($method === 'POST' && $action === 'logout') {
 }
 
 if ($method === 'GET' && $action === 'load') {
+    wpdev_require_admin_token($token, 'GET load');
     if (!is_file($configPath) || !is_readable($configPath)) {
         http_response_code(404);
         echo json_encode(['ok' => false, 'error' => 'not_found'], JSON_UNESCAPED_SLASHES);

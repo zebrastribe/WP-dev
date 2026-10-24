@@ -27,9 +27,10 @@ export function readUpdateLock(configDir: string): { pid: number; startedAt: str
 export function acquireUpdateLock(configDir: string): boolean {
   const path = updateLockPath(configDir);
   mkdirSync(join(configDir, "logs"), { recursive: true });
-  const stale = readUpdateLock(configDir);
-  if (stale && isPidAlive(stale.pid)) return false;
-  if (stale) {
+  if (existsSync(path)) {
+    const existing = readUpdateLock(configDir);
+    // Valid lock held by a live pid → busy. Missing/corrupt/dead → treat as stale.
+    if (existing && isPidAlive(existing.pid)) return false;
     try {
       unlinkSync(path);
     } catch {

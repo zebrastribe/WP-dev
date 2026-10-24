@@ -32,7 +32,7 @@ describe("rsync-ssh-env helpers", () => {
       identityFile: `~/.ssh/${keyName}`,
     });
     expect(env).toContain("-p 2222");
-    expect(env).toContain(`-i ${keyPath}`);
+    expect(env).toContain(`-i '${keyPath}'`);
     expect(env).toContain("BatchMode=yes");
 
     rmSync(keyPath, { force: true });
@@ -43,11 +43,44 @@ describe("rsync-ssh-env helpers", () => {
     expect(canRetryPullWithRelativePath("staging", "change_dir failed")).toBe(false);
   });
 
-  it("detects push relative-path retry", () => {
+  it("detects push relative-path retry only for destination root mkdir", () => {
     expect(
-      canRetryPushWithRelativePath("/var/www/html", "mkdir /customers/foo failed: Permission denied"),
+      canRetryPushWithRelativePath(
+        "/var/www/html",
+        'mkdir "/var/www/html" failed: Permission denied',
+      ),
     ).toBe(true);
+    expect(
+      canRetryPushWithRelativePath(
+        "/var/www/html",
+        "recv_generator: mkdir /var/www/html failed: Permission denied",
+      ),
+    ).toBe(true);
+    // Mid-tree failure must NOT trigger absolute→relative retry (wrong tree risk).
+    expect(
+      canRetryPushWithRelativePath(
+        "/var/www/html",
+        "mkdir /var/www/html/wp-content failed: Permission denied",
+      ),
+    ).toBe(false);
     expect(canRetryPushWithRelativePath("/var/www/html", "other error")).toBe(false);
+  });
+
+  it("buildSshRsyncEnv quotes identity file path", () => {
+    const sshDir = join(os.homedir(), ".ssh");
+    mkdirSync(sshDir, { recursive: true });
+    const keyName = `wp-dev-quote-${process.pid}.pem`;
+    const keyPath = join(sshDir, keyName);
+    writeFileSync(keyPath, "fake-key");
+    const env = buildSshRsyncEnv({
+      host: "example.com",
+      user: "deploy",
+      path: "/var/www",
+      url: "https://example.com",
+      identityFile: `~/.ssh/${keyName}`,
+    });
+    expect(env).toContain(`-i '${keyPath}'`);
+    rmSync(keyPath, { force: true });
   });
 
   it("pullRsyncFailureHint suggests fix-permissions", () => {

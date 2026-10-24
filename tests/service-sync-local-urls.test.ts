@@ -4,7 +4,7 @@ import {
   isLoopbackHost,
   normalizeLoopbackSiteUrl,
   shouldSyncLocalWordPressUrl,
-} from "../src/services/sync-local-urls.js";
+} from "../src/utils/sync-local-urls.js";
 
 describe("service sync-local-urls helpers", () => {
   it("isLoopbackHost recognizes localhost variants", () => {

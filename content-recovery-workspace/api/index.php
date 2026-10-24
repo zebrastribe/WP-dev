@@ -3,26 +3,29 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/bootstrap.php';
 
-Auth::check();
-
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $path = $_GET['path'] ?? '';
 $segments = array_values(array_filter(explode('/', trim((string) $path, '/'))));
-$repo = crw_repo();
 
 try {
+    // Health may report config status without a token; all other routes require auth.
     if ($path === 'health' || ($segments[0] ?? '') === 'health') {
         $env = crw_read_env_file(dirname(__DIR__) . '/project.env');
         $clientMode = BasicAuth::isEnabled() || (($env['UI_MODE'] ?? '') === 'client');
+        $tokenConfigured = trim((string) getenv('WPDEV_IMPORT_TOKEN')) !== '';
         crw_json_response([
             'ok' => true,
             'project' => crw_project_id(),
             'db' => is_readable(crw_db_path()),
             'knowledge_base' => is_dir(crw_knowledge_base_path()),
             'client_mode' => $clientMode,
-            'requires_token' => trim((string) getenv('WPDEV_IMPORT_TOKEN')) !== '',
+            'requires_token' => true,
+            'token_configured' => $tokenConfigured,
         ]);
     }
+
+    Auth::check();
+    $repo = crw_repo();
 
     if ($method === 'GET' && ($segments[0] ?? '') === 'stats') {
         crw_json_response([

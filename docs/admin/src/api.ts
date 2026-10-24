@@ -215,7 +215,11 @@ export async function loadWpDevConfig(): Promise<Record<string, unknown> | null>
   const t0 = performance.now();
   logAdmin("info", "loadWpDevConfig: request started", url);
   try {
-    const res = await fetch(url, { method: "GET", credentials: "same-origin" });
+    const res = await fetch(url, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: buildAdminApiHeaders(),
+    });
     const ms = Math.round(performance.now() - t0);
     if (res.status === 404) {
       logAdmin("info", "loadWpDevConfig: no file yet (404)", `${ms}ms`);

@@ -151,16 +151,18 @@ export async function assertLocalWpInstalled(
   }
 }
 
+/** Assert remote WP is installed; returns the resolved install path (may differ from config). */
 export async function assertRemoteWpInstalled(
   ssh: SshSession,
   remotePath: string,
-): Promise<void> {
+): Promise<string> {
   const check = await resolveRemoteWpPath(ssh, remotePath);
-  if (!check.installed) {
+  if (!check.installed || !check.path) {
     throw new Error(
       `Remote WordPress not found or WP-CLI failed at path: ${remotePath}. stderr: ${check.stderr ?? ""}${check.hint ?? ""}`,
     );
   }
+  return check.path;
 }
 
 export async function resolveRemoteWpPath(

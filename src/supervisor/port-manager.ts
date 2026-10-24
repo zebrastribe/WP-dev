@@ -105,7 +105,7 @@ export async function validateReservedPorts(
   }
 
   if (!options.strict || options.relocate) {
-    const next = await relocatePorts(loaded, envPath, ports, projectPorts, used);
+    const next = await relocatePorts(loaded, envPath, ports, projectPorts, used, conflicts);
     emitLifecycleEvent(loaded.configDir, loaded.config.project, "port.reserve", {
       relocated: true,
       ports: next,
@@ -129,8 +129,10 @@ async function relocatePorts(
   current: DockerEnvPorts,
   projectPorts: Set<number>,
   used: Set<number>,
+  conflicts: PortConflictInfo[],
 ): Promise<DockerEnvPorts> {
   const next = { ...current };
+  const conflictedKeys = new Set(conflicts.map((c) => c.key));
 
   const allocate = async (key: DockerEnvPortKey, startAt: number): Promise<number> => {
     let candidate = startAt;
@@ -148,17 +150,22 @@ async function relocatePorts(
     throw new Error(`Could not find a free local TCP port for ${key}`);
   };
 
+  // Only reassign conflicted keys — free ports must stay put.
   for (const key of PORT_KEYS) {
-    const allocated = await allocate(key, next[key]);
-    if (allocated !== next[key]) {
-      setPortInEnvFile(envPath, key, allocated, {
-        configDir: loaded.configDir,
-        projectId: loaded.config.project,
-      });
-      next[key] = allocated;
-    }
+    if (!conflictedKeys.has(key)) continue;
+    const allocated = await allocate(key, next[key] + 1);
+    setPortInEnvFile(envPath, key, allocated, {
+      configDir: loaded.configDir,
+      projectId: loaded.config.project,
+    });
+    next[key] = allocated;
   }
   return next;
+}
+
+/** Keys that would be reassigned by relocate (exported for unit tests). */
+export function conflictedPortKeys(conflicts: PortConflictInfo[]): Set<DockerEnvPortKey> {
+  return new Set(conflicts.map((c) => c.key));
 }
 
 export function formatPortConflicts(conflicts: PortConflictInfo[]): string {

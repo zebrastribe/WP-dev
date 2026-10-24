@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ProjectLock, readLockData, removeStaleLock } from "../src/supervisor/project-lock.js";
 import { emptyRegistry, loadRegistry, saveRegistry } from "../src/supervisor/service-registry.js";
-import { defaultSupervisorPort } from "../src/supervisor/paths.js";
+import { defaultSupervisorPort, lockPath } from "../src/supervisor/paths.js";
 
 describe("supervisor project-lock", () => {
   let dir: string;
@@ -53,6 +53,23 @@ describe("supervisor project-lock", () => {
     });
     expect(removeStaleLock(dir)).toBe(true);
     expect(readLockData(dir)).toBeNull();
+  });
+
+  it("removeStaleLock clears corrupt lock files", () => {
+    mkdirSync(join(dir, "logs"), { recursive: true });
+    writeFileSync(lockPath(dir), "{broken", "utf8");
+    expect(removeStaleLock(dir)).toBe(true);
+    const lock = new ProjectLock(dir);
+    expect(
+      lock.tryAcquire({
+        pid: process.pid,
+        projectId: "test",
+        configDir: dir,
+        supervisorPort: 17680,
+        startedAt: new Date().toISOString(),
+      }),
+    ).toBe(true);
+    lock.release();
   });
 });
 

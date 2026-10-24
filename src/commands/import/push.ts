@@ -57,15 +57,21 @@ export async function cmdImportPush(
   const remoteStorage = `${remoteImport}/storage/${loaded.config.project}`;
 
   const basicAuth = loadImportBasicAuth(loaded.configDir);
+  const importToken = (process.env.WPDEV_IMPORT_TOKEN ?? "").trim();
   writeImportRemoteConfig(importDir, loaded.config.project, basicAuth);
+  if (!dryRun && !basicAuth && !importToken) {
+    throw new Error(
+      "Refusing to deploy /import/ without auth.\n" +
+        "Set WPDEV_IMPORT_TOKEN (required by the import API) and/or copy import.auth.env.example to import.auth.env for HTTP Basic Auth.",
+    );
+  }
   if (basicAuth) {
     console.log(
       `[wp-dev] import push ${env}: PHP HTTP Basic Auth enabled for user ${basicAuth.user}`,
     );
-  } else if (!dryRun) {
-    console.warn(
-      "[wp-dev] import push: no import.auth.env — /import/ will be open. Copy import.auth.env.example to import.auth.env",
-    );
+  }
+  if (importToken) {
+    console.log("[wp-dev] import push: WPDEV_IMPORT_TOKEN is set (ensure the same value is on the remote PHP env)");
   }
 
   console.log(`[wp-dev] import push ${env}: ${importDir} → ${remoteImport}/`);

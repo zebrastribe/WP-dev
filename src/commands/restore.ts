@@ -64,15 +64,15 @@ export async function cmdRestore(
   const backupDir = ensureBackupDir(config.project, env);
   const preRestoreLocal = join(backupDir, timestampedPreRestoreName());
   try {
-    await assertRemoteWpInstalled(ssh, remote.path);
+    const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
     logInfo(`restore ${env}: pre-restore remote db backup -> ${preRestoreLocal}`);
     const remotePreDump = `/tmp/wp-dev-pre-restore-${Date.now()}.sql`;
-    await wpRemoteDbExport(ssh, remote.path, remotePreDump);
+    await wpRemoteDbExport(ssh, wpPath, remotePreDump);
     await ssh.getFile(remotePreDump, preRestoreLocal);
     await ssh.exec(`rm -f ${remotePreDump}`);
 
     await ssh.putFile(resolvedFile, remoteImport);
-    await wpRemoteDbImport(ssh, remote.path, remoteImport);
+    await wpRemoteDbImport(ssh, wpPath, remoteImport);
     await ssh.exec(`rm -f ${remoteImport}`);
   } finally {
     ssh.dispose();

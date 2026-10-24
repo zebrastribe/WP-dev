@@ -34,17 +34,30 @@ describe("rsync theme path helpers", () => {
     expect(args.some((a) => a.includes("deploy@example.com"))).toBe(true);
   });
 
-  it("rsyncPushToPath retries with relative path on permission denied", async () => {
+  it("rsyncPushToPath retries with relative path on destination-root permission denied", async () => {
+    const dest = "/staging/wp-content/themes/slug";
     execaMock
       .mockResolvedValueOnce({
         exitCode: 23,
-        stderr: "recv_generator: mkdir foo failed: Permission denied",
+        stderr: `recv_generator: mkdir ${dest} failed: Permission denied`,
       })
       .mockResolvedValueOnce({ exitCode: 0, stderr: "" });
-    await rsyncPushToPath(remote, "/local/theme", "/staging/wp-content/themes/slug", {
+    await rsyncPushToPath(remote, "/local/theme", dest, {
       dryRun: false,
     });
     expect(execaMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("rsyncPushToPath does not retry on mid-tree mkdir permission denied", async () => {
+    const dest = "/staging/wp-content/themes/slug";
+    execaMock.mockResolvedValueOnce({
+      exitCode: 23,
+      stderr: `mkdir ${dest}/assets failed: Permission denied`,
+    });
+    await expect(
+      rsyncPushToPath(remote, "/local/theme", dest, { dryRun: false }),
+    ).rejects.toThrow(/exit code 23/);
+    expect(execaMock).toHaveBeenCalledTimes(1);
   });
 
   it("rsyncPullFromPath succeeds on first attempt", async () => {

@@ -38,12 +38,17 @@ function shellQuote(value: string): string {
 
 /** wp-dev admin must never remain on staging/production (local dev tool only). */
 async function purgeRemoteWpDevAdmin(
-  ssh: { exec: (command: string) => Promise<unknown> },
+  ssh: { exec: (command: string) => Promise<{ code: number | null }> },
   remoteWpPath: string,
 ): Promise<void> {
   const adminDir = `${remoteWpPath.replace(/\/$/, "")}/admin`;
   logInfo(`push: remove remote wp-dev admin at ${adminDir}`);
-  await ssh.exec(`rm -rf ${shellQuote(adminDir)}`);
+  const result = await ssh.exec(`rm -rf ${shellQuote(adminDir)}`);
+  if (result.code !== 0 && result.code != null) {
+    throw new Error(
+      `Failed to remove remote wp-dev admin at ${adminDir} (exit ${result.code}). Remove it manually before relying on this push.`,
+    );
+  }
 }
 
 async function sanitizeRemoteGeneratedAssetUrls(
@@ -97,6 +102,7 @@ export async function cmdPush(
     await rsyncPush(remote, localWpRoot, {
       dryRun: true,
       excludes: pushExcludePatterns(configDir, config, localWpRoot),
+      remotePath: remote.path,
     });
     return;
   }
@@ -137,6 +143,7 @@ export async function cmdPush(
       await rsyncPush(remote, localWpRoot, {
         dryRun: false,
         excludes: pushExcludePatterns(configDir, config, localWpRoot),
+        remotePath: remote.path,
       });
       await purgeRemoteWpDevAdmin(ssh, remote.path);
       if (!remote.db) {
@@ -178,11 +185,12 @@ export async function cmdPush(
       logInfo(`push ${env}: bootstrap mode — skipping pre-push remote DB backup`);
     }
 
-    logInfo(`push ${env}: rsync files -> remote`);
+    logInfo(`push ${env}: rsync files -> remote (${wpPath})`);
     try {
       await rsyncPush(remote, localWpRoot, {
         dryRun: false,
         excludes: pushExcludePatterns(configDir, config, localWpRoot),
+        remotePath: wpPath,
       });
       await purgeRemoteWpDevAdmin(ssh, wpPath);
 
