@@ -3,6 +3,7 @@ import {
   JobProgressPanel,
   SyncTab,
   createLocalAdapter,
+  loadLocalStatus,
   loadWpDevConfig,
   logAdmin,
   syncActionsForRoute,
@@ -23,8 +24,8 @@ type Scope = Extract<SyncScopePreset, "theme_only" | "full">;
 
 const FULL_HINT: Partial<Record<SyncRouteId, string>> = {
   dev_to_staging: "Overwrites Staging files + database",
-  staging_to_dev: "Overwrites Dev files + database",
-  production_to_dev: "Overwrites Dev files + database",
+  staging_to_dev: "Overwrites Local files + database",
+  production_to_dev: "Overwrites Local files + database",
 };
 
 /**
@@ -42,6 +43,7 @@ export function SyncPage() {
   const [showMoreRoutes, setShowMoreRoutes] = useState(false);
   const [buildTheme, setBuildTheme] = useState(true);
   const [themeSlug, setThemeSlug] = useState<string | null>(null);
+  const [themeName, setThemeName] = useState<string | null>(null);
   const [remoteMeta, setRemoteMeta] = useState<{
     staging: { host: string; url: string };
     production: { host: string; url: string };
@@ -55,12 +57,12 @@ export function SyncPage() {
 
   /** Theme-only also allows Dev → Production (safe files-only path). */
   const themePushTargets = [
-    { id: "dev_to_staging" as const, label: "Dev → Staging", dest: "staging" as const },
-    { id: "dev_to_production" as const, label: "Dev → Production", dest: "production" as const },
+    { id: "dev_to_staging" as const, label: "Local → Staging", dest: "staging" as const },
+    { id: "dev_to_production" as const, label: "Local → Production", dest: "production" as const },
   ];
   const themePullTargets = [
-    { id: "staging_to_dev" as const, label: "Staging → Dev", env: "staging" as const },
-    { id: "production_to_dev" as const, label: "Production → Dev", env: "production" as const },
+    { id: "staging_to_dev" as const, label: "Staging → Local", env: "staging" as const },
+    { id: "production_to_dev" as const, label: "Production → Local", env: "production" as const },
   ];
 
   const [themeTarget, setThemeTarget] = useState<"dev_to_staging" | "dev_to_production">(
@@ -91,14 +93,21 @@ export function SyncPage() {
     if (!canRun) return;
     let cancelled = false;
     void (async () => {
-      const cfg = await loadWpDevConfig();
-      if (cancelled || !cfg) return;
-      const local = cfg.local as { themeSlug?: string; themePath?: string } | undefined;
-      const slug =
-        local?.themeSlug?.trim() ||
-        local?.themePath?.trim().replace(/\/$/, "").split("/").pop() ||
-        null;
-      setThemeSlug(slug);
+      const [cfg, status] = await Promise.all([loadWpDevConfig(), loadLocalStatus()]);
+      if (cancelled) return;
+      if (status.ok && status.theme?.slug) {
+        setThemeSlug(status.theme.slug);
+        setThemeName(status.theme.name || status.theme.slug);
+      } else if (cfg) {
+        const local = cfg.local as { themeSlug?: string; themePath?: string } | undefined;
+        const slug =
+          local?.themeSlug?.trim() ||
+          local?.themePath?.trim().replace(/\/$/, "").split("/").pop() ||
+          "agency-starter";
+        setThemeSlug(slug);
+        setThemeName(slug);
+      }
+      if (!cfg) return;
       const staging = cfg.staging as { host?: string; url?: string } | undefined;
       const production = cfg.production as { host?: string; url?: string } | undefined;
       setRemoteMeta({
@@ -142,7 +151,7 @@ export function SyncPage() {
       if (!dryRun && themeDirection === "pull") {
         if (
           !window.confirm(
-            `Pull theme${slugNote} from ${ENV_LABEL[themeEnv === "staging" ? "staging" : "production"]} into Dev?\n\nLocal theme files will be overwritten.`,
+            `Pull theme${slugNote} from ${ENV_LABEL[themeEnv === "staging" ? "staging" : "production"]} into Local?\n\nLocal theme files will be overwritten.`,
           )
         ) {
           return;
@@ -166,7 +175,7 @@ export function SyncPage() {
     if (route.hostedOnly) return;
     if (!dryRun) {
       if (route.destination === "production") {
-        window.alert("Full-site Dev → Production is not offered. Use Theme only for live CSS/JS.");
+        window.alert("Full-site Local → Production is not offered. Use Theme only for live CSS/JS.");
         return;
       }
       const runnerEnv = route.runnerEnv;
@@ -186,7 +195,7 @@ export function SyncPage() {
         return;
       }
       if (runnerEnv === "staging" && !meta.host) {
-        window.alert("Set staging.host in config (Setup staging) before full-site sync.");
+        window.alert("Set staging.host in config (Setup) before full-site sync.");
         return;
       }
     }
@@ -205,19 +214,26 @@ export function SyncPage() {
     if (dryRun) setPreviewKey(result.ok ? keyAtStart : null);
   };
 
+  // Theme-only is the safe lane — Start does not require Preview. Full-site still does.
+  const previewDone = previewKey === selectionKey;
   const canStart =
-    canRun && !isRunning && previewKey === selectionKey && (scope === "theme_only" || !route.hostedOnly);
+    canRun &&
+    !isRunning &&
+    (scope === "theme_only" || !route.hostedOnly) &&
+    (scope === "theme_only" || previewDone);
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Sync</h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Pick what to sync first — theme-only is the safe day-to-day path.
+          Pick what to sync first — theme-only is the safe day-to-day path. Full-site sync refuses a
+          mistyped remote path (parent of other sites or WP-dev in the docroot) — verify path in Setup
+          staging first.
         </p>
       </div>
 
-      <ol className="space-y-8">
+      <ol className="list-none space-y-8 p-0">
         <li className="space-y-3">
           <div className="flex items-baseline gap-2">
             <span className="text-xs font-bold uppercase tracking-wide text-brand-600 dark:text-brand-400">
@@ -282,12 +298,18 @@ export function SyncPage() {
 
             {scope === "theme_only" ? (
             <div className="space-y-3">
-              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-                Theme folder:{" "}
-                <strong>{themeSlug ?? "(set local.themeSlug or themePath in wp-dev.config.json)"}</strong>
-                . This is the configured theme path — not auto-detected from WordPress “active theme”.
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+                Syncing theme:{" "}
+                <strong className="text-slate-900 dark:text-white">
+                  {themeName && themeSlug && themeName !== themeSlug
+                    ? `${themeName} (${themeSlug})`
+                    : themeSlug ?? themeName ?? "…"}
+                </strong>
+                <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                  From your WP-dev config / default theme folder — not WordPress “active theme”.
+                </span>
               </p>
-              <p className="text-xs font-medium text-slate-500">Push theme from Dev</p>
+              <p className="text-xs font-medium text-slate-500">Push theme from Local</p>
               <div className="flex flex-wrap gap-2">
                 {themePushTargets.map((t) => (
                   <button
@@ -325,7 +347,7 @@ export function SyncPage() {
               </label>
               <details className="text-sm">
                 <summary className="cursor-pointer font-medium text-slate-600 dark:text-slate-300">
-                  Pull theme into Dev
+                  Pull theme into Local
                 </summary>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {themePullTargets.map((t) => (
@@ -405,7 +427,7 @@ export function SyncPage() {
       </ol>
 
       <LockedGate message="Unlock admin to run preview and sync.">
-        <ol className="mt-8 space-y-8" start={3}>
+        <ol className="mt-8 list-none space-y-8 p-0" start={3}>
           <li className="space-y-3">
             <div className="flex items-baseline gap-2">
               <span className="text-xs font-bold uppercase tracking-wide text-brand-600 dark:text-brand-400">
@@ -423,15 +445,19 @@ export function SyncPage() {
             >
               Preview changes
             </button>
-            {previewKey === selectionKey ? (
+            {previewDone ? (
               <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                Preview complete for this route — you can start.
+                Preview complete for this route.
                 {scope === "full"
                   ? " (Preview is files only; Start still replaces the database.)"
                   : ""}
               </p>
+            ) : scope === "full" ? (
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                Required for full-site: run Preview once, then Start unlocks.
+              </p>
             ) : (
-              <p className="text-xs text-slate-500">Preview once before starting.</p>
+              <p className="text-xs text-slate-500">Optional for theme sync — Start works without it.</p>
             )}
           </li>
 
@@ -447,7 +473,7 @@ export function SyncPage() {
                 <strong>
                   {themeDirection === "push"
                     ? ENV_LABEL[themeEnv === "staging" ? "staging" : "production"]
-                    : "Dev"}
+                    : "Local"}
                 </strong>
                 . Database and uploads stay untouched.
               </p>
@@ -464,10 +490,21 @@ export function SyncPage() {
                 scope === "theme_only" ? "bg-brand-600" : "bg-amber-600"
               }`}
               onClick={() => void runSync(false)}
-              title={!canStart ? "Run Preview first" : undefined}
+              title={
+                !canStart
+                  ? scope === "full" && !previewDone
+                    ? "Run Preview first"
+                    : "Unlock admin or wait for the current job"
+                  : undefined
+              }
             >
               {scope === "theme_only" ? "Start theme sync" : "Start full-site sync"}
             </button>
+            {!canStart && scope === "full" && !previewDone ? (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                Start is locked until Preview finishes successfully.
+              </p>
+            ) : null}
           </li>
         </ol>
 

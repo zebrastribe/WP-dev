@@ -20,7 +20,7 @@ export const Overview: FC = () => (
       </strong>{" "}
       after <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev up</code> and{" "}
       <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">npm run admin:build:wp</code> — start with{" "}
-      <strong>Setup staging</strong> / <strong>Sync</strong>, then use Advanced docs when you need detail.
+      <strong>Setup</strong> / <strong>Sync</strong>, then use Advanced docs when you need detail.
     </p>
     <p className="text-base text-slate-600 dark:text-slate-400">
       <strong className="text-slate-900 dark:text-white">wp-dev</strong> is a CLI: local WordPress in Docker,
@@ -198,7 +198,7 @@ export const Backups: FC = () => (
     </p>
     <p>
       Database-only backups restore in the admin (Backup → Restore, or Advanced → Restore points).
-      Dev can also create a full archive (<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">backup --files</code>)
+      Use a complete install archive (<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">backup --complete</code>) before updates, or content (<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">backup --files</code>)
       with DB + wp-content; Staging/Production full archives restore via CLI only.
     </p>
     <p>

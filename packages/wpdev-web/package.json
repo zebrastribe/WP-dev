@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Shared WP-dev web UI (Backup · Setup staging · Sync). Localhost admin and future hosted control-web both consume this package.",
+  "description": "Shared WP-dev web UI (Backup · Setup · Sync). Localhost admin and future hosted control-web both consume this package.",
   "exports": {
     ".": "./src/index.ts",
     "./adapter": "./src/adapter/types.ts"

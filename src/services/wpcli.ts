@@ -1,7 +1,9 @@
 import {
+  chownSync,
   copyFileSync,
   createReadStream,
   existsSync,
+  readdirSync,
   readFileSync,
   unlinkSync,
 } from "node:fs";
@@ -18,6 +20,7 @@ import {
 } from "./docker-compose.js";
 import { resolveFromConfigDir } from "../config/load.js";
 import { persistEnvContent, setEnvValueInContent, writeEnvFile } from "../utils/compose-env.js";
+import { resolveHostIdentity } from "../utils/host-paths.js";
 import { posixShellArg, posixShellQuote } from "../utils/shell-quote.js";
 import { sanitizeCliError } from "../utils/sanitize-cli-error.js";
 
@@ -337,10 +340,16 @@ export async function wpRemoteBootstrapConfigFromRemoteDb(
   );
 }
 
-function upsertDotenvKey(envPath: string, key: string, value: string): void {
+function upsertDotenvKey(
+  envPath: string,
+  key: string,
+  value: string,
+  loaded: { configDir: string; config: { project: string } },
+): void {
   const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const next = setEnvValueInContent(current, key, value);
-  persistEnvContent(envPath, next);
+  // Pass loaded so writeEnvFile chowns host:www-data (UI runner is root).
+  persistEnvContent(envPath, next, loaded);
 }
 
 function ensureComposeDotenv(configDir: string, config: WpDevConfig): string {
@@ -367,7 +376,10 @@ export async function wpLocalAlignTablePrefixAfterImport(
 ): Promise<void> {
   await waitForLocalMysqlReady(configDir, config);
   const envPath = ensureComposeDotenv(configDir, config);
-  upsertDotenvKey(envPath, "WORDPRESS_TABLE_PREFIX", tablePrefix);
+  upsertDotenvKey(envPath, "WORDPRESS_TABLE_PREFIX", tablePrefix, {
+    configDir,
+    config: { project: config.project },
+  });
 
   let r = await wpLocalRaw(
     configDir,
@@ -406,6 +418,38 @@ export async function wpLocalDbImportFromFile(
   }
 }
 
+/** Best-effort remove of root-owned `.wp-dev-export-*.sql` temps in the WP bind mount. */
+function removeWpDevExportTemp(path: string, configDir: string): void {
+  try {
+    unlinkSync(path);
+    return;
+  } catch {
+    /* may be root-owned after container export */
+  }
+  try {
+    const { uid, gid } = resolveHostIdentity(configDir);
+    chownSync(path, uid, gid);
+    unlinkSync(path);
+  } catch {
+    /* leave for next sweep / fix-permissions */
+  }
+}
+
+function sweepStaleWpDevExports(configDir: string, config: WpDevConfig): void {
+  const root = resolveFromConfigDir(configDir, config.local.wpRoot);
+  let names: string[] = [];
+  try {
+    names = readdirSync(root).filter(
+      (n) => n.startsWith(".wp-dev-export-") && n.endsWith(".sql"),
+    );
+  } catch {
+    return;
+  }
+  for (const n of names) {
+    removeWpDevExportTemp(join(root, n), configDir);
+  }
+}
+
 /** Export DB to a host path by writing via the bind-mounted wp root (handles large dumps). */
 export async function wpLocalDbExportToFile(
   configDir: string,
@@ -413,6 +457,7 @@ export async function wpLocalDbExportToFile(
   hostSqlPath: string,
 ): Promise<void> {
   await waitForLocalMysqlReady(configDir, config);
+  sweepStaleWpDevExports(configDir, config);
   const fileName = `.wp-dev-export-${Date.now()}.sql`;
   const containerPath = `${CONTAINER_WP_PATH}/${fileName}`;
   // Export as root so temporary dump file can always be created on bind-mounted wp root.
@@ -426,11 +471,8 @@ export async function wpLocalDbExportToFile(
   try {
     copyFileSync(mounted, hostSqlPath);
   } finally {
-    try {
-      unlinkSync(mounted);
-    } catch {
-      /* cleanup */
-    }
+    removeWpDevExportTemp(mounted, configDir);
+    sweepStaleWpDevExports(configDir, config);
   }
 }
 

@@ -12,7 +12,7 @@ This repository is the **public localhost tool** (CLI + optional `/admin/` UI). 
 
 - Local WordPress in Docker (MySQL + Apache)
 - **Pull / push** database and files via SSH and rsync
-- Optional browser UI at `/admin/` — **Backup · Setup staging · Sync** (Advanced for power tools)
+- Optional browser UI at `/admin/` — **Backup · Setup · Sync** (Advanced for power tools)
 - **Theme-only** day-to-day sync (default); full-site after Preview
 - **DB backups** before destructive sync when WordPress is already installed
 - Staging sync/restore requires **host confirm** (`--confirm-host`); production stays gated
@@ -105,7 +105,7 @@ cat ~/.ssh/id_ed25519.pub
 ssh user@your-ssh-host.example.com
 ```
 
-**4. Add to WP-dev** — **Setup staging** in `/admin/` or:
+**4. Add to WP-dev** — **Setup** in `/admin/` or:
 
 ```bash
 npm run wp-dev -- init
@@ -129,7 +129,7 @@ npm run wp-dev -- up
 http://localhost:8888/admin/
 ```
 
-Use **Setup staging** to save SSH/config, then **Sync** or **Backup** as needed. Unlock with the token in `docker/.env` → `WPDEV_ADMIN_SAVE_TOKEN` if prompted.
+Use **Setup** to save SSH/config, then **Sync** or **Backup** as needed. Unlock with the token in `docker/.env` → `WPDEV_ADMIN_SAVE_TOKEN` if prompted.
 
 **3. Open your site:**
 
@@ -155,7 +155,7 @@ npm run wp-dev -- pull production
 | Tab | Purpose |
 |-----|---------|
 | **Backup** | Snapshot Dev / Staging / Production; restore on the same page |
-| **Setup staging** | SSH (or Simply), save config, verify |
+| **Setup** | Live SSH + optional staging (or Simply), save config, verify |
 | **Sync** | Theme-only (default) or full-site after Preview → Start |
 | **Advanced** | Restore points, PHP versions, services, terminal, update, docs |
 
@@ -187,7 +187,8 @@ npm run wp-dev -- <command>
 | `doctor --filesystem` | Check permissions and paths |
 | `update` | Update WP-dev from git |
 | `backup local` | Save database backup |
-| `backup local --files` | Full archive (DB + wp-content; excludes `node_modules`) |
+| `backup local --files` | Content archive (DB + wp-content; excludes `node_modules`) |
+| `backup local --complete` | Complete install archive (DB + WordPress tree; excludes `wp-config.php`) for update rollback |
 | `restore local <file>` | Restore a backup under `~/.wp-dev/backups/<project>/local/` |
 | `services` | Show ports and service health |
 | `logs` | Show recent log lines |

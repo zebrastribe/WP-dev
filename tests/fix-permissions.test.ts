@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   RUNTIME_WRITE_PATHS,
@@ -8,6 +10,12 @@ import {
 import { buildSharedConfigReconcileShell } from "../src/fs/ownership/reconcile.js";
 
 describe("fix-permissions runtime paths", () => {
+  it("cmdFixPermissions uses resolveHostIdentity (not raw userInfo) for container pulls", () => {
+    const src = readFileSync(join(process.cwd(), "src/commands/fix-permissions.ts"), "utf8");
+    expect(src).toContain("resolveHostIdentity");
+    expect(src).not.toMatch(/from "node:os".*userInfo|userInfo\(\)/s);
+  });
+
   it("lists runtime write paths without themes", () => {
     expect(RUNTIME_WRITE_PATHS).toContain("wp-content/upgrade");
     expect(RUNTIME_WRITE_PATHS).toContain("wp-content/upgrade-temp-backup");
@@ -46,5 +54,12 @@ describe("shared config reconcile", () => {
     expect(sh).toContain("chmod 660 /wp-dev-repo/docker/.env");
     expect(sh).toContain("chmod 664 /wp-dev-repo/wp-dev.config.json");
     expect(sh).not.toMatch(/chmod 664 \/wp-dev-repo\/docker\/\.env/);
+  });
+
+  it("makes logs/ writable by www-data for admin API log", () => {
+    const sh = buildSharedConfigReconcileShell(1000, 1000, 33);
+    expect(sh).toContain("chown 1000:33 /wp-dev-repo/logs");
+    expect(sh).toContain("chmod 2775 /wp-dev-repo/logs");
+    expect(sh).toContain("wp-dev-admin-api.log");
   });
 });

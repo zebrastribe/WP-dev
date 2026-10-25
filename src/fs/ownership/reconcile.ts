@@ -18,6 +18,7 @@ import { buildOwnershipManifest } from "./profiles.js";
  * without world-readable secrets (replaces chmod 666/777 band-aids).
  * - wp-dev.config.json: 664 host:host (non-secret project config)
  * - docker/.env: 660 host:www-data (secrets; owner + Apache group only)
+ * - logs/: 2775 host:www-data so Apache can append wp-dev-admin-api.log
  */
 export function buildSharedConfigReconcileShell(
   hostUid: number,
@@ -30,10 +31,14 @@ export function buildSharedConfigReconcileShell(
     `chown ${hostUid}:${hostGid} /wp-dev-repo/wp-dev.config.json`,
     `chown ${hostUid}:${wwwDataGid} /wp-dev-repo/docker/.env`,
     `if [ -f /wp-dev-repo/docker/.env.bak ]; then chown ${hostUid}:${wwwDataGid} /wp-dev-repo/docker/.env.bak && chmod 660 /wp-dev-repo/docker/.env.bak; fi`,
-    `chown ${hostUid}:${hostGid} /wp-dev-repo/docker /wp-dev-repo/logs`,
-    "chmod 775 /wp-dev-repo/docker /wp-dev-repo/logs",
+    `chown ${hostUid}:${hostGid} /wp-dev-repo/docker`,
+    // www-data must create/append admin API log; setgid keeps new files group-writable.
+    `chown ${hostUid}:${wwwDataGid} /wp-dev-repo/logs`,
+    "chmod 775 /wp-dev-repo/docker",
+    "chmod 2775 /wp-dev-repo/logs",
     "chmod 664 /wp-dev-repo/wp-dev.config.json",
     "chmod 660 /wp-dev-repo/docker/.env",
+    `if [ -f /wp-dev-repo/logs/wp-dev-admin-api.log ]; then chown ${hostUid}:${wwwDataGid} /wp-dev-repo/logs/wp-dev-admin-api.log && chmod 664 /wp-dev-repo/logs/wp-dev-admin-api.log; fi`,
   ].join(" && ");
 }
 

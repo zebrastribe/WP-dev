@@ -25,6 +25,7 @@ import {
   timestampedDbName,
 } from "../services/backup.js";
 import { confirmRemoteTarget } from "../utils/confirm.js";
+import { assertRemotePathSafe } from "../services/remote-path-safety.js";
 import {
   DISK_NEED,
   assertLocalFreeSpace,
@@ -108,6 +109,14 @@ export async function cmdPush(
     console.error(
       "[dry-run] Would: backup remote DB, rsync push, export local DB, import on remote, search-replace URLs.",
     );
+    const sshDry = await connectSsh(remote);
+    try {
+      await assertRemotePathSafe(sshDry, remote.path, env, {
+        allowMissingWpConfig: env === "staging",
+      });
+    } finally {
+      sshDry.dispose();
+    }
     await rsyncPush(remote, localWpRoot, {
       dryRun: true,
       excludes: pushExcludePatterns(configDir, config, localWpRoot),
@@ -149,6 +158,9 @@ export async function cmdPush(
     await assertRemoteFreeSpace(ssh, "/tmp", DISK_NEED.dbBackupRemoteTmp, `push ${env}`);
     let remoteWp = await resolveRemoteWpPath(ssh, remote.path);
     const shouldBootstrapStaging = env === "staging" && !remoteWp.installed;
+    await assertRemotePathSafe(ssh, remote.path, env, {
+      allowMissingWpConfig: shouldBootstrapStaging,
+    });
     if (!remoteWp.installed && !shouldBootstrapStaging) {
       await assertRemoteWpInstalled(ssh, remote.path);
     }

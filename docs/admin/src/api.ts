@@ -169,6 +169,8 @@ export type LocalStatus = {
   writable: { wpContent: boolean; plugins: boolean; upgrade: boolean };
   adminUrl: string;
   installUrl: string;
+  /** Theme-only sync target (resolved like CLI; not necessarily WP active theme). */
+  theme?: { slug: string; name: string; path: string; source: string };
 };
 
 export type LocalStatusResponse = { ok: true } & LocalStatus | { ok: false; error: string };

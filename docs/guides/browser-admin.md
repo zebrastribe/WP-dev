@@ -21,7 +21,7 @@ http://localhost:8888/admin/
 | Nav | Purpose |
 |-----|---------|
 | **Backup** | Snapshot Dev / Staging / Production; restore **on the same page** (database for Staging/Production; full DB+files for Dev) |
-| **Setup staging** | Connect SSH (or Simply), save config, verify, first backup |
+| **Setup** | Live SSH (production.*), optional staging, save config, verify, first backup |
 | **Sync** | Day-to-day: **theme only** (configured theme folder). Full-site push/pull after Preview. |
 | **Advanced** | Restore points list, copy config JSON, PHP versions, services/ports, terminal, update wp-dev, docs |
 
@@ -41,7 +41,7 @@ Full-site excludes (plugins, `node_modules`, etc.) are under Sync → “Full-si
 ### Backup / restore
 
 - Staging/Production backups in the UI default to **database only** (those `.sql` files restore in the browser).
-- Dev may create a **full** archive (`backup --files`); full `.tar.gz` restore to Staging/Production is CLI-only.
+- Backup types: **Database**, **Content** (`backup --files`), and **Complete** (`backup --complete`) for Dev, Staging, and Production. Complete is best before updates; restore keeps live `wp-config.php`.
 - **Advanced → Restore points** is the longer list / timeline for the same backup store.
 
 ## Security (localhost)

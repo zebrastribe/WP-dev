@@ -30,13 +30,13 @@ export type SyncRoute = {
 };
 
 export const ENV_LABEL: Record<EnvRole, string> = {
-  dev: "Dev",
+  dev: "Local",
   staging: "Staging",
   production: "Production",
 };
 
 export const RUNNER_ENV_LABEL: Record<RunnerEnv, string> = {
-  local: "Dev",
+  local: "Local",
   staging: "Staging",
   production: "Production",
 };
@@ -45,7 +45,7 @@ export const RUNNER_ENV_LABEL: Record<RunnerEnv, string> = {
 export const LOCAL_SYNC_ROUTES: SyncRoute[] = [
   {
     id: "dev_to_staging",
-    label: "Dev → Staging",
+    label: "Local → Staging",
     source: "dev",
     destination: "staging",
     primary: true,
@@ -54,7 +54,7 @@ export const LOCAL_SYNC_ROUTES: SyncRoute[] = [
   },
   {
     id: "staging_to_dev",
-    label: "Staging → Dev",
+    label: "Staging → Local",
     source: "staging",
     destination: "dev",
     primary: true,
@@ -63,7 +63,7 @@ export const LOCAL_SYNC_ROUTES: SyncRoute[] = [
   },
   {
     id: "production_to_dev",
-    label: "Production → Dev",
+    label: "Production → Local",
     source: "production",
     destination: "dev",
     primary: false,

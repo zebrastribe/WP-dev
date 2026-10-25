@@ -52,6 +52,22 @@
 
 ---
 
+## Path safety: parent folder or WP-dev in docroot
+
+**Symptoms:** `doctor` reports `Path safety: FAIL` — parent of sites, missing `wp-config.php`, or wp-dev tooling in docroot.
+
+**Cause:** `path` points at a shared parent (other sites/logs), or the WP-dev git project was copied into the live site folder.
+
+**Fix:**
+
+1. Set `path` to the directory that contains **this** site’s `wp-config.php`.
+2. Keep other sites and logs as **siblings**, not under that path.
+3. Remove any WP-dev checkout from production/staging docroot; run WP-dev only on your machine (or a non-web directory).
+
+**Verify:** `npm run wp-dev -- doctor production`
+
+---
+
 ## Related
 
 - [SSH setup](../getting-started/ssh.md)

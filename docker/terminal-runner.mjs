@@ -96,8 +96,23 @@ function commandForAction(action, args) {
   if (action === "ssh_test") {
     const user = safeArg(args?.user);
     const host = safeArg(args?.host);
+    const path = safeArg(args?.path);
     if (!user || !host) return null;
-    return `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} "pwd && ls -la && wp --info"`;
+    if (!path) {
+      return 'echo "FAIL: WordPress path is required. Set staging.path / production.path to the folder that contains wp-config.php (not a parent of other sites)." >&2; exit 1';
+    }
+    // Verify the configured site root before listing — catches mistyped parents early.
+    // Keep $P as a remote shell var (escape $ so Node template literals do not eat it).
+    return (
+      `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} ` +
+      `'set -e; P=${path}; ` +
+      `test -d "\$P" || { echo "FAIL: path does not exist: \$P"; exit 1; }; ` +
+      `if [ ! -f "\$P/wp-config.php" ] && [ ! -f "\$P/wp-config-sample.php" ]; then ` +
+      `echo "FAIL: \$P is not a WordPress root (no wp-config.php). Point path at this site only — not a parent with other sites/logs."; exit 1; fi; ` +
+      `if [ -f "\$P/wp-dev.config.json" ] || [ -f "\$P/docker/terminal-runner.mjs" ]; then ` +
+      `echo "FAIL: WP-dev tooling found inside \$P. Keep WP-dev on your workstation; path must be the site docroot only."; exit 1; fi; ` +
+      `echo "Path OK: \$P (WordPress root)"; ls -la "\$P" | head -n 40; wp --path="\$P" --info'`
+    );
   }
   if (action === "wpdev_doctor") {
     const env = safeArg(args?.env);
@@ -189,26 +204,37 @@ function commandForAction(action, args) {
   if (action === "backup_create") {
     const env = safeArg(args?.env);
     const kindRaw = safeArg(args?.kind);
-    const kind = kindRaw === "full" ? "full" : "db";
+    const kind =
+      kindRaw === "complete" ? "complete" : kindRaw === "full" || kindRaw === "content" ? "full" : "db";
     if (!["local", "staging", "production"].includes(env)) return null;
     // Always use CLI so disk-space preflight and shared backup logic apply.
-    return kind === "full"
-      ? `npm run wp-dev -- backup ${env} --files`
-      : `npm run wp-dev -- backup ${env}`;
+    if (kind === "complete") return `npm run wp-dev -- backup ${env} --complete`;
+    if (kind === "full") return `npm run wp-dev -- backup ${env} --files`;
+    return `npm run wp-dev -- backup ${env}`;
   }
   if (action === "backup_list") {
     const env = safeArg(args?.env);
     const kindRaw = safeArg(args?.kind);
-    const kind = kindRaw === "full" ? "full" : kindRaw === "all" ? "all" : "db";
+    const kind =
+      kindRaw === "complete"
+        ? "complete"
+        : kindRaw === "full" || kindRaw === "content"
+          ? "full"
+          : kindRaw === "all"
+            ? "all"
+            : "db";
     const project = readProjectId();
     if (!["local", "staging", "production"].includes(env) || !project) return null;
     const base = `$HOME/.wp-dev/backups/${project}/${env}`;
+    if (kind === "complete") {
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/complete-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No complete backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+    }
     if (kind === "full") {
-      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/full-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No full backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/full-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No content backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
     }
     if (kind === "all") {
-      // Prefer full + db/pre prefixes; avoid *.sql which double-matches those globs.
-      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/full-*.tar.gz ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 40 || true)"; if [ -z "$OUT" ]; then echo "No backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+      // Prefer complete + content + db/pre prefixes; avoid *.sql which double-matches those globs.
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/complete-*.tar.gz ${base}/full-*.tar.gz ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 40 || true)"; if [ -z "$OUT" ]; then echo "No backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
     }
     return `mkdir -p ${base}; OUT="$(ls -1t ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No database backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
   }
@@ -225,20 +251,9 @@ function commandForAction(action, args) {
       'test -n "$FILE_REAL" || { echo "Backup file not found or unreadable."; exit 1; }',
       `case "$FILE_REAL" in "$HOME"/.wp-dev/backups/${project}/${env}/*) ;; *) echo "Restore refused: file must be under ~/.wp-dev/backups/${project}/${env}/"; exit 1;; esac`,
     ].join("; ");
+    // All restores go through CLI (DB, content, and complete archives; remote needs confirm).
     if (env === "local") {
-      if (safeArg(file).endsWith(".tar.gz")) {
-        return [
-          backupGuard,
-          'test -n "$MYSQL_DATABASE" || { echo "Missing MYSQL_DATABASE in terminal environment."; exit 1; }',
-          'test -n "$MYSQL_USER" || { echo "Missing MYSQL_USER in terminal environment."; exit 1; }',
-          'test -n "$MYSQL_PASSWORD" || { echo "Missing MYSQL_PASSWORD in terminal environment."; exit 1; }',
-          `case "$FILE_REAL" in *.tar.gz) TMPDIR="$(mktemp -d)"; tar -xzf "$FILE_REAL" -C "$TMPDIR" || { rm -rf "$TMPDIR"; exit 1; }; test -f "$TMPDIR/db.sql" || { echo "Invalid full backup archive: missing db.sql"; rm -rf "$TMPDIR"; exit 1; }; test -d "$TMPDIR/wp-content" || { echo "Invalid full backup archive: missing wp-content"; rm -rf "$TMPDIR"; exit 1; }; PRE="$HOME/.wp-dev/backups/${project}/local/pre-restore-ui-$(date +%s).sql"; mkdir -p "$(dirname "$PRE")"; mysqldump --no-tablespaces -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" > "$PRE" || { rm -rf "$TMPDIR"; exit 1; }; mysql -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < "$TMPDIR/db.sql" || { rm -rf "$TMPDIR"; exit 1; }; mkdir -p /workspace/wordpress/wp-content; rsync -a --delete "$TMPDIR/wp-content/" /workspace/wordpress/wp-content/ || { rm -rf "$TMPDIR"; exit 1; }; rm -rf "$TMPDIR"; npm run wp-dev -- fix-runtime-permissions >/dev/null 2>&1 || npm run wp-dev -- fix-permissions >/dev/null 2>&1 || true; echo "Local full restore completed (pre-restore DB: $PRE). Runtime write permissions refreshed for www-data.";; *) echo "Unexpected"; exit 1;; esac`,
-        ].join("; ");
-      }
       return `${backupGuard}; npm run wp-dev -- restore local "$FILE_REAL"`;
-    }
-    if (safeArg(file).endsWith(".tar.gz")) {
-      return `${backupGuard}; echo "Full archive restore to ${env} via the browser runner is disabled (no safe pre-backup + URL rewrite). Use host CLI after backing up." >&2; exit 1`;
     }
     if (env === "staging") {
       return `${backupGuard}; npm run wp-dev -- restore staging "$FILE_REAL" --yes --confirm-host ${confirm}`;

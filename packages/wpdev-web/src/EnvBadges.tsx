@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { loadLocalStatus, loadWpDevConfig, useAdminAuth } from "@wpdev/web-host";
 import { ENV_LABEL, type EnvRole } from "./adapter/types";
 
-type Badge = { role: EnvRole; detail: string; ok: boolean | null };
+type Badge = { role: EnvRole; detail: string; ok: boolean | null; title?: string };
 
 export function EnvBadges() {
   const { authenticated, authVersion } = useAdminAuth();
@@ -42,7 +42,8 @@ export function EnvBadges() {
         host.includes("example.com") ||
         host.includes("example.invalid") ||
         host.endsWith(".invalid");
-      // Staging/Production green would mean "safe to push" — only show host-saved (neutral) vs not set.
+      // Dev = local Docker probe. Staging/Production are NOT live SSH/HTTP checks — only whether
+      // a real host is saved in config (green would falsely imply "reachable / safe to push").
       const stagingSaved = Boolean(stagingHost && !isPlaceholderHost(stagingHost));
       const prodSaved = Boolean(prodHost && !isPlaceholderHost(prodHost));
       setBadges([
@@ -57,13 +58,19 @@ export function EnvBadges() {
         },
         {
           role: "staging",
-          detail: stagingSaved ? `host saved · ${stagingHost}` : "not set",
+          detail: stagingSaved ? `configured · ${stagingHost}` : "not configured",
           ok: stagingSaved ? null : false,
+          title: stagingSaved
+            ? `SSH host is saved in config (${stagingHost}). This is not a live online check — use Verify path or doctor.`
+            : "Add staging.host in Setup.",
         },
         {
           role: "production",
-          detail: prodSaved ? `host saved · ${prodHost}` : "not set",
+          detail: prodSaved ? `configured · ${prodHost}` : "not configured",
           ok: prodSaved ? null : false,
+          title: prodSaved
+            ? `SSH host is saved in config (${prodHost}). This is not a live online check — use Verify path or doctor.`
+            : "Add production.host in Setup.",
         },
       ]);
     })();
@@ -94,7 +101,7 @@ export function EnvBadges() {
                 ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
                 : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
           }`}
-          title={b.detail}
+          title={b.title ?? b.detail}
         >
           <span className="font-semibold">{ENV_LABEL[b.role]}</span>
           <span aria-hidden className="opacity-40">

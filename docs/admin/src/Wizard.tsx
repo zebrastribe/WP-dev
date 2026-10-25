@@ -22,7 +22,7 @@ import { TerminalEmbed } from "./TerminalEmbed";
 import { SyncDeployPanel } from "./SyncDeployPanel";
 import { useRunnerSecrets } from "./useRunnerSecrets";
 
-const STEP_LABELS = ["Connect", "SSH", "Staging", "First backup", "Ready"] as const;
+const STEP_LABELS = ["Connect", "Live SSH", "Staging", "First backup", "Ready"] as const;
 /** Wizard step index for staging — skipped when syncing from one remote only. */
 const STAGING_STEP = 2;
 
@@ -285,10 +285,23 @@ export function Wizard() {
   const [saving, setSaving] = useState(false);
   const [terminalPrep, setTerminalPrep] = useState<TerminalPrepState>(null);
   const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
+  /** Cleared when host/user/path change; set when SSH test or doctor succeeds. */
+  const [pathVerified, setPathVerified] = useState<{ staging: boolean; production: boolean }>({
+    staging: false,
+    production: false,
+  });
 
   useEffect(() => {
     if (terminalAuth) setTerminalAuthDraft(terminalAuth);
   }, [terminalAuth]);
+
+  useEffect(() => {
+    setPathVerified((prev) => ({ ...prev, staging: false }));
+  }, [data.staging.host, data.staging.user, data.staging.path]);
+
+  useEffect(() => {
+    setPathVerified((prev) => ({ ...prev, production: false }));
+  }, [data.production.host, data.production.user, data.production.path]);
 
   const goStep = useCallback((n: number) => {
     const i = Math.max(0, Math.min(STEP_LABELS.length - 1, n));
@@ -619,10 +632,39 @@ export function Wizard() {
               `Wizard: runner ${action} finished`,
               `exit=${status.exitCode ?? 1}`,
             );
+            const ok = status.exitCode === 0;
+            if (ok && (action === "ssh_test" || action === "wpdev_doctor")) {
+              const envArg = args?.env;
+              const which =
+                envArg === "staging" || envArg === "production"
+                  ? envArg
+                  : args?.path &&
+                      data.staging.path.trim() &&
+                      args.path === data.staging.path.trim()
+                    ? "staging"
+                    : args?.path &&
+                        data.production.path.trim() &&
+                        args.path === data.production.path.trim()
+                      ? "production"
+                      : null;
+              if (which) {
+                setPathVerified((prev) => ({ ...prev, [which]: true }));
+              }
+            }
+            if (!ok && (action === "ssh_test" || action === "wpdev_doctor")) {
+              const envArg = args?.env;
+              if (envArg === "staging" || envArg === "production") {
+                setPathVerified((prev) => ({ ...prev, [envArg]: false }));
+              }
+            }
             setAlert({
-              tone: status.exitCode === 0 ? "success" : "error",
+              tone: ok ? "success" : "error",
               text:
-                (status.exitCode === 0 ? "Command completed successfully." : `Command failed (exit ${status.exitCode ?? 1}).`) +
+                (ok
+                  ? action === "ssh_test" || action === "wpdev_doctor"
+                    ? "Path check passed. Remote path looks like this site’s WordPress root."
+                    : "Command completed successfully."
+                  : `Command failed (exit ${status.exitCode ?? 1}). Fix path/SSH, then re-run Verify path.`) +
                 "\n\nSee output in the command output panel below.",
             });
             return;
@@ -697,7 +739,8 @@ export function Wizard() {
     const remote = data[env];
     const host = remote.host.trim() || "<ssh-host>";
     const user = remote.user.trim() || "<ssh-user>";
-    return `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} "pwd && ls -la && wp --info"`;
+    const path = remote.path.trim() || "<wordpress-path>";
+    return `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} 'P=${path}; test -f "$P/wp-config.php" || test -f "$P/wp-config-sample.php" || { echo FAIL: not a WordPress root; exit 1; }; echo Path OK: $P; ls -la "$P" | head; wp --path="$P" --info'`;
   };
 
   const buildKeypairCommand = (): string =>
@@ -869,6 +912,17 @@ export function Wizard() {
         "On shared hosting, a relative path like `staging` often works better than `/staging`.",
     },
     {
+      status: !hasStagingServer
+        ? ("done" as ChecklistStatus)
+        : pathVerified.staging
+          ? ("done" as ChecklistStatus)
+          : ("todo" as ChecklistStatus),
+      label: "Staging WordPress path verified on server",
+      detail: pathVerified.staging
+        ? "SSH/path check passed for this site’s wp-config.php directory."
+        : "Run Verify path (staging) after saving host, user, and path — refuses parent folders and WP-dev in docroot.",
+    },
+    {
       status:
         /^https:\/\//i.test(data.staging.url.trim()) && data.staging.url.includes(".")
           ? ("done" as ChecklistStatus)
@@ -931,7 +985,7 @@ export function Wizard() {
   );
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="w-full space-y-6">
       <div className="flex flex-wrap gap-2 text-xs">
         {STEP_LABELS.map((label, i) => {
           if (skipStaging && i === STAGING_STEP) return null;
@@ -1084,11 +1138,11 @@ export function Wizard() {
                 <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Terminal login (user:password)</span>
                 <input
                   className={input}
-                  type="text"
-                  autoComplete="off"
+                  type="password"
+                  autoComplete="new-password"
                   value={terminalAuthDraft}
                   onChange={(e) => setTerminalAuthDraft(e.target.value)}
-                  placeholder="wpdev:wpdev"
+                  placeholder="user:password"
                 />
               </label>
               <label className="block">
@@ -1199,12 +1253,12 @@ export function Wizard() {
           )}
           <p className="text-sm text-slate-600 dark:text-slate-400">
             {workflow === "pull"
-              ? "One SSH connection — no separate staging/production domains required."
-              : "Remote SSH (optional for local-only)."}
+              ? "Live site SSH — saved as production.* in config. Staging (next step) is optional."
+              : "Live / production SSH (optional for local-only). Saved as production.*"}
           </p>
           <label className="block">
             <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-              SSH host{workflow === "pull" ? " *" : ""}
+              Live SSH host{workflow === "pull" ? " *" : ""}
             </span>
             <input
               className={input}
@@ -1215,7 +1269,7 @@ export function Wizard() {
           </label>
           <label className="block">
             <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-              SSH user{workflow === "pull" ? " *" : ""}
+              Live SSH user{workflow === "pull" ? " *" : ""}
             </span>
             <input
               className={input}
@@ -1226,7 +1280,7 @@ export function Wizard() {
           </label>
           <label className="block">
             <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-              WordPress path on server{workflow === "pull" ? " *" : ""}
+              Live WordPress path{workflow === "pull" ? " *" : ""}
             </span>
             <input
               className={input}
@@ -1281,12 +1335,33 @@ export function Wizard() {
                   void runTerminalCommand(buildSshTestCommand("production"), "plain", "ssh_test", {
                     user: data.production.user.trim(),
                     host: data.production.host.trim(),
+                    path: data.production.path.trim(),
+                    env: "production",
                   })
                 }
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Run SSH test (production)
+                Verify path (production)
               </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void runTerminalCommand(
+                    "npm run wp-dev -- doctor production --http",
+                    "plain",
+                    "wpdev_doctor",
+                    { env: "production" },
+                  )
+                }
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+              >
+                Full doctor (production)
+              </button>
+              {pathVerified.production ? (
+                <span className="self-center text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                  Path verified
+                </span>
+              ) : null}
             </div>
             {terminalPrep && (
               <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
@@ -1402,7 +1477,8 @@ export function Wizard() {
                   Required: ensure this key is uploaded on the staging host too (or shared host account) before pull/push.
                 </p>
                 <p className="mt-1">
-                  Run this check first. Expected output: remote path listing + WP-CLI info.
+                  Verifies SSH <strong>and</strong> that staging.path is this site’s WordPress root (has
+                  wp-config.php; refuses parent folders and WP-dev tooling in the docroot).
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -1411,12 +1487,33 @@ export function Wizard() {
                       void runTerminalCommand(buildSshTestCommand("staging"), "plain", "ssh_test", {
                         user: data.staging.user.trim(),
                         host: data.staging.host.trim(),
+                        path: data.staging.path.trim(),
+                        env: "staging",
                       })
                     }
                     className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                   >
-                    Run SSH test (staging)
+                    Verify path (staging)
                   </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void runTerminalCommand(
+                        "npm run wp-dev -- doctor staging --http",
+                        "plain",
+                        "wpdev_doctor",
+                        { env: "staging" },
+                      )
+                    }
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                  >
+                    Full doctor (staging)
+                  </button>
+                  {pathVerified.staging ? (
+                    <span className="self-center text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                      Path verified
+                    </span>
+                  ) : null}
                 </div>
                 {terminalPrep && (
                   <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-900">

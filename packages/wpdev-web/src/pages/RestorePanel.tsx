@@ -37,18 +37,15 @@ export function RestorePanel({ env, busy, canRun, onRestore }: RestorePanelProps
   const envLabel = RUNNER_ENV_LABEL[env];
   const isProduction = env === "production";
   const isStaging = env === "staging";
-  const isRemote = env !== "local";
-  const isFullArchive = file.trim().endsWith(".tar.gz");
-  const remoteFullBlocked = isRemote && isFullArchive;
+  const isArchive = file.trim().endsWith(".tar.gz");
+  const archiveHint = isArchive
+    ? file.includes("complete-")
+      ? "complete install"
+      : "content (DB + wp-content)"
+    : "database";
 
   const handleRestore = async () => {
     const path = file.trim();
-    if (remoteFullBlocked) {
-      window.alert(
-        "Full archive (.tar.gz) restore to Staging/Production is not available here. Use a .sql database backup, or restore full archives on Dev only.",
-      );
-      return;
-    }
     if (isStaging && !stagingHost) {
       window.alert("Set staging.host in config before restoring Staging.");
       return;
@@ -56,7 +53,7 @@ export function RestorePanel({ env, busy, canRun, onRestore }: RestorePanelProps
     const hostLine = isStaging && stagingHost ? `SSH host: ${stagingHost}\n\n` : "";
     if (
       !window.confirm(
-        `${hostLine}Restore ${envLabel} from:\n${path}\n\nThis replaces the current ${envLabel} site state. Continue?`,
+        `${hostLine}Restore ${envLabel} (${archiveHint}) from:\n${path}\n\nThis replaces the current ${envLabel} site state. Live wp-config.php is kept on complete restores. Continue?`,
       )
     ) {
       return;
@@ -73,9 +70,10 @@ export function RestorePanel({ env, busy, canRun, onRestore }: RestorePanelProps
     <div className="space-y-3">
       <p className="text-sm text-slate-600 dark:text-slate-400">
         Restores into <span className="font-medium text-slate-800 dark:text-slate-100">{envLabel}</span>{" "}
-        from a backup file under this project. Staging/Production: <strong>.sql only</strong> in the
-        browser. Dev can restore full <code className="text-xs">.tar.gz</code>. For a list, open
-        Advanced → Restore points.
+        from a backup under this project. Accepts <code className="text-xs">.sql</code> (database),{" "}
+        <code className="text-xs">full-*.tar.gz</code> (content), and{" "}
+        <code className="text-xs">complete-*.tar.gz</code> (whole install). Staging and Production need
+        the confirm fields below. Use List recent to copy a path.
       </p>
       <label className="block">
         <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Backup file path</span>
@@ -86,12 +84,6 @@ export function RestorePanel({ env, busy, canRun, onRestore }: RestorePanelProps
           placeholder="Path from List recent, or ~/.wp-dev/backups/&lt;project&gt;/…"
         />
       </label>
-      {remoteFullBlocked ? (
-        <p className="text-xs text-amber-800 dark:text-amber-200">
-          This path looks like a full archive. Choose a .sql backup for {envLabel}, or switch env to
-          Dev.
-        </p>
-      ) : null}
       {isProduction ? (
         <label className="block">
           <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
@@ -110,7 +102,6 @@ export function RestorePanel({ env, busy, canRun, onRestore }: RestorePanelProps
           busy ||
           !canRun ||
           !file.trim() ||
-          remoteFullBlocked ||
           (isProduction && productionConfirm !== "RESTORE_PRODUCTION") ||
           (isStaging && !stagingHost)
         }

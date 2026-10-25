@@ -24,6 +24,14 @@ describe("runner-remote-env.mjs", () => {
   });
 });
 
+describe("CLI logging", () => {
+  it("runWithConfig logs exit code when command aborts without throwing", () => {
+    const cli = readFileSync(join(process.cwd(), "src/cli.ts"), "utf8");
+    expect(cli).toContain("finished exit=${process.exitCode}");
+    expect(cli).toMatch(/process\.exitCode && process\.exitCode !== 0/);
+  });
+});
+
 describe("pull/push safety guards", () => {
   it("pull rolls back local DB on sync failure when pre-pull backup exists", () => {
     const pull = readFileSync(join(process.cwd(), "src/commands/pull.ts"), "utf8");
@@ -33,6 +41,15 @@ describe("pull/push safety guards", () => {
     expect(pull).toContain("confirmRemoteTarget");
     expect(pull).toContain("confirmHost");
     expect(wpcli).toContain("--precise");
+  });
+
+  it("pull and pull-theme re-own wordpress/ after rsync (container root bind-mount)", () => {
+    const pull = readFileSync(join(process.cwd(), "src/commands/pull.ts"), "utf8");
+    const theme = readFileSync(join(process.cwd(), "src/commands/pull-theme.ts"), "utf8");
+    expect(pull).toContain("cmdFixPermissions");
+    expect(pull).toMatch(/fix-permissions after rsync/);
+    expect(theme).toContain("cmdFixPermissions");
+    expect(theme).not.toMatch(/cmdFixRuntimeWritePermissions/);
   });
 
   it("push confirms staging and rolls back remote DB on failure", () => {

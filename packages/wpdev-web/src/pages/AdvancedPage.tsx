@@ -49,7 +49,7 @@ export function AdvancedPage() {
           Advanced
         </h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Power tools. Everyday work is on Backup, Setup staging, and Sync.
+          Power tools. Everyday work is on Backup, Setup, and Sync.
         </p>
       </div>
 

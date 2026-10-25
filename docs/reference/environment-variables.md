@@ -28,7 +28,7 @@ WP-dev auto-generates security tokens on first `wp-dev up`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WPDEV_PHP_VERSION` | 8.2 | Docker image tag (`7.4`–`8.4`) |
+| `WPDEV_PHP_VERSION` | 8.2 | Docker image tag (`7.4`–`8.5`; see [PHP versions](../guides/php-versions.md)) |
 
 ```bash
 npm run wp-dev -- php show --env local

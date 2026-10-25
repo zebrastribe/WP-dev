@@ -8,7 +8,16 @@ import { connectSsh, type SshSession } from "./ssh.js";
 import { posixShellQuote } from "../utils/shell-quote.js";
 import { persistEnvContent, setEnvValueInContent } from "../utils/compose-env.js";
 
-export const SUPPORTED_PHP_VERSIONS = ["7.4", "8.0", "8.1", "8.2", "8.3", "8.4"] as const;
+/** Local Docker + remote selector allow-list. Track https://www.php.net/supported-versions.php and Docker Hub wordpress:php*-apache tags. */
+export const SUPPORTED_PHP_VERSIONS = [
+  "7.4",
+  "8.0",
+  "8.1",
+  "8.2",
+  "8.3",
+  "8.4",
+  "8.5",
+] as const;
 export type SupportedPhpVersion = (typeof SUPPORTED_PHP_VERSIONS)[number];
 
 export type PhpEnvTarget = "local" | RemoteEnvName;
@@ -200,36 +209,57 @@ export async function detectRemotePhp(
       `touch ${posixShellQuote(`${wpPath}/.wp-dev-php-write-test`)} 2>/dev/null && rm -f ${posixShellQuote(`${wpPath}/.wp-dev-php-write-test`)} && echo ok`,
     );
     const writable = canWrite.code === 0 && (canWrite.stdout || "").includes("ok");
-    if (!writable) {
-      return {
-        env,
-        currentVersion,
-        strategy: "unsupported",
-        detail:
-          "Web root not writable over SSH. Change PHP in the hosting panel, then verify with php show.",
-        supported: false,
-      };
-    }
 
     if (htaccess !== null && /AddHandler\s+.*php/i.test(htaccess)) {
+      if (!writable) {
+        return {
+          env,
+          currentVersion,
+          strategy: "unsupported",
+          detail:
+            "Host uses .htaccess PHP handlers, but the web root is not writable over SSH. Change PHP in the hosting panel.",
+          supported: false,
+        };
+      }
       return {
         env,
         currentVersion,
         strategy: "htaccess_addhandler",
-        detail: "Detected AddHandler-style .htaccess PHP selector",
+        detail: "Detected AddHandler-style .htaccess PHP selector — WP-dev can change it.",
         supported: true,
       };
     }
 
+    if (phpVersionFile !== null) {
+      if (!writable) {
+        return {
+          env,
+          currentVersion,
+          strategy: "unsupported",
+          detail:
+            "Found .php-version, but the web root is not writable over SSH. Change PHP in the hosting panel.",
+          supported: false,
+        };
+      }
+      return {
+        env,
+        currentVersion,
+        strategy: "dot_php_version",
+        detail: "Found .php-version (common on shared hosting) — WP-dev can update it.",
+        supported: true,
+      };
+    }
+
+    // Writable alone is not enough: many shared hosts ignore a newly created .php-version
+    // until PHP is enabled in the panel. Prefer honest “panel only” over a fake Apply control.
     return {
       env,
       currentVersion,
-      strategy: "dot_php_version",
-      detail:
-        phpVersionFile !== null
-          ? "Found .php-version (common on shared hosting)"
-          : "Writable web root — will use .php-version (if host ignores it, change PHP in panel and rollback)",
-      supported: true,
+      strategy: "unsupported",
+      detail: writable
+        ? "No .php-version or htaccess PHP selector detected. Change PHP in the hosting panel, then Refresh here to confirm."
+        : "Web root not writable over SSH. Change PHP in the hosting panel, then Refresh here to confirm.",
+      supported: false,
     };
   } finally {
     ssh.dispose();

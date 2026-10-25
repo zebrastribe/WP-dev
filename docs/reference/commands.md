@@ -58,7 +58,9 @@ npm run wp-dev -- pull theme production
 ```bash
 npm run wp-dev -- backup local
 npm run wp-dev -- backup production --files
+npm run wp-dev -- backup staging --complete
 npm run wp-dev -- restore local ~/.wp-dev/backups/.../file.sql
+npm run wp-dev -- restore local ~/.wp-dev/backups/.../complete-….tar.gz
 ```
 
 ## Diagnostics

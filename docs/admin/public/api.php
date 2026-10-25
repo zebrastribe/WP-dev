@@ -413,6 +413,86 @@ function wpdev_admin_api_log(string $message): void
 /**
  * @return array<string, mixed>
  */
+/**
+ * Theme used by theme-only sync (same defaults as CLI resolveTheme*).
+ * @return array{slug: string, name: string, path: string, source: string}
+ */
+function wpdev_resolve_sync_theme(string $configPath, string $wpRoot): array
+{
+    $slug = '';
+    $themePathRel = '';
+    $source = 'default';
+    if (is_file($configPath) && is_readable($configPath)) {
+        $cfg = json_decode((string) file_get_contents($configPath), true);
+        if (is_array($cfg) && isset($cfg['local']) && is_array($cfg['local'])) {
+            $local = $cfg['local'];
+            if (!empty($local['themeSlug']) && is_string($local['themeSlug'])) {
+                $slug = trim($local['themeSlug']);
+                $source = 'themeSlug';
+            }
+            if (!empty($local['themePath']) && is_string($local['themePath'])) {
+                $themePathRel = trim($local['themePath']);
+                if ($slug === '') {
+                    $source = 'themePath';
+                    $slug = basename(rtrim(str_replace('\\', '/', $themePathRel), '/'));
+                }
+            }
+        }
+    }
+    if ($slug === '') {
+        $slug = 'agency-starter';
+        $source = 'default';
+    }
+
+    $absCandidates = [];
+    if ($themePathRel !== '') {
+        // Config paths are repo-relative; in the container the theme usually lives under wpRoot.
+        $absCandidates[] = $wpRoot . '/' . ltrim(preg_replace('#^(\.\./)+#', '', str_replace('\\', '/', $themePathRel)), '/');
+        if (str_contains($themePathRel, 'wp-content/themes/')) {
+            $absCandidates[] = $wpRoot . '/wp-content/themes/' . basename(rtrim(str_replace('\\', '/', $themePathRel), '/'));
+        }
+    }
+    $absCandidates[] = $wpRoot . '/wp-content/themes/' . $slug;
+
+    $themeAbs = '';
+    foreach ($absCandidates as $cand) {
+        if (is_dir($cand)) {
+            $themeAbs = $cand;
+            break;
+        }
+    }
+    if ($themeAbs === '') {
+        $themeAbs = $wpRoot . '/wp-content/themes/' . $slug;
+    }
+
+    $name = $slug;
+    $style = is_file($themeAbs . '/style.css')
+        ? $themeAbs . '/style.css'
+        : (is_file($themeAbs . '/theme/style.css') ? $themeAbs . '/theme/style.css' : '');
+    if ($style !== '') {
+        $header = substr((string) file_get_contents($style), 0, 8192);
+        if (preg_match('/^\s*\*?\s*Theme Name:\s*(.+)$/mi', $header, $m)) {
+            $name = trim($m[1]);
+        }
+        if ($source !== 'themeSlug' && preg_match('/^\s*\*?\s*Text Domain:\s*(.+)$/mi', $header, $m2)) {
+            $fromStyle = strtolower(preg_replace('/[^a-z0-9-]/', '', str_replace(' ', '-', trim($m2[1]))));
+            if ($fromStyle !== '') {
+                $slug = $fromStyle;
+                if ($source === 'default') {
+                    $source = 'style.css';
+                }
+            }
+        }
+    }
+
+    return [
+        'slug' => $slug,
+        'name' => $name,
+        'path' => 'wp-content/themes/' . $slug,
+        'source' => $source,
+    ];
+}
+
 function wpdev_local_status(): array
 {
     global $configPath;
@@ -507,6 +587,8 @@ function wpdev_local_status(): array
         $writable['upgrade'] = is_writable($wpRoot . '/wp-content');
     }
 
+    $theme = wpdev_resolve_sync_theme($configPath, $wpRoot);
+
     return [
         'configPresent' => $configPresent,
         'configIsExample' => $configIsExample,
@@ -522,6 +604,7 @@ function wpdev_local_status(): array
         'writable' => $writable,
         'adminUrl' => '/admin/',
         'installUrl' => '/wp-admin/install.php',
+        'theme' => $theme,
     ];
 }
 

@@ -135,7 +135,7 @@ export function ConfigAssistant() {
         </h3>
         <p className="text-sm text-slate-600 dark:text-slate-400">
           This does <strong>not</strong> save the project config. To write settings use{" "}
-          <strong>Setup staging</strong>. Here you can tweak fields, then Copy into{" "}
+          <strong>Setup</strong>. Here you can tweak fields, then Copy into{" "}
           <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev.config.json</code> next
           to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">package.json</code>.
         </p>

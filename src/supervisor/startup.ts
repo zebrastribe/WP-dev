@@ -62,6 +62,30 @@ function dockerService(
   };
 }
 
+/** Seed compose service rows from registry ports (idempotent upserts). */
+export function seedComposeServices(
+  registry: ServiceRegistry,
+  sslEnabled = false,
+): ServiceRegistry {
+  const ports = registry.ports;
+  let next = registry;
+  next = upsertService(next, dockerService(next, "db", undefined, 3306));
+  next = upsertService(next, dockerService(next, "wordpress", ports.WP_PORT, 80));
+  next = upsertService(next, dockerService(next, "terminal", ports.WPDEV_TERMINAL_PORT, 7681));
+  next = upsertService(
+    next,
+    dockerService(next, "terminal-runner", ports.WPDEV_TERMINAL_RUNNER_PORT, 7682),
+  );
+  next = upsertService(
+    next,
+    dockerService(next, "sync-runner", ports.WPDEV_HOST_RUNNER_PORT, 7683),
+  );
+  if (sslEnabled) {
+    next = upsertService(next, dockerService(next, "local_ssl_proxy", ports.WP_HTTPS_PORT, 443));
+  }
+  return next;
+}
+
 export async function runStartupStateMachine(
   loaded: LoadedConfig,
   envPath: string,
@@ -116,20 +140,8 @@ export async function runStartupStateMachine(
 
   const ports = parseDockerEnvPorts(existsSync(envPath) ? readFileSync(envPath, "utf8") : "");
   let next = loadRegistry(loaded.configDir) ?? registry;
-  next = upsertService(next, dockerService(next, "db", undefined, 3306));
-  next = upsertService(next, dockerService(next, "wordpress", ports.WP_PORT, 80));
-  next = upsertService(next, dockerService(next, "terminal", ports.WPDEV_TERMINAL_PORT, 7681));
-  next = upsertService(
-    next,
-    dockerService(next, "terminal-runner", ports.WPDEV_TERMINAL_RUNNER_PORT, 7682),
-  );
-  next = upsertService(
-    next,
-    dockerService(next, "sync-runner", ports.WPDEV_HOST_RUNNER_PORT, 7683),
-  );
-  if (sslEnabled) {
-    next = upsertService(next, dockerService(next, "local_ssl_proxy", ports.WP_HTTPS_PORT, 443));
-  }
+  next = { ...next, ports };
+  next = seedComposeServices(next, sslEnabled);
   saveRegistry(loaded.configDir, next);
 
   try {
@@ -200,14 +212,24 @@ export function createInitialRegistry(
   const envPath = join(loaded.configDir, loaded.config.local.path, ".env");
   const ports = existsSync(envPath)
     ? parseDockerEnvPorts(readFileSync(envPath, "utf8"))
-    : undefined;
-  return emptyRegistry(
+    : existing?.ports;
+  const base = emptyRegistry(
     loaded.config.project,
     loaded.configDir,
     supervisorPid,
     supervisorPort,
     ports,
   );
+  // Preserve service rows filled by startup — daemon re-init must not wipe them.
+  if (existing?.services?.length) {
+    return {
+      ...base,
+      services: existing.services,
+      ports: { ...existing.ports, ...base.ports },
+    };
+  }
+  // Empty registry (fresh or previously wiped): seed expected compose services.
+  return seedComposeServices(base);
 }
 
 export { maybeUpdateLocalUrlPort, maybeUpdateRunnerOriginPort };

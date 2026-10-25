@@ -9,6 +9,7 @@ import {
   resolveThemePaths,
 } from "../services/theme-path.js";
 import { resolveRemoteWpPath } from "../services/wpcli.js";
+import { assertRemotePathSafe } from "../services/remote-path-safety.js";
 import { confirmProduction } from "../utils/confirm.js";
 import { logInfo } from "../utils/logger.js";
 import { cmdThemeBuild } from "./theme-build.js";
@@ -75,6 +76,7 @@ export async function cmdPushTheme(
   logInfo(`push theme ${env}: connect ssh ${remote.user}@${remote.host}`);
   const ssh = await connectSsh(remote);
   try {
+    await assertRemotePathSafe(ssh, remote.path, env);
     const remoteWp = await resolveRemoteWpPath(ssh, remote.path);
     if (!remoteWp.installed || !remoteWp.path) {
       throw new Error(

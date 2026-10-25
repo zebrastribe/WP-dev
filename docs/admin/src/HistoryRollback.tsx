@@ -3,10 +3,10 @@ import { getTerminalJobStatus, loadWpDevConfig, runTerminalAction } from "./api"
 import { useRunnerSecrets } from "./useRunnerSecrets";
 
 type EnvName = "local" | "staging" | "production";
-type BackupKind = "full" | "db";
+type BackupKind = "db" | "full" | "complete";
 
 const ENV_LABEL: Record<EnvName, string> = {
-  local: "Dev",
+  local: "Local",
   staging: "Staging",
   production: "Production",
 };
@@ -72,9 +72,7 @@ export function HistoryRollback() {
               .split("\n")
               .map((x) => x.trim())
               .filter((x) => x.length > 0 && x.startsWith("/"))
-              .filter((x) => backupPathMatchesEnv(x, listEnv))
-              // Staging/Production full .tar.gz cannot be restored via the UI runner yet.
-              .filter((x) => listEnv === "local" || !x.endsWith(".tar.gz"));
+              .filter((x) => backupPathMatchesEnv(x, listEnv));
             setBackups(parsed);
             setSelectedBackup("");
           }
@@ -103,15 +101,9 @@ export function HistoryRollback() {
       );
       return;
     }
-    if (env !== "local" && selectedBackup.endsWith(".tar.gz")) {
-      setOutput(
-        "Full archive (.tar.gz) restore to Staging/Production is not available in the browser. Use a .sql backup, or restore Dev full archives only.",
-      );
-      return;
-    }
     if (
       !window.confirm(
-        `Restore ${ENV_LABEL[env]} from:\n${selectedBackup}\n\nThis replaces the current site state. Continue?`,
+        `Restore ${ENV_LABEL[env]} from:\n${selectedBackup}\n\nThis replaces the current site state. Complete archives keep live wp-config.php. Continue?`,
       )
     ) {
       return;
@@ -188,10 +180,6 @@ export function HistoryRollback() {
     setSelectedBackup("");
     setBackups([]);
     setProductionConfirm("");
-    if (env !== "local" && kind === "full") {
-      setKind("db");
-      return;
-    }
     if (!canRun) return;
     void refreshBackups();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -201,7 +189,8 @@ export function HistoryRollback() {
     <div className="space-y-4">
       <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Restore points</h2>
       <p className="text-sm text-slate-600 dark:text-slate-400">
-        Database snapshots for Dev, Staging, and Production. Full file archives (DB + wp-content) are Dev-only in this UI.
+        Database, content (DB + wp-content), and complete install archives for Local, Staging, and Production.
+        Prefer Complete before updates so you can roll back the whole install.
       </p>
 
       <div
@@ -230,27 +219,27 @@ export function HistoryRollback() {
         <div className="inline-flex rounded-lg border border-slate-300 dark:border-slate-600">
           <button
             type="button"
-            disabled={env !== "local"}
-            title={env !== "local" ? "Full archives are Dev-only in this UI" : undefined}
-            onClick={() => setKind("full")}
-            className={`px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${kind === "full" ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-800"}`}
-          >
-            Full (DB + files)
-          </button>
-          <button
-            type="button"
             onClick={() => setKind("db")}
             className={`px-3 py-1.5 text-xs ${kind === "db" ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-800"}`}
           >
             Database
           </button>
+          <button
+            type="button"
+            onClick={() => setKind("full")}
+            className={`px-3 py-1.5 text-xs ${kind === "full" ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-800"}`}
+          >
+            Content
+          </button>
+          <button
+            type="button"
+            onClick={() => setKind("complete")}
+            className={`px-3 py-1.5 text-xs ${kind === "complete" ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-800"}`}
+          >
+            Complete
+          </button>
         </div>
       </div>
-      {env !== "local" ? (
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Staging/Production restore uses database snapshots only (same as Backup → Database only).
-        </p>
-      ) : null}
 
       <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
         <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">Restore point timeline</p>

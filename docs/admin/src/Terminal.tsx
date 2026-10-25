@@ -11,8 +11,8 @@ export function TerminalTab() {
   const { job, run, cancel, reset, outputRef, isRunning } = useRunnerJob("terminal", canRun);
   const [env, setEnv] = useState<EnvName>("staging");
 
-  const envLabel = env === "local" ? "Dev" : env === "staging" ? "Staging" : "Production";
-  const backupKind = env === "local" ? "full" : "db";
+  const envLabel = env === "local" ? "Local" : env === "staging" ? "Staging" : "Production";
+  const backupKind = "complete";
 
   return (
     <div className="space-y-4">
@@ -44,7 +44,7 @@ export function TerminalTab() {
       <div className="flex flex-wrap items-center gap-2">
         {(
           [
-            ["local", "Dev"],
+            ["local", "Local"],
             ["staging", "Staging"],
             ["production", "Production"],
           ] as const
@@ -84,12 +84,12 @@ export function TerminalTab() {
             void run(
               "backup_create",
               { env, kind: backupKind },
-              `Backup ${envLabel} (${backupKind === "full" ? "DB + files" : "database"})`,
+              `Backup ${envLabel} (complete)`,
             )
           }
           className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
         >
-          Backup {envLabel} ({backupKind === "full" ? "full" : "database"})
+          Backup {envLabel} (complete)
         </button>
         <button
           type="button"

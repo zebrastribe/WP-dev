@@ -136,6 +136,7 @@ describe("runner smoke", () => {
     const script = readFileSync(join(root, "docker/start-terminal-services.sh"), "utf8");
     expect(script).toContain("host-runner.mjs");
     expect(script).toContain("terminal-runner.mjs");
+    expect(script).toContain("ttyd -d 3");
   });
 
   it("runner proxy routes sync runner to terminal container", () => {

@@ -182,25 +182,35 @@ function commandForAction(action, args) {
   if (action === "backup_create") {
     const env = safeArg(args?.env);
     const kindRaw = safeArg(args?.kind);
-    const kind = kindRaw === "full" ? "full" : "db";
+    const kind =
+      kindRaw === "complete" ? "complete" : kindRaw === "full" || kindRaw === "content" ? "full" : "db";
     if (!["local", "staging", "production"].includes(env)) return null;
-    return kind === "full"
-      ? `npm run wp-dev -- backup ${env} --files`
-      : `npm run wp-dev -- backup ${env}`;
+    if (kind === "complete") return `npm run wp-dev -- backup ${env} --complete`;
+    if (kind === "full") return `npm run wp-dev -- backup ${env} --files`;
+    return `npm run wp-dev -- backup ${env}`;
   }
   if (action === "backup_list") {
     const env = safeArg(args?.env);
     const kindRaw = safeArg(args?.kind);
-    const kind = kindRaw === "full" ? "full" : kindRaw === "all" ? "all" : "db";
+    const kind =
+      kindRaw === "complete"
+        ? "complete"
+        : kindRaw === "full" || kindRaw === "content"
+          ? "full"
+          : kindRaw === "all"
+            ? "all"
+            : "db";
     const project = readProjectId();
     if (!["local", "staging", "production"].includes(env) || !project) return null;
     const base = `$HOME/.wp-dev/backups/${project}/${env}`;
+    if (kind === "complete") {
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/complete-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No complete backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+    }
     if (kind === "full") {
-      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/full-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No full backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/full-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No content backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
     }
     if (kind === "all") {
-      // Prefer full + db/pre prefixes; avoid *.sql which double-matches those globs.
-      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/full-*.tar.gz ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 40 || true)"; if [ -z "$OUT" ]; then echo "No backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/complete-*.tar.gz ${base}/full-*.tar.gz ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 40 || true)"; if [ -z "$OUT" ]; then echo "No backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
     }
     return `mkdir -p ${base}; OUT="$(ls -1t ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No database backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
   }

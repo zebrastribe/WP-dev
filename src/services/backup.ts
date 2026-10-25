@@ -43,8 +43,25 @@ export function timestampedFullName(): string {
   return `full-${stampParts()}.tar.gz`;
 }
 
-/** Paths excluded from full (DB + wp-content) archives. */
-export const FULL_BACKUP_TAR_EXCLUDES = ["node_modules", ".git"] as const;
+/** Complete install archive (DB + entire WordPress tree, for update rollback). */
+export function timestampedCompleteName(): string {
+  return `complete-${stampParts()}.tar.gz`;
+}
+
+/** Paths excluded from content (DB + wp-content) archives. */
+export const FULL_BACKUP_TAR_EXCLUDES = [
+  "node_modules",
+  ".git",
+  // Leftover local DB export temps (wpLocalDbExportToFile); never restore material.
+  ".wp-dev-export-*.sql",
+] as const;
+
+/** Extra excludes for complete install archives (keep live secrets out of backups). */
+export const COMPLETE_BACKUP_TAR_EXCLUDES = [
+  ...FULL_BACKUP_TAR_EXCLUDES,
+  "wp-config.php",
+  "wp-config-*.php",
+] as const;
 
 export function timestampedPreRestoreName(): string {
   return `pre-restore-${stampParts()}.sql`;

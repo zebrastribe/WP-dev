@@ -5,6 +5,7 @@ import type { LoadedConfig } from "../config/load.js";
 import { resolveFromConfigDir } from "../config/load.js";
 import { getRemoteEnv, type RemoteEnvName } from "../config/schema.js";
 import { connectSsh } from "../services/ssh.js";
+import { assertRemotePathSafe } from "../services/remote-path-safety.js";
 import { rsyncPull } from "../services/rsync.js";
 import {
   chownBackupArtifact,
@@ -31,7 +32,7 @@ import { logInfo } from "../utils/logger.js";
 import { assertValidSqlDump } from "../utils/sql-dump-validate.js";
 import { remoteRmFile } from "../utils/shell-quote.js";
 import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
-import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
+import { cmdFixPermissions } from "./fix-permissions.js";
 import {
   reconcileContainerRuntime,
   reconcileHostEditable,
@@ -94,6 +95,12 @@ export async function cmdPull(
   if (options.dryRun) {
     logInfo(`pull ${env} dry-run: rsync only`);
     console.error("[dry-run] Would: validate SSH, export remote DB, rsync files, import DB, search-replace URLs.");
+    const sshDry = await connectSsh(remote);
+    try {
+      await assertRemotePathSafe(sshDry, remote.path, env);
+    } finally {
+      sshDry.dispose();
+    }
     await rsyncPull(remote, localWpRoot, {
       dryRun: true,
       excludes: pullExcludePatterns(configDir, config),
@@ -124,6 +131,7 @@ export async function cmdPull(
   logInfo(`pull ${env}: connect ssh ${remote.user}@${remote.host}`);
   const ssh = await connectSsh(remote);
   try {
+    await assertRemotePathSafe(ssh, remote.path, env);
     assertLocalFreeSpace(tmpdir(), DISK_NEED.dbBackupLocal, `pull ${env}`);
     await assertRemoteFreeSpace(ssh, "/tmp", DISK_NEED.dbBackupRemoteTmp, `pull ${env}`);
     const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
@@ -205,15 +213,17 @@ export async function cmdPull(
         throw syncErr;
       }
       try {
-        logInfo(`pull ${env}: restore runtime write permissions for wp-content`);
+        // Container rsync runs as root on the bind mount; --no-owner only skips remote uids.
+        // Re-own wordpress/ to the host user, then restore www-data write on runtime paths.
+        logInfo(`pull ${env}: fix-permissions after rsync (host-own tree + runtime www-data writes)`);
         await reconcileContainerRuntime(loaded);
         await reconcileSharedConfig(loaded);
-        await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
+        await cmdFixPermissions(loaded, { quiet: true });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        logInfo(`pull ${env}: runtime write permissions step failed (${msg})`);
+        logInfo(`pull ${env}: fix-permissions step failed (${msg})`);
         console.error(
-          "Warning: wp-content runtime write permissions could not be applied. If plugin updates fail, run: npm run wp-dev -- fix-runtime-permissions",
+          "Warning: could not restore wordpress/ ownership after pull. Host edits may need sudo until you run: npm run wp-dev -- fix-permissions",
         );
       }
     } finally {

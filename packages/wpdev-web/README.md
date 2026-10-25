@@ -7,7 +7,7 @@ Shared WP-dev web UI for:
 
 ## Primary IA (binding)
 
-**Backup · Setup staging · Sync** (+ **Advanced** for power tools)
+**Backup · Setup · Sync** (+ **Advanced** for power tools)
 
 Localhost Sync defaults to **theme only**; full-site is Preview → Start. Backup restores on the Backup page (DB for remote envs). See [`docs/guides/browser-admin.md`](../../docs/guides/browser-admin.md).
 
@@ -15,7 +15,7 @@ Localhost Sync defaults to **theme only**; full-site is Preview → Start. Backu
 
 - Adapter types and `LOCAL_SYNC_ROUTES`
 - Primary pages: `BackupPage`, `SetupStagingPage`, `SyncPage`, `AdvancedPage`
-- `EnvBadges`, `PRIMARY_TABS`, shared button classes
+- `EnvBadges`, `PRIMARY_TABS` (Backup · Setup · Sync · Advanced), shared button classes
 
 ## Host wiring
 
