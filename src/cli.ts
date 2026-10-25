@@ -76,11 +76,11 @@ async function runWithConfig(
       /^(Restore refused|Backup file not found|Path safety FAIL|Refusing to |SSH host )/i.test(
         short,
       ) || /user aborted/i.test(short);
+    // logError mirrors to stderr once — enough for CLI + runner panel (no extra console.error).
     logError(expectedRefuse ? short : detail);
     const code = process.exitCode && process.exitCode !== 0 ? process.exitCode : 1;
     process.exitCode = code;
     logInfo(`command ${label} finished exit=${code}`);
-    console.error(short);
     // Do not rethrow: avoids duplicate fatal: line and Node stack dump in the admin job panel.
   }
 }
