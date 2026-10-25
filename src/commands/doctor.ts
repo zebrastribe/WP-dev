@@ -26,6 +26,11 @@ import { loadRegistry } from "../supervisor/service-registry.js";
 import { hostRunnerPidPath } from "../supervisor/paths.js";
 import { checkFilesystemHealth } from "../fs/recovery.js";
 import { ownershipManifestPath } from "../fs/path-resolver.js";
+import {
+  buildLocalRuntimeWriteProbeShell,
+  hostSharedWritePathsLabel,
+  runtimeWritePathsLabel,
+} from "./fix-permissions.js";
 import { existsSync } from "node:fs";
 
 export type DoctorOptions = {
@@ -72,11 +77,8 @@ async function tryDns(host: string): Promise<{ ok: true } | { ok: false; err: st
 
 async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fail"> {
   const marker = `wp-dev-doctor-${process.pid}`;
-  const script = [
-    `for d in /var/www/html/wp-content/upgrade/${marker} /var/www/html/wp-content/upgrade-temp-backup/${marker}; do`,
-    `  mkdir -p "$d" && touch "$d/.write-test" && rm -rf "$d"`,
-    `done`,
-  ].join("\n");
+  const script = buildLocalRuntimeWriteProbeShell("/var/www/html", marker);
+  const label = `${runtimeWritePathsLabel()}; core (wp-admin/wp-includes); ${hostSharedWritePathsLabel()}`;
   try {
     await compose(
       loaded.configDir,
@@ -95,17 +97,13 @@ async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fai
       ],
       { stdio: "pipe" },
     );
-    console.error(
-      "Local runtime write: OK (www-data can write wp-content/upgrade and upgrade-temp-backup)",
-    );
+    console.error(`Local runtime write: OK (www-data can write ${label})`);
     return "ok";
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    console.error(`Local runtime write: FAIL — www-data cannot write one of: ${label}`);
     console.error(
-      "Local runtime write: FAIL — www-data cannot write wp-content/upgrade or upgrade-temp-backup",
-    );
-    console.error(
-      "Fix: npm run wp-dev -- fix-runtime-permissions (or fix-permissions, which restores runtime paths automatically)",
+      "Fix: npm run wp-dev -- fix-runtime-permissions (or fix-permissions). Needed for plugin/theme updates without FTP.",
     );
     logInfo(`doctor: local runtime write check failed (${msg})`);
     return "fail";

@@ -25,7 +25,7 @@ import { confirmRemoteTarget } from "../utils/confirm.js";
 import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
 import { logInfo } from "../utils/logger.js";
 import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
-import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
+import { reconcileAfterPull } from "../fs/index.js";
 
 export type RestoreTarget = RemoteEnvName | "local";
 
@@ -103,7 +103,7 @@ async function restoreLocalArchive(
     }
 
     try {
-      await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
+      await reconcileAfterPull(loaded);
     } catch {
       /* best-effort */
     }

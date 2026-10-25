@@ -21,8 +21,9 @@ export const WWW_DATA_UID = 33;
 export const WWW_DATA_GID = 33;
 
 /**
- * Paths under /var/www/html owned by www-data so wp-admin updates, uploads, and cache work.
- * Themes are intentionally excluded so the host user can edit wp-content/themes/.
+ * Paths under /var/www/html owned by www-data so wp-admin uploads/cache/plugin dirs work cleanly.
+ * Core (`wp-admin`, `wp-includes`, root PHP) uses host:www-data shared write instead — required for
+ * WordPress core updates with FS_METHOD=direct (see buildHostSharedWritePermissionsShell).
  */
 export const RUNTIME_WRITE_PATHS = [
   "wp-content/upgrade",
@@ -32,16 +33,24 @@ export const RUNTIME_WRITE_PATHS = [
   "wp-content/cache",
   "wp-content/languages",
   "wp-content/mu-plugins",
+  /** All-in-One WP Migration — needs www-data to write .htaccess / index stubs. */
+  "wp-content/ai1wm-backups",
 ] as const;
 
-/** Shell script run inside the wordpress container (root) to fix runtime write ownership. */
+/**
+ * Paths kept host-owned (not reassigned to www-data:www-data) so the IDE can edit them.
+ * They still get host:www-data + group write via the shared-tree pass.
+ */
+export const HOST_SHARED_WRITE_PATHS = ["wp-content/themes"] as const;
+
+/** Shell: www-data owns runtime plugin/upload paths. */
 export function buildRuntimeWritePermissionsShell(
   htmlRoot = "/var/www/html",
 ): string {
   const runtimeAbs = RUNTIME_WRITE_PATHS.map((rel) => `${htmlRoot}/${rel}`);
   const mkdirTargets = [
     ...runtimeAbs,
-    `${htmlRoot}/wp-content/themes`,
+    ...HOST_SHARED_WRITE_PATHS.map((rel) => `${htmlRoot}/${rel}`),
   ];
   const mkdirCmd = mkdirTargets
     .map((p) => `mkdir -p ${posixShellQuote(p)}`)
@@ -56,18 +65,71 @@ export function buildRuntimeWritePermissionsShell(
 }
 
 /**
+ * WordPress FS_METHOD=direct standard for bind mounts: host owns files, www-data is the
+ * group with write bit set (dirs 2775 setgid, files 664). Applied to the **entire** tree so
+ * core updates can copy into wp-admin / wp-includes / root PHP — not only themes.
+ *
+ * Call **before** buildRuntimeWritePermissionsShell so runtime paths can then become
+ * www-data:www-data without losing shared write on core.
+ */
+export function buildHostSharedWritePermissionsShell(
+  hostUid: number,
+  htmlRoot = "/var/www/html",
+): string {
+  if (!Number.isFinite(hostUid) || hostUid <= 0) {
+    throw new Error("buildHostSharedWritePermissionsShell requires a positive hostUid");
+  }
+  const root = posixShellQuote(htmlRoot);
+  return [
+    `mkdir -p ${root}`,
+    `chown -R ${hostUid}:${WWW_DATA_GID} ${root}`,
+    `find ${root} -type d -exec chmod 2775 {} +`,
+    `find ${root} -type f -exec chmod 664 {} +`,
+  ].join(" && ");
+}
+
+/**
+ * Probe as www-data: runtime paths, themes, wp-content, and wp-admin (core update).
+ */
+export function buildLocalRuntimeWriteProbeShell(
+  htmlRoot = "/var/www/html",
+  marker = "wp-dev-doctor-probe",
+): string {
+  const dirs = [
+    ...RUNTIME_WRITE_PATHS.map((rel) => `${htmlRoot}/${rel}/${marker}`),
+    ...HOST_SHARED_WRITE_PATHS.map((rel) => `${htmlRoot}/${rel}/${marker}`),
+    `${htmlRoot}/wp-content/${marker}`,
+    `${htmlRoot}/wp-admin/${marker}`,
+    `${htmlRoot}/wp-includes/${marker}`,
+  ];
+  const list = dirs.map((d) => posixShellQuote(d)).join(" ");
+  return [
+    `for d in ${list}; do`,
+    `  mkdir -p "$d" && touch "$d/.write-test" && rm -rf "$d" || exit 1`,
+    `done`,
+    // Core update must be able to overwrite existing files (not only create new dirs).
+    `test -w ${posixShellQuote(`${htmlRoot}/wp-admin/includes`)} || exit 1`,
+  ].join("\n");
+}
+
+/** Short label for CLI/doctor messages (basename of each runtime path). */
+export function runtimeWritePathsLabel(): string {
+  return RUNTIME_WRITE_PATHS.map((p) => p.replace(/^wp-content\//, "")).join(", ");
+}
+
+export function hostSharedWritePathsLabel(): string {
+  return "entire tree (host:www-data), themes stay host-editable";
+}
+
+/**
  * chown bind-mounted wordpress/ to the host user only (no www-data runtime paths).
  * Use before host-side rsync so uploads/plugins are writable by the host user.
- *
- * Uses `--entrypoint chown` so the WordPress image entrypoint does not reset ownership
- * to www-data before our command runs. Uses `--no-deps` so MySQL does not need to be up.
  */
 export async function cmdFixHostOwnershipOnly(
   loaded: LoadedConfig,
   options: FixPermissionsOptions = {},
 ): Promise<void> {
   assertDockerReady();
-  // Prefer WPDEV_HOST_UID/GID: UI/runner pull runs as root in the terminal container.
   const { uid, gid } = resolveHostIdentity(loaded.configDir);
   if (uid <= 0 || gid <= 0) {
     throw new Error(
@@ -91,13 +153,13 @@ export async function cmdFixHostOwnershipOnly(
   if (!options.quiet) {
     console.error(
       "Updated ownership of wordpress/ for your host user (entire tree). " +
-        "Run fix-runtime-permissions (or full fix-permissions) when Apache needs to write uploads/plugins again.",
+        "Run fix-runtime-permissions (or full fix-permissions) when Apache needs write access again.",
     );
   }
 }
 
 /**
- * Host-own the tree, then restore www-data on runtime paths (uploads, plugins, …).
+ * Host-own the tree, then shared host:www-data + www-data runtime paths.
  * Do **not** call this immediately before host rsync — use `cmdFixHostOwnershipOnly` first.
  */
 export async function cmdFixPermissions(
@@ -108,23 +170,36 @@ export async function cmdFixPermissions(
   await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
   if (!options.quiet) {
     console.error(
-      "Updated ownership of wordpress/ for your host user (themes, core). " +
-        "Runtime paths (upgrade, upgrade-temp-backup, plugins, uploads, cache) are www-data for wp-admin updates.",
+      "Updated WordPress permissions for FS_METHOD=direct: " +
+        `tree is host:www-data (core updates + IDE); runtime (${runtimeWritePathsLabel()}) is www-data.`,
     );
   }
 }
 
 /**
- * Make runtime-writable WordPress paths owned by www-data for plugin/theme updates and uploads.
- * Kept separate from `cmdFixPermissions` (host ownership) so pull can do:
- * host-writeable before rsync, runtime-writeable after sync.
+ * Apply WordPress-standard bind-mount permissions for Apache (www-data):
+ * 1) Entire tree host:www-data group-writable (core / theme updates without FTP)
+ * 2) Runtime paths www-data:www-data (uploads, plugins, ai1wm-backups, …)
  */
 export async function cmdFixRuntimeWritePermissions(
   loaded: LoadedConfig,
   options: FixRuntimeWritePermissionsOptions = {},
 ): Promise<void> {
   assertDockerReady();
-  logInfo("fix-runtime-write-permissions: chown/chmod runtime wp-content paths for www-data");
+  const { uid } = resolveHostIdentity(loaded.configDir);
+  if (uid <= 0) {
+    throw new Error(
+      "fix-runtime-permissions needs a real host uid (set WPDEV_HOST_UID or run from the host).",
+    );
+  }
+  logInfo(
+    "fix-runtime-write-permissions: host:www-data on entire tree, then www-data on runtime paths",
+  );
+  // Shared tree FIRST (incl. wp-admin), then runtime override — required for core updates.
+  const shell = [
+    buildHostSharedWritePermissionsShell(uid),
+    buildRuntimeWritePermissionsShell(),
+  ].join(" && ");
   await compose(
     loaded.configDir,
     loaded.config,
@@ -138,14 +213,15 @@ export async function cmdFixRuntimeWritePermissions(
       "sh",
       "wordpress",
       "-lc",
-      buildRuntimeWritePermissionsShell(),
+      shell,
     ],
     { stdio: "pipe" },
   );
   if (!options.quiet) {
     console.error(
-      "Updated wp-content runtime paths for WordPress writes (upgrade, upgrade-temp-backup, plugins, uploads, cache). " +
-        "Themes remain host-owned for local editing.",
+      "Updated WordPress write access (FS_METHOD=direct): " +
+        `entire tree host:www-data; runtime (${runtimeWritePathsLabel()}) www-data. ` +
+        "Core/theme/plugin updates should work without FTP.",
     );
   }
 }

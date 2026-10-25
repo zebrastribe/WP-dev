@@ -32,11 +32,9 @@ import { logInfo } from "../utils/logger.js";
 import { assertValidSqlDump } from "../utils/sql-dump-validate.js";
 import { remoteRmFile } from "../utils/shell-quote.js";
 import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
-import { cmdFixPermissions } from "./fix-permissions.js";
 import {
-  reconcileContainerRuntime,
+  reconcileAfterPull,
   reconcileHostWritableForRsync,
-  reconcileSharedConfig,
 } from "../fs/index.js";
 import { registerTempDir, unregisterTempDir } from "../fs/temp-registry.js";
 import { cmdSimplySetupStagingDns } from "./simply.js";
@@ -219,16 +217,17 @@ export async function cmdPull(
       throw syncErr;
     }
     try {
-      // Re-own wordpress/ to the host user, then restore www-data write on runtime paths.
-      logInfo(`pull ${env}: fix-permissions after rsync (host-own tree + runtime www-data writes)`);
-      await reconcileContainerRuntime(loaded);
-      await reconcileSharedConfig(loaded);
-      await cmdFixPermissions(loaded, { quiet: true });
+      // Key WP-dev contract: after pull, tree is FS_METHOD=direct ready (host:www-data + runtime www-data).
+      logInfo(
+        `pull ${env}: reconcile after rsync (host:www-data tree + www-data runtime paths — core/theme updates work)`,
+      );
+      await reconcileAfterPull(loaded);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      logInfo(`pull ${env}: fix-permissions step failed (${msg})`);
+      logInfo(`pull ${env}: post-pull permission reconcile failed (${msg})`);
       console.error(
-        "Warning: could not restore wordpress/ ownership after pull. Host edits may need sudo until you run: npm run wp-dev -- fix-permissions",
+        "Warning: could not apply WordPress write permissions after pull. " +
+          "Run: npm run wp-dev -- fix-runtime-permissions   then retry wp-admin updates.",
       );
     }
   } finally {

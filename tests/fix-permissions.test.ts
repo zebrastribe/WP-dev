@@ -2,10 +2,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  HOST_SHARED_WRITE_PATHS,
   RUNTIME_WRITE_PATHS,
   WWW_DATA_GID,
   WWW_DATA_UID,
+  buildHostSharedWritePermissionsShell,
+  buildLocalRuntimeWriteProbeShell,
   buildRuntimeWritePermissionsShell,
+  runtimeWritePathsLabel,
 } from "../src/commands/fix-permissions.js";
 import { buildSharedConfigReconcileShell } from "../src/fs/ownership/reconcile.js";
 
@@ -34,7 +38,21 @@ describe("fix-permissions runtime paths", () => {
     expect(RUNTIME_WRITE_PATHS).toContain("wp-content/upgrade");
     expect(RUNTIME_WRITE_PATHS).toContain("wp-content/upgrade-temp-backup");
     expect(RUNTIME_WRITE_PATHS).toContain("wp-content/plugins");
+    expect(RUNTIME_WRITE_PATHS).toContain("wp-content/ai1wm-backups");
     expect(RUNTIME_WRITE_PATHS).not.toContain("wp-content/themes");
+    expect(HOST_SHARED_WRITE_PATHS).toContain("wp-content/themes");
+  });
+
+  it("doctor probe covers runtime, themes, and core dirs", () => {
+    const sh = buildLocalRuntimeWriteProbeShell("/var/www/html", "probe-x");
+    for (const rel of RUNTIME_WRITE_PATHS) {
+      expect(sh).toContain(`/var/www/html/${rel}/probe-x`);
+    }
+    expect(sh).toContain("/var/www/html/wp-content/themes/probe-x");
+    expect(sh).toContain("/var/www/html/wp-admin/probe-x");
+    expect(sh).toContain("/var/www/html/wp-includes/probe-x");
+    expect(sh).toContain("test -w '/var/www/html/wp-admin/includes'");
+    expect(runtimeWritePathsLabel()).toContain("ai1wm-backups");
   });
 
   it("buildRuntimeWritePermissionsShell chowns only runtime paths as www-data", () => {
@@ -51,6 +69,15 @@ describe("fix-permissions runtime paths", () => {
     );
     expect(sh).toContain("chmod 775");
     expect(sh).toContain("chmod 664");
+  });
+
+  it("buildHostSharedWritePermissionsShell applies host:www-data to entire tree (core updates)", () => {
+    const sh = buildHostSharedWritePermissionsShell(1000);
+    expect(sh).toContain("chown -R 1000:33 '/var/www/html'");
+    expect(sh).toContain("find '/var/www/html' -type d -exec chmod 2775");
+    expect(sh).toContain("find '/var/www/html' -type f -exec chmod 664");
+    // Must not assign themes to www-data owner in this step.
+    expect(sh).not.toContain(`chown -R ${WWW_DATA_UID}:${WWW_DATA_GID}`);
   });
 
   it("supports a custom html root", () => {

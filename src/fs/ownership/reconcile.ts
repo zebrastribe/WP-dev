@@ -3,7 +3,6 @@ import { compose } from "../../services/docker-compose.js";
 import { resolveHostIdentity } from "../../utils/host-paths.js";
 import {
   cmdFixHostOwnershipOnly,
-  cmdFixPermissions,
   cmdFixRuntimeWritePermissions,
 } from "../../commands/fix-permissions.js";
 import { assertDockerReady } from "../../utils/docker-prereq.js";
@@ -104,6 +103,13 @@ export async function reconcileHostWritableForRsync(loaded: LoadedConfig): Promi
   await reconcileHostEditable(loaded);
 }
 
+/**
+ * Post-sync / post-up WordPress writability (FS_METHOD=direct):
+ * 1) Entire tree host:www-data (core + theme updates without FTP)
+ * 2) Runtime paths www-data:www-data (uploads, plugins, ai1wm-backups, …)
+ *
+ * Use after pull/rsync/restore/up — **not** before host rsync.
+ */
 export async function reconcileContainerRuntime(loaded: LoadedConfig): Promise<void> {
   await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
   fsAuditLog(loaded.configDir, loaded.config.project, "fs.reconcile", {
@@ -125,9 +131,12 @@ export async function reconcileAllProfiles(loaded: LoadedConfig): Promise<void> 
   });
 }
 
+/**
+ * Canonical end of every local file sync that lands under wordpress/:
+ * Apache-writable tree + shared config (docker/.env, logs).
+ */
 export async function reconcileAfterPull(loaded: LoadedConfig): Promise<void> {
-  // Full host own + runtime www-data + shared config (post-sync).
-  await cmdFixPermissions(loaded, { quiet: true });
+  await reconcileContainerRuntime(loaded);
   await reconcileSharedConfig(loaded);
 }
 

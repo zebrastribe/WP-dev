@@ -50,13 +50,13 @@ describe("pull/push safety guards", () => {
     expect(wpcli).toContain("--precise");
   });
 
-  it("pull and pull-theme re-own wordpress/ after rsync (container root bind-mount)", () => {
+  it("pull and pull-theme reconcile permissions after rsync (FS_METHOD=direct)", () => {
     const pull = readFileSync(join(process.cwd(), "src/commands/pull.ts"), "utf8");
     const theme = readFileSync(join(process.cwd(), "src/commands/pull-theme.ts"), "utf8");
-    expect(pull).toContain("cmdFixPermissions");
-    expect(pull).toMatch(/fix-permissions after rsync/);
-    expect(theme).toContain("cmdFixPermissions");
-    expect(theme).not.toMatch(/cmdFixRuntimeWritePermissions/);
+    expect(pull).toContain("reconcileAfterPull");
+    expect(pull).toContain("reconcileHostWritableForRsync");
+    expect(theme).toContain("reconcileAfterPull");
+    expect(theme).toContain("reconcileHostWritableForRsync");
   });
 
   it("push confirms staging and rolls back remote DB on failure", () => {

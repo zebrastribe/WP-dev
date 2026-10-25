@@ -9,7 +9,10 @@ import {
 import { resolveRemoteWpPath } from "../services/wpcli.js";
 import { assertRemotePathSafe } from "../services/remote-path-safety.js";
 import { logInfo } from "../utils/logger.js";
-import { cmdFixPermissions } from "./fix-permissions.js";
+import {
+  reconcileAfterPull,
+  reconcileHostWritableForRsync,
+} from "../fs/index.js";
 
 export type PullThemeOptions = {
   dryRun: boolean;
@@ -32,10 +35,11 @@ export async function cmdPullTheme(
 
   if (!options.dryRun) {
     try {
-      await cmdFixPermissions(loaded, { quiet: true });
+      // Same as full pull: host-own before rsync so the bind mount is writable.
+      await reconcileHostWritableForRsync(loaded);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      logInfo(`pull theme ${env}: fix-permissions failed (${msg})`);
+      logInfo(`pull theme ${env}: pre-rsync host ownership failed (${msg})`);
     }
   }
 
@@ -59,11 +63,14 @@ export async function cmdPullTheme(
 
     if (!options.dryRun) {
       try {
-        // Rsync as root leaves theme files root-owned on the bind mount.
-        await cmdFixPermissions(loaded, { quiet: true });
+        await reconcileAfterPull(loaded);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        logInfo(`pull theme ${env}: fix-permissions failed (${msg})`);
+        logInfo(`pull theme ${env}: post-pull permission reconcile failed (${msg})`);
+        console.error(
+          "Warning: could not apply WordPress write permissions after theme pull. " +
+            "Run: npm run wp-dev -- fix-runtime-permissions",
+        );
       }
       console.error(
         `\nTheme "${slug}" pulled from ${env} into ${deployDir} (database unchanged).`,

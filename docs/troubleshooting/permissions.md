@@ -27,11 +27,56 @@ npm run wp-dev -- fix-permissions
 **Fix:**
 
 ```bash
-npm run wp-dev -- up
-npm run wp-dev -- doctor --filesystem
+npm run wp-dev -- fix-runtime-permissions
+npm run wp-dev -- doctor
 ```
 
-**Verify:** Update a plugin in wp-admin.
+---
+
+## All-in-One WP Migration: cannot create ai1wm-backups stubs
+
+**Symptoms:** AI1WM admin errors like “Could not create …/wp-content/ai1wm-backups/.htaccess” (also `web.config`, `index.php`, `robots.txt`).
+
+**Cause:** `ai1wm-backups` stayed host-owned after `fix-permissions` / pull (missing from runtime www-data paths).
+
+**Fix:**
+
+```bash
+npm run wp-dev -- fix-runtime-permissions
+```
+
+**Verify:** `npm run wp-dev -- doctor` reports Local runtime write OK including `ai1wm-backups`. Retry AI1WM in wp-admin.
+
+---
+
+## wp-admin asks for FTP (theme/plugin update)
+
+**Symptoms:** “Connection Information” / FTP hostname form when updating themes or plugins (even with `FS_METHOD` direct).
+
+**Cause:** www-data cannot write themes or site roots (host-owned without group write).
+
+**Fix:**
+
+```bash
+npm run wp-dev -- fix-runtime-permissions
+```
+
+---
+
+## Core update: some files could not be copied (update-core.php)
+
+**Symptoms:** WordPress core update downloads and unpacks, then fails copying files (often names `wp-admin/includes/update-core.php`). Danish: *“nogle filer ikke kunne kopieres… fil-tilladelserne”*.
+
+**Cause:** `wp-admin` / `wp-includes` stayed host:host after pull — Apache is not in that group, so `FS_METHOD=direct` cannot overwrite core files.
+
+**Fix (WordPress bind-mount standard — host owner, www-data group write):**
+
+```bash
+npm run wp-dev -- fix-runtime-permissions
+npm run wp-dev -- doctor
+```
+
+Then retry Dashboard → Updates. Do not use FTP credentials on local Docker.
 
 ---
 

@@ -19,7 +19,6 @@ import {
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { cmdFixRuntimeWritePermissions } from "./fix-permissions.js";
 import {
   autoReconcileOnStartup,
   probeWritable,
@@ -234,8 +233,8 @@ async function applyRuntimeWritePermissionsWithRetry(
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
+      // Same contract as post-pull: host:www-data tree + www-data runtime (FS_METHOD=direct).
       await reconcileContainerRuntime(loaded);
-      await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
       return;
     } catch (e) {
       lastError = e;
@@ -245,9 +244,9 @@ async function applyRuntimeWritePermissionsWithRetry(
     }
   }
   const msg = lastError instanceof Error ? lastError.message : String(lastError);
-  logInfo(`up: could not apply runtime wp-content write permissions (${msg})`);
+  logInfo(`up: could not apply WordPress write permissions (${msg})`);
   console.error(
-    "Warning: could not apply runtime write permissions for wp-content. Plugin updates may fail.",
+    "Warning: could not apply WordPress write permissions. Core/theme/plugin updates may fail or ask for FTP.",
   );
   console.error("Try: npm run wp-dev -- fix-runtime-permissions");
 }
