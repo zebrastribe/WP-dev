@@ -69,13 +69,19 @@ async function runWithConfig(
       logInfo(`command ${label} finished ok`);
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.stack || e.message : String(e);
-    logError(msg);
-    // Thrown refusals/failures must match the exitCode abort contract (no silent missing finished line).
+    const short = e instanceof Error ? e.message : String(e);
+    const detail = e instanceof Error ? e.stack || e.message : String(e);
+    // Expected refusals: message only (no stack in UI/runner panel). Unexpected: keep stack in the log.
+    const expectedRefuse =
+      /^(Restore refused|Backup file not found|Path safety FAIL|Refusing to |SSH host )/i.test(
+        short,
+      ) || /user aborted/i.test(short);
+    logError(expectedRefuse ? short : detail);
     const code = process.exitCode && process.exitCode !== 0 ? process.exitCode : 1;
     process.exitCode = code;
     logInfo(`command ${label} finished exit=${code}`);
-    throw e;
+    console.error(short);
+    // Do not rethrow: avoids duplicate fatal: line and Node stack dump in the admin job panel.
   }
 }
 
