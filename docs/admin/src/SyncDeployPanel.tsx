@@ -80,21 +80,33 @@ export function SyncDeployPanel({
       if (
         activeDirection === "push" &&
         activeEnv === "production" &&
-        !window.confirm(`${hostLine}Push to PRODUCTION replaces remote files and database. Continue?`)
+        !window.confirm(
+          `${hostLine}Push to PRODUCTION:\n` +
+            `• Files: incremental (only new/changed; remote DB is overwritten fully)\n` +
+            `• Database: full export from localhost → replaces remote DB\n\nContinue?`,
+        )
       ) {
         return;
       }
       if (
         activeDirection === "pull" &&
         activeEnv === "production" &&
-        !window.confirm(`${hostLine}Pull PRODUCTION → localhost replaces local files and database. Continue?`)
+        !window.confirm(
+          `${hostLine}Pull PRODUCTION → localhost:\n` +
+            `• Files: incremental (only new/changed from production)\n` +
+            `• Database: full dump of production → replaces local DB (newest data)\n\nContinue?`,
+        )
       ) {
         return;
       }
       if (
         activeDirection === "push" &&
         activeEnv === "staging" &&
-        !window.confirm(`${hostLine}Push localhost → staging replaces remote files and database. Continue?`)
+        !window.confirm(
+          `${hostLine}Push localhost → staging:\n` +
+            `• Files: incremental (only new/changed)\n` +
+            `• Database: full export from localhost → replaces staging DB\n\nContinue?`,
+        )
       ) {
         return;
       }
@@ -150,7 +162,10 @@ export function SyncDeployPanel({
         <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
           Runs on your machine via the host runner — no terminal paste required. Live output below.
         </p>
-        {hint ? <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{hint}</p> : null}
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          {hint ??
+            "Pull/push: files are incremental (rsync new/changed only; connection drops auto-retry). Database is always a full dump of the source → replaces the destination."}
+        </p>
       </div>
 
       <div

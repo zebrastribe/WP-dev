@@ -23,7 +23,7 @@ import { SyncDeployPanel } from "./SyncDeployPanel";
 import { useRunnerSecrets } from "./useRunnerSecrets";
 
 const STEP_LABELS = ["Connect", "Live SSH", "Staging", "First backup", "Ready"] as const;
-/** Wizard step index for staging — skipped when syncing from one remote only. */
+/** Wizard step index for staging — always in the rail (optional via checkbox). */
 const STAGING_STEP = 2;
 
 type SetupWorkflow = "pull" | "local-only";
@@ -40,17 +40,11 @@ function isMacBrowser(): boolean {
   return /Mac/i.test(navigator.platform || navigator.userAgent);
 }
 
-function skipStagingWizardStep(workflow: SetupWorkflow, hasStagingServer: boolean): boolean {
-  return workflow === "pull" && !hasStagingServer;
-}
-
-function wizardStepAfter(current: number, skipStaging: boolean): number {
-  if (skipStaging && current === 1) return 3;
+function wizardStepAfter(current: number): number {
   return Math.min(STEP_LABELS.length - 1, current + 1);
 }
 
-function wizardStepBefore(current: number, skipStaging: boolean): number {
-  if (skipStaging && current === 3) return 1;
+function wizardStepBefore(current: number): number {
   return Math.max(0, current - 1);
 }
 
@@ -362,12 +356,12 @@ export function Wizard() {
   }, []);
 
   const goNext = useCallback(() => {
-    setStep((s) => wizardStepAfter(s, skipStagingWizardStep(setupWorkflow ?? "pull", hasStagingServer)));
-  }, [setupWorkflow, hasStagingServer]);
+    setStep((s) => wizardStepAfter(s));
+  }, []);
 
   const goPrev = useCallback(() => {
-    setStep((s) => wizardStepBefore(s, skipStagingWizardStep(setupWorkflow ?? "pull", hasStagingServer)));
-  }, [setupWorkflow, hasStagingServer]);
+    setStep((s) => wizardStepBefore(s));
+  }, []);
 
   useEffect(() => {
     logAdmin("info", "Wizard: opened");
@@ -1011,7 +1005,6 @@ export function Wizard() {
   const adminSelfLink = `${window.location.origin}/admin/`;
   const installLink = localLink ? `${localLink.replace(/\/$/, "")}/wp-admin/install.php` : "";
   const workflow = setupWorkflow ?? "pull";
-  const skipStaging = skipStagingWizardStep(workflow, hasStagingServer);
   const permissionsOk =
     localStatus?.writable.wpContent &&
     localStatus?.writable.plugins &&
@@ -1051,23 +1044,20 @@ export function Wizard() {
   return (
     <div className="w-full space-y-6">
       <div className="flex flex-wrap gap-2 text-xs">
-        {STEP_LABELS.map((label, i) => {
-          if (skipStaging && i === STAGING_STEP) return null;
-          return (
-            <button
-              key={label}
-              type="button"
-              onClick={() => goStep(i)}
-              className={`rounded-full px-3 py-1 font-medium ${
-                step === i
-                  ? "bg-brand-600 text-white"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
-              }`}
-            >
-              {label}
-            </button>
-          );
-        })}
+        {STEP_LABELS.map((label, i) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => goStep(i)}
+            className={`rounded-full px-3 py-1 font-medium ${
+              step === i
+                ? "bg-brand-600 text-white"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
       {alertBox}
       {terminalRun && (
@@ -1132,7 +1122,7 @@ export function Wizard() {
                   Sync from my server (SSH only)
                 </span>
                 <span className="text-xs text-slate-600 dark:text-slate-400">
-                  Set up SSH key, one remote path, save, then pull — no staging domain needed.
+                  Set up live SSH, then optionally add Staging on the next step, save, and pull.
                 </span>
               </span>
             </label>
@@ -1165,8 +1155,8 @@ export function Wizard() {
               <li>
                 Click <strong>Next</strong>
                 {workflow === "pull"
-                  ? " — SSH key + server path only (staging is optional later)."
-                  : " (SSH step is optional)."}
+                  ? " — then Live SSH, then Staging (optional)."
+                  : " (SSH and Staging steps are optional)."}
               </li>
             </ol>
             <p className="mt-2">
@@ -1311,7 +1301,7 @@ export function Wizard() {
                   Live site URL is only for fixing links in the database — often{" "}
                   <code>https://yourdomain.com</code> (auto-guessed from SSH host when possible).
                 </li>
-                <li>Next → Save & sync → run pull.</li>
+                <li>Next → Staging (optional) → First backup → Ready, then Sync tab → pull.</li>
               </ol>
             </div>
           )}
@@ -1492,24 +1482,32 @@ export function Wizard() {
 
       {step === STAGING_STEP && (
         <div className="space-y-4">
-          {skipStaging && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/40">
-              <p className="text-sm font-medium text-emerald-900 dark:text-emerald-100">
-                Staging is not required for localhost sync.
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Staging server</h2>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+              Optional second remote (SSH + URL) for preview before production. Turn on the checkbox
+              to enter host, path, HTTP auth, and DNS helpers — or continue without staging.
+            </p>
+          </div>
+          {!hasStagingServer ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+              <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                Staging is optional for localhost sync from production.
               </p>
-              <p className="mt-1 text-xs text-emerald-800 dark:text-emerald-200">
-                Enable below only if you use a separate staging server later.
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                Check the box below when you have a separate staging host. You can return here anytime
+                via the <strong>Staging</strong> step above.
               </p>
               <button
                 type="button"
                 onClick={goNext}
-                className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+                className="mt-3 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Skip to Save & sync →
+                Continue without staging →
               </button>
             </div>
-          )}
-          <label className="flex items-center gap-2 text-sm">
+          ) : null}
+          <label className="flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 p-3 text-sm dark:border-brand-900 dark:bg-brand-950/40">
             <input
               type="checkbox"
               checked={hasStagingServer}
@@ -1531,7 +1529,14 @@ export function Wizard() {
               }}
               className="rounded border-slate-300"
             />
-            I have a real staging server (SSH + DNS)
+            <span>
+              <span className="font-semibold text-slate-900 dark:text-white">
+                I have a real staging server (SSH + DNS)
+              </span>
+              <span className="mt-0.5 block text-xs text-slate-600 dark:text-slate-400">
+                Shows staging.host / user / path / url and HTTP password protection below.
+              </span>
+            </span>
           </label>
           {hasStagingServer ? (
             <div className="space-y-3">
@@ -2310,7 +2315,7 @@ export function Wizard() {
               <ol className="mt-2 list-inside list-decimal space-y-1 text-emerald-900 dark:text-emerald-100">
                 <li>
                   Open the <strong>Sync</strong> tab → Full site → <strong>Production → Dev</strong> (or{" "}
-                  <code className="rounded bg-white/60 px-1 dark:bg-slate-900">npm run wp-dev -- pull production</code>
+                  <code className="rounded bg-white/60 px-1 dark:bg-slate-900">npm run wp-dev -- pull production --yes</code>
                   ).
                 </li>
                 <li>When pull finishes, open Localhost below to verify the site.</li>

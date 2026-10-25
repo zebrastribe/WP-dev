@@ -88,9 +88,10 @@ function SyncHelpPanel() {
       </summary>
       <div className="space-y-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-700 dark:border-slate-700 dark:text-slate-300">
         <p>
-          These rules apply to <strong>full site sync</strong> — files and database together
-          between Dev, Staging, and Production. A first sync to an empty host may seed files
-          before the database import.
+          These rules apply to <strong>full site sync</strong> between Dev, Staging, and
+          Production. <strong>Files</strong> are incremental (only new/changed).{" "}
+          <strong>Database</strong> is always a full dump from the source so you get the
+          newest data. A first sync to an empty host may seed files before the database import.
         </p>
         <div>
           <p className="font-semibold text-slate-900 dark:text-slate-100">Plugins</p>
@@ -866,7 +867,7 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
             runnerMessage={runnerMessage}
             title="Sync"
             onBeforeRun={saveBeforeDeploy}
-            hint="Full site sync: files and database together. First sync to empty staging uploads files only — run again after WordPress is installed on the server."
+            hint="Files: incremental (new/changed only; drops auto-retry). Database: full dump from source → replaces destination. First sync to empty staging may upload files only — run again after WordPress is installed on the server."
           />
         </div>
         ) : null}

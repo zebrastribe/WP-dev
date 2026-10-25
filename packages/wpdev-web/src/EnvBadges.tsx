@@ -46,15 +46,25 @@ export function EnvBadges() {
       // a real host is saved in config (green would falsely imply "reachable / safe to push").
       const stagingSaved = Boolean(stagingHost && !isPlaceholderHost(stagingHost));
       const prodSaved = Boolean(prodHost && !isPlaceholderHost(prodHost));
+      const localDetail = !status.ok
+        ? "status unavailable"
+        : status.wpInstalled
+          ? "online"
+          : status.wpConfigPresent || status.hasSyncedContent
+            ? "awaiting install"
+            : "stack up · no WP yet";
+      const localTitle = !status.ok
+        ? `Could not read local status (${"error" in status ? status.error : "unknown"}). Stack may still be running — refresh or check Activity log.`
+        : status.wpInstalled
+          ? "Local WordPress responds in the database (siteurl set)."
+          : "Docker/admin is up, but WordPress is not installed in the local DB yet — pull production or run the installer.";
+
       setBadges([
         {
           role: "dev",
-          detail: status.ok
-            ? status.wpInstalled
-              ? "online"
-              : "stack / install"
-            : "offline",
+          detail: localDetail,
           ok: status.ok ? status.wpInstalled : false,
+          title: localTitle,
         },
         {
           role: "staging",

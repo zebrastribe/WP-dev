@@ -557,16 +557,27 @@ function wpdev_local_status(): array
             $port = 3306;
         }
     }
-    $mysqli = @new mysqli($host, $dbUser, $dbPass, $dbName, $port);
-    if (!$mysqli->connect_errno) {
-        $table = $prefix . 'options';
-        $sql = "SELECT option_value FROM `{$table}` WHERE option_name='siteurl' LIMIT 1";
-        $res = @$mysqli->query($sql);
-        if ($res instanceof mysqli_result && $res->num_rows > 0) {
-            $row = $res->fetch_assoc();
-            $wpInstalled = is_array($row) && trim((string) ($row['option_value'] ?? '')) !== '';
+    // PHP 8.1+ mysqli may throw on missing tables; @ does not swallow exceptions.
+    // Empty DB (before first pull/install) must still return ok JSON — not a 500.
+    try {
+        $mysqli = @new mysqli($host, $dbUser, $dbPass, $dbName, $port);
+        if ($mysqli instanceof mysqli && !$mysqli->connect_errno) {
+            $table = $prefix . 'options';
+            $sql = "SELECT option_value FROM `{$table}` WHERE option_name='siteurl' LIMIT 1";
+            try {
+                $res = $mysqli->query($sql);
+                if ($res instanceof mysqli_result && $res->num_rows > 0) {
+                    $row = $res->fetch_assoc();
+                    $wpInstalled = is_array($row) && trim((string) ($row['option_value'] ?? '')) !== '';
+                }
+            } catch (Throwable $e) {
+                // Table missing / wrong prefix → treat as not installed.
+                $wpInstalled = false;
+            }
+            $mysqli->close();
         }
-        $mysqli->close();
+    } catch (Throwable $e) {
+        $wpInstalled = false;
     }
 
     $hasSyncedContent = $hasSyncedPlugins || $hasUploads;
