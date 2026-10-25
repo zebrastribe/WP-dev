@@ -71,6 +71,10 @@ async function runWithConfig(
   } catch (e) {
     const msg = e instanceof Error ? e.stack || e.message : String(e);
     logError(msg);
+    // Thrown refusals/failures must match the exitCode abort contract (no silent missing finished line).
+    const code = process.exitCode && process.exitCode !== 0 ? process.exitCode : 1;
+    process.exitCode = code;
+    logInfo(`command ${label} finished exit=${code}`);
     throw e;
   }
 }
@@ -704,5 +708,5 @@ main().catch((err) => {
     /* no config — cannot write log file */
   }
   console.error(msg);
-  process.exitCode = 1;
+  process.exitCode = process.exitCode && process.exitCode !== 0 ? process.exitCode : 1;
 });
