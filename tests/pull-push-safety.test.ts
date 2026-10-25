@@ -30,6 +30,12 @@ describe("CLI logging", () => {
     expect(cli).toContain("finished exit=${process.exitCode}");
     expect(cli).toMatch(/process\.exitCode && process\.exitCode !== 0/);
   });
+
+  it("runWithConfig logs finished exit when command throws", () => {
+    const cli = readFileSync(join(process.cwd(), "src/cli.ts"), "utf8");
+    expect(cli).toMatch(/logInfo\(`command \$\{label\} finished exit=\$\{code\}`\)/);
+    expect(cli).toContain("Thrown refusals/failures must match the exitCode abort contract");
+  });
 });
 
 describe("pull/push safety guards", () => {
