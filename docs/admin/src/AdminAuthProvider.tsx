@@ -187,13 +187,18 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
               Unlock wp-dev admin
             </h2>
             <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-              Auto-unlock failed (not localhost or token missing). Paste{" "}
-              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_ADMIN_SAVE_TOKEN</code> from{" "}
-              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>, or run{" "}
-              <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">wp-dev up</code>.
+              In a terminal, from your project folder (the one with <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/</code>), run:
+            </p>
+            <pre className="mt-2 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+              grep WPDEV_ADMIN_SAVE_TOKEN docker/.env
+            </pre>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+              Copy the value after <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">=</code> and paste it below.
             </p>
             <label className="mt-4 block">
-              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Admin token</span>
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                Paste token here
+              </span>
               <input
                 type="password"
                 autoComplete="off"
@@ -212,7 +217,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
                   }
                 }}
                 className="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950"
-                placeholder="From docker/.env"
+                placeholder="Paste token from docker/.env"
               />
             </label>
             {unlockError ? (

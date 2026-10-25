@@ -106,6 +106,30 @@ function wpdev_validate_node(mixed $data, array $schema, array $doc, string $pat
         return null;
     }
 
+    if ($type === 'boolean') {
+        if (!is_bool($data)) {
+            return 'invalid_type:' . ($path !== '' ? $path : 'root');
+        }
+        return null;
+    }
+
+    if ($type === 'array') {
+        if (!is_array($data) || !array_is_list($data)) {
+            return 'invalid_type:' . ($path !== '' ? $path : 'root');
+        }
+        $items = isset($schema['items']) && is_array($schema['items']) ? $schema['items'] : null;
+        if ($items !== null) {
+            foreach ($data as $i => $val) {
+                $next = ($path !== '' ? $path : 'root') . '[' . (string) $i . ']';
+                $err = wpdev_validate_node($val, $items, $doc, $next);
+                if ($err !== null) {
+                    return $err;
+                }
+            }
+        }
+        return null;
+    }
+
     if ($type === 'object') {
         if (!is_array($data) || array_is_list($data)) {
             return 'invalid_type:' . ($path !== '' ? $path : 'root');

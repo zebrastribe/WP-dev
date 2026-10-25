@@ -1,15 +1,30 @@
-import { mkdirSync, existsSync } from "node:fs";
+import { chownSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { RemoteEnvName } from "../config/schema.js";
+import { resolveHostIdentity } from "../utils/host-paths.js";
 
 export function backupDirFor(project: string, env: RemoteEnvName | "local"): string {
   return join(homedir(), ".wp-dev", "backups", project, env);
 }
 
+/**
+ * When CLI runs as root inside the terminal container, backup files land on the
+ * host bind as root-owned. Re-own to the workstation user so host tools can read them.
+ */
+export function chownBackupArtifact(path: string, configDir = process.cwd()): void {
+  try {
+    const { uid, gid } = resolveHostIdentity(configDir);
+    chownSync(path, uid, gid);
+  } catch {
+    /* ignore: non-posix or permission denied */
+  }
+}
+
 export function ensureBackupDir(project: string, env: RemoteEnvName | "local"): string {
   const dir = backupDirFor(project, env);
   mkdirSync(dir, { recursive: true });
+  chownBackupArtifact(dir);
   return dir;
 }
 
@@ -27,6 +42,26 @@ export function timestampedDbName(): string {
 export function timestampedFullName(): string {
   return `full-${stampParts()}.tar.gz`;
 }
+
+/** Complete install archive (DB + entire WordPress tree, for update rollback). */
+export function timestampedCompleteName(): string {
+  return `complete-${stampParts()}.tar.gz`;
+}
+
+/** Paths excluded from content (DB + wp-content) archives. */
+export const FULL_BACKUP_TAR_EXCLUDES = [
+  "node_modules",
+  ".git",
+  // Leftover local DB export temps (wpLocalDbExportToFile); never restore material.
+  ".wp-dev-export-*.sql",
+] as const;
+
+/** Extra excludes for complete install archives (keep live secrets out of backups). */
+export const COMPLETE_BACKUP_TAR_EXCLUDES = [
+  ...FULL_BACKUP_TAR_EXCLUDES,
+  "wp-config.php",
+  "wp-config-*.php",
+] as const;
 
 export function timestampedPreRestoreName(): string {
   return `pre-restore-${stampParts()}.sql`;

@@ -8,3 +8,15 @@ The detailed **online / multi-tenant / control-plane** migration plan lives only
 
 - Do **not** expose today’s `/admin/` PHP API or Docker runners on the public internet.
 - Day-to-day use: [README.md](../../README.md), [project-structure.md](./project-structure.md), [architecture.md](./architecture.md).
+
+## Status snapshot (2026-10-24)
+
+| Item | Status |
+|------|--------|
+| Plan document (private) | **COMPLETE** — amendments via dated §27 notes only |
+| G1 (merge integrity PR #1) | **Done** on public `main` |
+| G2 (lift SaaS build hold) | **ON** — owner must lift explicitly before Phase 1 coding |
+| Product launch | **Not ready** — no hosted control plane |
+| Localhost dogfood (Sync/Backup/Restore) | **Verified** on staging/Dev — see private plan §27 Amendment **N** |
+
+**Next owner steps:** merge `feat/admin-plan-ia` if not yet on `main` → when ready, lift G2 hold → execute Phase 1 checklist in the private plan (§25).

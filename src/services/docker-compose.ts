@@ -2,6 +2,11 @@ import { execa } from "execa";
 import { join } from "node:path";
 import type { WpDevConfig } from "../config/schema.js";
 import { resolveFromConfigDir } from "../config/load.js";
+import {
+  resolveHostHome,
+  resolveHostIdentity,
+  resolveHostProjectRoot,
+} from "../utils/host-paths.js";
 
 /** Stable Docker Compose project id so each clone gets its own containers/volumes. */
 export function dockerComposeProjectId(config: WpDevConfig): string {
@@ -46,6 +51,13 @@ export async function compose(
   options: { stdio?: "inherit" | "pipe" } = {},
 ): Promise<void> {
   const projectDir = getComposeProjectDir(configDir, config);
+  const composeEnvPath = join(projectDir, ".env");
+  const hostProjectRoot = resolveHostProjectRoot(configDir, composeEnvPath);
+  const hostHome = resolveHostHome(composeEnvPath);
+  // Host developer identity (not container root) for ttyd + bind-mount chowns.
+  const hostId = resolveHostIdentity(configDir);
+  const hostUid = String(hostId.uid);
+  const hostGid = String(hostId.gid);
   await execa(
     "docker",
     [...getDockerComposeLeadArgs(config), ...composeArgs],
@@ -53,6 +65,13 @@ export async function compose(
       cwd: projectDir,
       stdio: options.stdio ?? "inherit",
       reject: false,
+      env: {
+        ...process.env,
+        WPDEV_HOST_PROJECT_ROOT: hostProjectRoot,
+        WPDEV_HOST_HOME: hostHome,
+        WPDEV_HOST_UID: process.env.WPDEV_HOST_UID || hostUid,
+        WPDEV_HOST_GID: process.env.WPDEV_HOST_GID || hostGid,
+      },
     },
   ).then((r) => {
     if (r.exitCode !== 0) {

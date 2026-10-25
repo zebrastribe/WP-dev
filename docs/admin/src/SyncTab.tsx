@@ -63,31 +63,43 @@ type SyncPreviewJson = {
 };
 
 const RECOMMENDED_TOGGLES = [
-  { key: "node-modules", label: "node_modules", hint: "All theme/build node_modules" },
-  { key: "debug-log", label: "debug.log", hint: "wp-content/debug.log" },
-  { key: "upgrade-temp", label: "upgrade temp", hint: "wp-content/upgrade" },
+  {
+    key: "node-modules",
+    label: "Exclude node_modules from full push",
+    hint: "All theme/build node_modules (checked = excluded)",
+  },
+  {
+    key: "debug-log",
+    label: "Exclude debug.log from full push",
+    hint: "wp-content/debug.log (checked = excluded)",
+  },
+  {
+    key: "upgrade-temp",
+    label: "Exclude upgrade temp from full push",
+    hint: "wp-content/upgrade (checked = excluded)",
+  },
 ] as const;
 
 function SyncHelpPanel() {
   return (
     <details className="rounded-xl border border-slate-200 bg-slate-50 text-sm dark:border-slate-700 dark:bg-slate-900/60">
       <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
-        What do Sync / Local only mean?
+        What do Sync / Dev only mean?
       </summary>
       <div className="space-y-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-700 dark:border-slate-700 dark:text-slate-300">
         <p>
-          This tab sets rules for <strong>full site sync</strong> — files and database together
-          (push/pull between local and staging or production). A first push to an empty host may
-          seed files before the database import.
+          These rules apply to <strong>full site sync</strong> — files and database together
+          between Dev, Staging, and Production. A first sync to an empty host may seed files
+          before the database import.
         </p>
         <div>
           <p className="font-semibold text-slate-900 dark:text-slate-100">Plugins</p>
           <ul className="mt-1 list-disc space-y-1 pl-4">
             <li>
-              <strong>Deploy</strong> — plugin folder is included in push/pull.
+              <strong>Deploy</strong> — plugin folder is included in sync.
             </li>
             <li>
-              <strong>Local only</strong> — plugin never leaves your laptop. Use for dev tools
+              <strong>Dev only</strong> — plugin never leaves your laptop. Use for tools
               (e.g. Query Monitor). Production keeps its own copy.
             </li>
           </ul>
@@ -180,7 +192,12 @@ function SegmentedToggle<T extends string>({
   );
 }
 
-export function SyncTab() {
+type SyncTabProps = {
+  /** Rules editor only — no nested push/pull deploy UI (used under Sync Advanced). */
+  rulesOnly?: boolean;
+};
+
+export function SyncTab({ rulesOnly = false }: SyncTabProps) {
   const { authenticated, requestUnlock } = useAdminAuth();
   const { runnerReady, runnerMessage, canRun } = useRunnerSecrets(
     "Runner not ready",
@@ -235,13 +252,14 @@ export function SyncTab() {
   }, [canRun, run]);
 
   useEffect(() => {
+    if (!canRun) return;
     void loadWpDevConfig().then((cfg) => {
       if (cfg) {
         setConfig(cfg);
         setLastSavedJson(JSON.stringify(cfg));
       }
     });
-  }, []);
+  }, [canRun]);
 
   useEffect(() => {
     if (canRun) void refreshScan();
@@ -433,16 +451,26 @@ export function SyncTab() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Sync & deployment</h2>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Configure deployment rules, preview changes, then push or pull with one click — live
-          progress, no terminal required.
-        </p>
-      </div>
+      {!rulesOnly ? (
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Sync & deployment</h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+            Configure deployment rules, preview changes, then sync with one click — live progress,
+            no terminal required.
+          </p>
+        </div>
+      ) : (
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Sync rules</h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+            Choose what stays on Dev and what syncs with Staging or Production.
+          </p>
+        </div>
+      )}
 
-      <SyncHelpPanel />
+      {!rulesOnly ? <SyncHelpPanel /> : null}
 
+      {!rulesOnly ? (
       <div
         className={`rounded border px-3 py-2 text-xs ${
           runnerReady
@@ -451,8 +479,9 @@ export function SyncTab() {
         }`}
       >
         {runnerMessage ||
-          (runnerReady ? "Ready — configure deployment units, preview, then push or pull." : "Loading runner…")}
+          (runnerReady ? "Ready — configure rules, preview, then sync." : "Loading runner…")}
       </div>
+      ) : null}
 
       {hasSuggestions ? (
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
@@ -460,12 +489,12 @@ export function SyncTab() {
             We found development-only items
           </p>
           <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-            These stay on localhost during full push — they are not removed from production.
+            These stay on Dev during full sync — they are not removed from production.
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-slate-700 dark:text-slate-300">
             {(scan?.suggestions.devPlugins ?? []).map((s) => (
               <li key={s}>
-                Plugin <strong>{s}</strong> → Local only (dev tool)
+                Plugin <strong>{s}</strong> → Dev only (tool)
               </li>
             ))}
             {(scan?.suggestions.buildThemes ?? []).map((t) => (
@@ -494,17 +523,17 @@ export function SyncTab() {
         </div>
       ) : null}
 
-      {job.phase !== "idle" ? (
+      {!rulesOnly && job.phase !== "idle" ? (
         <JobProgressPanel job={job} outputRef={outputRef} onStop={() => void cancel()} />
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-5">
-        <div className="space-y-4 xl:col-span-3">
+      <div className={`grid gap-6 ${rulesOnly ? "" : "xl:grid-cols-5"}`}>
+        <div className={`space-y-4 ${rulesOnly ? "" : "xl:col-span-3"}`}>
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Plugins</h3>
             <p className="mt-1 text-xs text-slate-500">
-              <strong>Deploy</strong> = included in full push/pull.{" "}
-              <strong>Local only</strong> = stays on your laptop (production unchanged).
+              <strong>Deploy</strong> = included in full sync.{" "}
+              <strong>Dev only</strong> = stays on your laptop (production unchanged).
             </p>
             <div className="mt-3 flex justify-end">
               <input
@@ -529,7 +558,13 @@ export function SyncTab() {
                 </div>
               ) : null}
               {!scanError && filteredPlugins.length === 0 ? (
-                <p className="text-xs text-slate-500">No plugins detected — run pull or install WordPress.</p>
+                <p className="text-xs text-slate-500">
+                  {job.phase === "running" && job.label.toLowerCase().includes("scan")
+                    ? "Scanning plugins and themes…"
+                    : scan == null
+                      ? "Scanning plugins and themes…"
+                      : "No plugins detected — run pull or install WordPress."}
+                </p>
               ) : null}
               {filteredPlugins.length > 0
                 ? filteredPlugins.map((p) => {
@@ -554,7 +589,7 @@ export function SyncTab() {
                         value={mode}
                         options={[
                           { value: "sync", label: "Deploy" },
-                          { value: "localOnly", label: "Local only" },
+                          { value: "localOnly", label: "Dev only" },
                         ]}
                         onChange={(v) => setPluginMode(p.slug, v)}
                       />
@@ -726,11 +761,12 @@ export function SyncTab() {
           </section>
         </div>
 
+        {!rulesOnly ? (
         <div className="space-y-4 xl:col-span-2">
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">File preview</h3>
             <p className="mt-1 text-xs text-slate-500">
-              See which paths would change before a full push/pull.
+              See which paths would change before a full sync.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               {(["push", "pull"] as const).map((d) => (
@@ -828,11 +864,12 @@ export function SyncTab() {
           <SyncDeployPanel
             canRun={canRun}
             runnerMessage={runnerMessage}
-            title="Push or pull"
+            title="Sync"
             onBeforeRun={saveBeforeDeploy}
-            hint="Full site sync: files and database together. First push to empty staging uploads files only — run push again after WordPress is installed on the server."
+            hint="Full site sync: files and database together. First sync to empty staging uploads files only — run again after WordPress is installed on the server."
           />
         </div>
+        ) : null}
       </div>
     </div>
   );

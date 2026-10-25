@@ -7,11 +7,9 @@ import {
   resolveThemePaths,
 } from "../services/theme-path.js";
 import { resolveRemoteWpPath } from "../services/wpcli.js";
+import { assertRemotePathSafe } from "../services/remote-path-safety.js";
 import { logInfo } from "../utils/logger.js";
-import {
-  cmdFixPermissions,
-  cmdFixRuntimeWritePermissions,
-} from "./fix-permissions.js";
+import { cmdFixPermissions } from "./fix-permissions.js";
 
 export type PullThemeOptions = {
   dryRun: boolean;
@@ -44,6 +42,7 @@ export async function cmdPullTheme(
   logInfo(`pull theme ${env}: connect ssh ${remote.user}@${remote.host}`);
   const ssh = await connectSsh(remote);
   try {
+    await assertRemotePathSafe(ssh, remote.path, env);
     const remoteWp = await resolveRemoteWpPath(ssh, remote.path);
     if (!remoteWp.installed || !remoteWp.path) {
       throw new Error(`Remote WordPress not found at ${remote.path}`);
@@ -58,10 +57,11 @@ export async function cmdPullTheme(
 
     if (!options.dryRun) {
       try {
-        await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
+        // Rsync as root leaves theme files root-owned on the bind mount.
+        await cmdFixPermissions(loaded, { quiet: true });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        logInfo(`pull theme ${env}: runtime permissions step failed (${msg})`);
+        logInfo(`pull theme ${env}: fix-permissions failed (${msg})`);
       }
       console.error(
         `\nTheme "${slug}" pulled from ${env} into ${deployDir} (database unchanged).`,

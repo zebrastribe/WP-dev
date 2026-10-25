@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiPhpUrl } from "./api";
 import { buildAdminApiHeaders } from "./adminAuthState";
-import { PhpVersionsPanel } from "./PhpVersionsPanel";
+
 
 type ManagedService = {
   name: string;
@@ -56,12 +56,12 @@ export function ServicesTab() {
 
   return (
     <div className="space-y-4">
-      <PhpVersionsPanel />
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Service Manager</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Services & ports</h2>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Managed processes, ports, and health from <code>logs/service-registry.json</code>.
+            Local Docker / supervisor registry from <code>logs/service-registry.json</code>. Change PHP under{" "}
+            Advanced → PHP versions.
           </p>
         </div>
         <button

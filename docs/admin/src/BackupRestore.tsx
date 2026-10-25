@@ -3,7 +3,7 @@ import { getTerminalJobStatus, runTerminalAction } from "./api";
 import { useRunnerSecrets } from "./useRunnerSecrets";
 
 type EnvName = "local" | "staging" | "production";
-type BackupKind = "db" | "full";
+type BackupKind = "db" | "full" | "complete";
 
 export function BackupRestore() {
   const { runnerReady, runnerMessage, canRun } = useRunnerSecrets();
@@ -71,10 +71,10 @@ export function BackupRestore() {
     <div className="space-y-4">
       <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Backup / Restore</h2>
       <p className="text-sm text-slate-600 dark:text-slate-400">
-        Create/list/restore backups. Full backup includes database + wp-content files.
+        Create/list/restore backups. Database, Content (DB + wp-content), or Complete install (DB + WordPress tree; excludes wp-config.php).
       </p>
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        For staging/production full backup/restore, remote host must support SSH access and have WP-CLI + rsync available.
+        For staging/production archives, remote host needs SSH, WP-CLI, and rsync. Prefer Complete before updates.
       </p>
 
       <div
@@ -104,17 +104,24 @@ export function BackupRestore() {
         <div className="inline-flex rounded-lg border border-slate-300 dark:border-slate-600">
           <button
             type="button"
-            onClick={() => setBackupKind("full")}
-            className={`px-3 py-1.5 text-xs ${backupKind === "full" ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-800"}`}
-          >
-            Full (DB + files)
-          </button>
-          <button
-            type="button"
             onClick={() => setBackupKind("db")}
             className={`px-3 py-1.5 text-xs ${backupKind === "db" ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-800"}`}
           >
-            Database only
+            Database
+          </button>
+          <button
+            type="button"
+            onClick={() => setBackupKind("full")}
+            className={`px-3 py-1.5 text-xs ${backupKind === "full" ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-800"}`}
+          >
+            Content
+          </button>
+          <button
+            type="button"
+            onClick={() => setBackupKind("complete")}
+            className={`px-3 py-1.5 text-xs ${backupKind === "complete" ? "bg-brand-600 text-white" : "bg-white dark:bg-slate-800"}`}
+          >
+            Complete
           </button>
         </div>
         <button
@@ -123,7 +130,9 @@ export function BackupRestore() {
           onClick={() => void runAction("backup_create", { env, kind: backupKind })}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
         >
-          {busy ? "Running..." : `Create ${env} ${backupKind === "full" ? "full" : "database"} backup`}
+          {busy
+            ? "Running..."
+            : `Create ${env} ${backupKind === "complete" ? "complete" : backupKind === "full" ? "content" : "database"} backup`}
         </button>
         <button
           type="button"
@@ -131,7 +140,7 @@ export function BackupRestore() {
           onClick={() => void runAction("backup_list", { env, kind: backupKind })}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
         >
-          List {env} {backupKind === "full" ? "full" : "database"} backups
+          List {env} backups
         </button>
       </div>
 

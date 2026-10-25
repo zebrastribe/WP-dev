@@ -19,8 +19,18 @@ import {
   wpRemoteDbImport,
   wpRemoteSearchReplace,
 } from "../services/wpcli.js";
-import { ensureBackupDir, timestampedDbName } from "../services/backup.js";
+import {
+  chownBackupArtifact,
+  ensureBackupDir,
+  timestampedDbName,
+} from "../services/backup.js";
 import { confirmRemoteTarget } from "../utils/confirm.js";
+import { assertRemotePathSafe } from "../services/remote-path-safety.js";
+import {
+  DISK_NEED,
+  assertLocalFreeSpace,
+  assertRemoteFreeSpace,
+} from "../utils/disk-space.js";
 import { logInfo } from "../utils/logger.js";
 import { getUrlVariants } from "../utils/url-variants.js";
 import { verifyRemoteSiteUrls } from "../utils/sync-verify.js";
@@ -33,6 +43,8 @@ export type PushOptions = {
   dryRun: boolean;
   /** Skip interactive SSH-host / production confirmation (browser runner, CI). */
   yes?: boolean;
+  /** Required with --yes for staging: must equal staging.host */
+  confirmHost?: string;
 };
 
 /** wp-dev admin must never remain on staging/production (local dev tool only). */
@@ -79,12 +91,11 @@ export async function cmdPush(
   const remote = getRemoteEnv(config, env);
   const localWpRoot = resolveFromConfigDir(configDir, config.local.wpRoot);
 
-  if (!options.dryRun && !options.yes && process.env.WPDEV_ASSUME_YES !== "1") {
-    const ok = await confirmRemoteTarget(
-      env,
-      remote,
-      "push",
-    );
+  if (!options.dryRun) {
+    const ok = await confirmRemoteTarget(env, remote, "push", {
+      yes: Boolean(options.yes) || process.env.WPDEV_ASSUME_YES === "1",
+      confirmHost: options.confirmHost,
+    });
     if (!ok) {
       logInfo(`push ${env}: user aborted at confirmation`);
       console.error("Aborted.");
@@ -98,6 +109,14 @@ export async function cmdPush(
     console.error(
       "[dry-run] Would: backup remote DB, rsync push, export local DB, import on remote, search-replace URLs.",
     );
+    const sshDry = await connectSsh(remote);
+    try {
+      await assertRemotePathSafe(sshDry, remote.path, env, {
+        allowMissingWpConfig: env === "staging",
+      });
+    } finally {
+      sshDry.dispose();
+    }
     await rsyncPush(remote, localWpRoot, {
       dryRun: true,
       excludes: pushExcludePatterns(configDir, config, localWpRoot),
@@ -109,7 +128,7 @@ export async function cmdPush(
   assertHostSyncTools();
   assertNotInTerminalContainerWithoutDocker();
 
-  const syncLock = acquireSyncLock(configDir, `push:${env}`);
+  const syncLock = acquireSyncLock(config.project, `push:${env}`);
   try {
   await assertLocalWpInstalled(configDir, config);
   if (env === "staging") {
@@ -135,8 +154,13 @@ export async function cmdPush(
   let prePushBackup = "";
   let bootstrappedFreshRemote = false;
   try {
+    assertLocalFreeSpace(tmpdir(), DISK_NEED.dbBackupLocal, `push ${env}`);
+    await assertRemoteFreeSpace(ssh, "/tmp", DISK_NEED.dbBackupRemoteTmp, `push ${env}`);
     let remoteWp = await resolveRemoteWpPath(ssh, remote.path);
     const shouldBootstrapStaging = env === "staging" && !remoteWp.installed;
+    await assertRemotePathSafe(ssh, remote.path, env, {
+      allowMissingWpConfig: shouldBootstrapStaging,
+    });
     if (!remoteWp.installed && !shouldBootstrapStaging) {
       await assertRemoteWpInstalled(ssh, remote.path);
     }
@@ -182,6 +206,7 @@ export async function cmdPush(
       logInfo(`push ${env}: remote pre-push db backup -> ${prePushBackup}`);
       await wpRemoteDbExport(ssh, wpPath, remotePreDump);
       await ssh.getFile(remotePreDump, prePushBackup);
+      chownBackupArtifact(prePushBackup, configDir);
       await ssh.exec(remoteRmFile(remotePreDump));
     } else {
       logInfo(`push ${env}: bootstrap mode — skipping pre-push remote DB backup`);

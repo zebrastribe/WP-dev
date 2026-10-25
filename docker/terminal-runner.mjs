@@ -1,6 +1,9 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { safeArg, wpdevPullPushCommand, restoreEnvConfirmOk } from "./runner-sync-gates.mjs";
 
 const PORT = Number(process.env.WPDEV_TERMINAL_RUNNER_PORT || 7682);
 const AUTH = process.env.WPDEV_TERMINAL_AUTH || "wpdev:wpdev";
@@ -8,8 +11,8 @@ const RUNNER_TOKEN = process.env.WPDEV_TERMINAL_RUNNER_TOKEN || "";
 const ALLOWED_ORIGIN = process.env.WPDEV_TERMINAL_RUNNER_ORIGIN || "";
 const WORKDIR = process.env.WPDEV_TERMINAL_WORKDIR || "/workspace";
 const MAX_OUTPUT = 64_000;
-const JOB_TTL_MS = 10 * 60 * 1000;
-const JOB_TIMEOUT_MS = 8 * 60 * 1000;
+const JOB_TTL_MS = 35 * 60 * 1000;
+const JOB_TIMEOUT_MS = 30 * 60 * 1000;
 
 if (AUTH === "wpdev:wpdev") {
   console.error("Refusing to start terminal runner: WPDEV_TERMINAL_AUTH is using insecure default.");
@@ -29,6 +32,7 @@ const jobs = new Map();
 function pruneJobs() {
   const now = Date.now();
   for (const [id, job] of jobs.entries()) {
+    if (job.status === "running") continue;
     if (now - job.updatedAt > JOB_TTL_MS) jobs.delete(id);
   }
 }
@@ -66,8 +70,14 @@ function parseAuth(req) {
   }
 }
 
-function safeArg(v) {
-  return typeof v === "string" && /^[a-zA-Z0-9._:@~/-]+$/.test(v) ? v : "";
+function readProjectId() {
+  try {
+    const raw = readFileSync(join(WORKDIR, "wp-dev.config.json"), "utf8");
+    const p = JSON.parse(raw).project;
+    return typeof p === "string" && /^[a-zA-Z0-9._-]+$/.test(p) ? p : "";
+  } catch {
+    return "";
+  }
 }
 
 function hasValidRunnerToken(req) {
@@ -86,8 +96,23 @@ function commandForAction(action, args) {
   if (action === "ssh_test") {
     const user = safeArg(args?.user);
     const host = safeArg(args?.host);
+    const path = safeArg(args?.path);
     if (!user || !host) return null;
-    return `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} "pwd && ls -la && wp --info"`;
+    if (!path) {
+      return 'echo "FAIL: WordPress path is required. Set staging.path / production.path to the folder that contains wp-config.php (not a parent of other sites)." >&2; exit 1';
+    }
+    // Verify the configured site root before listing — catches mistyped parents early.
+    // Keep $P as a remote shell var (escape $ so Node template literals do not eat it).
+    return (
+      `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} ` +
+      `'set -e; P=${path}; ` +
+      `test -d "\$P" || { echo "FAIL: path does not exist: \$P"; exit 1; }; ` +
+      `if [ ! -f "\$P/wp-config.php" ] && [ ! -f "\$P/wp-config-sample.php" ]; then ` +
+      `echo "FAIL: \$P is not a WordPress root (no wp-config.php). Point path at this site only — not a parent with other sites/logs."; exit 1; fi; ` +
+      `if [ -f "\$P/wp-dev.config.json" ] || [ -f "\$P/docker/terminal-runner.mjs" ]; then ` +
+      `echo "FAIL: WP-dev tooling found inside \$P. Keep WP-dev on your workstation; path must be the site docroot only."; exit 1; fi; ` +
+      `echo "Path OK: \$P (WordPress root)"; ls -la "\$P" | head -n 40; wp --path="\$P" --info'`
+    );
   }
   if (action === "wpdev_doctor") {
     const env = safeArg(args?.env);
@@ -95,9 +120,7 @@ function commandForAction(action, args) {
     return `npm run wp-dev -- doctor ${env} --http`;
   }
   if (action === "wpdev_pull") {
-    const env = safeArg(args?.env);
-    if (!["staging", "production"].includes(env)) return null;
-    return `npm run wp-dev -- pull ${env} --yes`;
+    return wpdevPullPushCommand("pull", args?.env, args?.confirm);
   }
   if (action === "wpdev_pull_dry") {
     const env = safeArg(args?.env);
@@ -105,14 +128,34 @@ function commandForAction(action, args) {
     return `npm run wp-dev -- pull ${env} --dry-run`;
   }
   if (action === "wpdev_push") {
-    const env = safeArg(args?.env);
-    if (!["staging", "production"].includes(env)) return null;
-    return `npm run wp-dev -- push ${env} --yes`;
+    return wpdevPullPushCommand("push", args?.env, args?.confirm);
   }
   if (action === "wpdev_push_dry") {
     const env = safeArg(args?.env);
     if (!["staging", "production"].includes(env)) return null;
     return `npm run wp-dev -- push ${env} --dry-run`;
+  }
+  if (action === "wpdev_push_theme") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    const build = safeArg(args?.build) === "1" ? " --build" : "";
+    return `npm run wp-dev -- push theme ${env} --yes${build}`;
+  }
+  if (action === "wpdev_push_theme_dry") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    const build = safeArg(args?.build) === "1" ? " --build" : "";
+    return `npm run wp-dev -- push theme ${env} --dry-run${build}`;
+  }
+  if (action === "wpdev_pull_theme") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- pull theme ${env}`;
+  }
+  if (action === "wpdev_pull_theme_dry") {
+    const env = safeArg(args?.env);
+    if (!["staging", "production"].includes(env)) return null;
+    return `npm run wp-dev -- pull theme ${env} --dry-run`;
   }
   if (action === "wpdev_sync_preview") {
     const env = safeArg(args?.env);
@@ -161,95 +204,61 @@ function commandForAction(action, args) {
   if (action === "backup_create") {
     const env = safeArg(args?.env);
     const kindRaw = safeArg(args?.kind);
-    const kind = kindRaw === "full" ? "full" : "db";
+    const kind =
+      kindRaw === "complete" ? "complete" : kindRaw === "full" || kindRaw === "content" ? "full" : "db";
     if (!["local", "staging", "production"].includes(env)) return null;
-    if (env === "local") {
-      if (kind === "full") {
-        return [
-          'PROJECT="$(node -e \'try{const c=require("/workspace/wp-dev.config.json");process.stdout.write(String(c.project||"site").replace(/[^a-zA-Z0-9_-]/g,"-"))}catch{process.stdout.write("site")}\')"',
-          'STAMP="$(date +%F-%H-%M-%S)"',
-          'OUT="$HOME/.wp-dev/backups/$PROJECT/local/full-$STAMP.tar.gz"',
-          'TMPDIR="$(mktemp -d)"',
-          'DBTMP="$TMPDIR/db.sql"',
-          'mkdir -p "$(dirname "$OUT")"',
-          'test -n "$MYSQL_DATABASE" || { echo "Missing MYSQL_DATABASE in terminal environment."; rm -rf "$TMPDIR"; exit 1; }',
-          'test -n "$MYSQL_USER" || { echo "Missing MYSQL_USER in terminal environment."; rm -rf "$TMPDIR"; exit 1; }',
-          'test -n "$MYSQL_PASSWORD" || { echo "Missing MYSQL_PASSWORD in terminal environment."; rm -rf "$TMPDIR"; exit 1; }',
-          'test -d "/workspace/wordpress/wp-content" || { echo "Missing /workspace/wordpress/wp-content directory."; rm -rf "$TMPDIR"; exit 1; }',
-          'mysqldump --no-tablespaces -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" > "$DBTMP" || { rm -rf "$TMPDIR"; exit 1; }',
-          'tar -czf "$OUT" -C /workspace/wordpress wp-content -C "$TMPDIR" db.sql || { rm -f "$OUT"; rm -rf "$TMPDIR"; exit 1; }',
-          'rm -rf "$TMPDIR"',
-          'echo "Local full backup written to $OUT"',
-        ].join("; ");
-      }
-      return [
-        'PROJECT="$(node -e \'try{const c=require("/workspace/wp-dev.config.json");process.stdout.write(String(c.project||"site").replace(/[^a-zA-Z0-9_-]/g,"-"))}catch{process.stdout.write("site")}\')"',
-        'STAMP="$(date +%F-%H-%M-%S)"',
-        'OUT="$HOME/.wp-dev/backups/$PROJECT/local/db-$STAMP.sql"',
-        'TMP="$OUT.tmp"',
-        'mkdir -p "$(dirname "$OUT")"',
-        'test -n "$MYSQL_DATABASE" || { echo "Missing MYSQL_DATABASE in terminal environment."; exit 1; }',
-        'test -n "$MYSQL_USER" || { echo "Missing MYSQL_USER in terminal environment."; exit 1; }',
-        'test -n "$MYSQL_PASSWORD" || { echo "Missing MYSQL_PASSWORD in terminal environment."; exit 1; }',
-        'mysqldump --no-tablespaces -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" > "$TMP" || { rm -f "$TMP"; exit 1; }',
-        'mv "$TMP" "$OUT"',
-        'echo "Local database backup written to $OUT"',
-      ].join("; ");
-    }
-    if (kind === "full") {
-      return [
-        "set -e",
-        `eval "$(node /workspace/docker/runner-remote-env.mjs ${env})"`,
-        `test -n "$HOST" && test -n "$USER" && test -n "$REMOTE_PATH" || { echo "Missing ${env} SSH settings in wp-dev.config.json"; exit 1; }`,
-        'STAMP="$(date +%F-%H-%M-%S)"',
-        `OUT="$HOME/.wp-dev/backups/$PROJECT/${env}/full-$STAMP.tar.gz"`,
-        'mkdir -p "$(dirname "$OUT")"',
-        `REMOTE_DIR="/tmp/wp-dev-full-${env}-$STAMP"`,
-        `ssh $SSH_OPTS "$USER@$HOST" "set -e; mkdir -p \\"$REMOTE_DIR\\"; cd \\"$REMOTE_PATH\\"; wp db export \\"$REMOTE_DIR/db.sql\\" --allow-root >/dev/null; tar -czf \\"$REMOTE_DIR/full.tar.gz\\" -C \\"$REMOTE_PATH\\" wp-content -C \\"$REMOTE_DIR\\" db.sql"`,
-        `scp $SSH_OPTS "$USER@$HOST:$REMOTE_DIR/full.tar.gz" "$OUT"`,
-        `ssh $SSH_OPTS "$USER@$HOST" "rm -rf \\"$REMOTE_DIR\\""`,
-        `echo "${env} full backup written to $OUT"`,
-      ].join("; ");
-    }
+    // Always use CLI so disk-space preflight and shared backup logic apply.
+    if (kind === "complete") return `npm run wp-dev -- backup ${env} --complete`;
+    if (kind === "full") return `npm run wp-dev -- backup ${env} --files`;
     return `npm run wp-dev -- backup ${env}`;
   }
   if (action === "backup_list") {
     const env = safeArg(args?.env);
     const kindRaw = safeArg(args?.kind);
-    const kind = kindRaw === "full" ? "full" : "db";
-    if (!["local", "staging", "production"].includes(env)) return null;
-    if (kind === "full") {
-      return `mkdir -p ~/.wp-dev/backups; OUT="$(ls -1t ~/.wp-dev/backups/*/${env}/full-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No full backups found for ${env}."; else printf "%s\\n" "$OUT"; fi`;
+    const kind =
+      kindRaw === "complete"
+        ? "complete"
+        : kindRaw === "full" || kindRaw === "content"
+          ? "full"
+          : kindRaw === "all"
+            ? "all"
+            : "db";
+    const project = readProjectId();
+    if (!["local", "staging", "production"].includes(env) || !project) return null;
+    const base = `$HOME/.wp-dev/backups/${project}/${env}`;
+    if (kind === "complete") {
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/complete-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No complete backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
     }
-    return `mkdir -p ~/.wp-dev/backups; OUT="$(ls -1t ~/.wp-dev/backups/*/${env}/db-*.sql ~/.wp-dev/backups/*/${env}/*.sql 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No database backups found for ${env}."; else printf "%s\\n" "$OUT"; fi`;
+    if (kind === "full") {
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/full-*.tar.gz 2>/dev/null | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No content backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+    }
+    if (kind === "all") {
+      // Prefer complete + content + db/pre prefixes; avoid *.sql which double-matches those globs.
+      return `mkdir -p ${base}; OUT="$(ls -1t ${base}/complete-*.tar.gz ${base}/full-*.tar.gz ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 40 || true)"; if [ -z "$OUT" ]; then echo "No backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
+    }
+    return `mkdir -p ${base}; OUT="$(ls -1t ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No database backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
   }
   if (action === "restore_env") {
     const env = safeArg(args?.env);
     const file = safeArg(args?.file);
     const confirm = safeArg(args?.confirm);
-    if (!["local", "staging", "production"].includes(env) || !file) return null;
+    const project = readProjectId();
+    if (!["local", "staging", "production"].includes(env) || !file || !project) return null;
     if (file.includes("..")) return null;
-    if (env === "production" && confirm !== "RESTORE_PRODUCTION") return null;
-    // Only allow restores from ~/.wp-dev/backups (no arbitrary path / traversal).
+    if (!restoreEnvConfirmOk(env, confirm)) return null;
     const backupGuard = [
       `FILE_REAL="$(realpath -e ${file} 2>/dev/null || true)"`,
       'test -n "$FILE_REAL" || { echo "Backup file not found or unreadable."; exit 1; }',
-      'case "$FILE_REAL" in "$HOME"/.wp-dev/backups/*) ;; *) echo "Restore refused: file must be under ~/.wp-dev/backups/"; exit 1;; esac',
+      `case "$FILE_REAL" in "$HOME"/.wp-dev/backups/${project}/${env}/*) ;; *) echo "Restore refused: file must be under ~/.wp-dev/backups/${project}/${env}/"; exit 1;; esac`,
     ].join("; ");
+    // All restores go through CLI (DB, content, and complete archives; remote needs confirm).
     if (env === "local") {
-      return [
-        backupGuard,
-        'test -n "$MYSQL_DATABASE" || { echo "Missing MYSQL_DATABASE in terminal environment."; exit 1; }',
-        'test -n "$MYSQL_USER" || { echo "Missing MYSQL_USER in terminal environment."; exit 1; }',
-        'test -n "$MYSQL_PASSWORD" || { echo "Missing MYSQL_PASSWORD in terminal environment."; exit 1; }',
-        'case "$FILE_REAL" in *.tar.gz) TMPDIR="$(mktemp -d)"; tar -xzf "$FILE_REAL" -C "$TMPDIR" || { rm -rf "$TMPDIR"; exit 1; }; test -f "$TMPDIR/db.sql" || { echo "Invalid full backup archive: missing db.sql"; rm -rf "$TMPDIR"; exit 1; }; test -d "$TMPDIR/wp-content" || { echo "Invalid full backup archive: missing wp-content"; rm -rf "$TMPDIR"; exit 1; }; PRE="$HOME/.wp-dev/backups/pre-ui-restore-$(date +%s).sql"; mkdir -p "$(dirname "$PRE")"; mysqldump --no-tablespaces -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" > "$PRE" || { rm -rf "$TMPDIR"; exit 1; }; mysql -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < "$TMPDIR/db.sql" || { rm -rf "$TMPDIR"; exit 1; }; mkdir -p /workspace/wordpress/wp-content; rsync -a --delete "$TMPDIR/wp-content/" /workspace/wordpress/wp-content/ || { rm -rf "$TMPDIR"; exit 1; }; rm -rf "$TMPDIR"; echo "Local full restore completed (pre-restore DB: $PRE).";; *) PRE="$HOME/.wp-dev/backups/pre-ui-restore-$(date +%s).sql"; mkdir -p "$(dirname "$PRE")"; mysqldump --no-tablespaces -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" > "$PRE" || exit 1; mysql -h db -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < "$FILE_REAL" && echo "Local database restore completed (pre-restore DB: $PRE).";; esac',
-      ].join("; ");
+      return `${backupGuard}; npm run wp-dev -- restore local "$FILE_REAL"`;
     }
-    if (safeArg(file).endsWith(".tar.gz")) {
-      return `${backupGuard}; echo "Full archive restore to ${env} via the browser runner is disabled (no safe pre-backup + URL rewrite). Use host CLI after backing up." >&2; exit 1`;
+    if (env === "staging") {
+      return `${backupGuard}; npm run wp-dev -- restore staging "$FILE_REAL" --yes --confirm-host ${confirm}`;
     }
-    const yesFlag = env === "production" ? " --yes" : "";
-    return `${backupGuard}; npm run wp-dev -- restore ${env} "$FILE_REAL"${yesFlag}`;
+    return `${backupGuard}; npm run wp-dev -- restore production "$FILE_REAL" --yes`;
   }
   if (action === "git_status") {
     return "git -c safe.directory=/workspace status --short";
@@ -314,8 +323,12 @@ function startJob(command) {
   };
   child.stdout.on("data", append);
   child.stderr.on("data", append);
+  const heartbeat = setInterval(() => {
+    if (job.status === "running") job.updatedAt = Date.now();
+  }, 30_000);
   child.on("close", (code) => {
     clearTimeout(timeout);
+    clearInterval(heartbeat);
     if (job.status === "running") {
       job.status = "done";
       job.exitCode = typeof code === "number" ? code : 1;
@@ -326,6 +339,7 @@ function startJob(command) {
   });
   child.on("error", (err) => {
     clearTimeout(timeout);
+    clearInterval(heartbeat);
     append(`\n[runner error] ${err?.message || String(err)}\n`);
     if (job.status === "running") {
       job.status = "done";

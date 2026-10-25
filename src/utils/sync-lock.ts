@@ -12,21 +12,22 @@ import { homedir } from "node:os";
 
 const STALE_MS = 2 * 60 * 60 * 1000;
 
-function lockPath(configDir: string): string {
+function lockPath(projectId: string): string {
   const dir = join(homedir(), ".wp-dev", "locks");
   mkdirSync(dir, { recursive: true });
-  const key = configDir.replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 120);
-  return join(dir, `sync-${key}.lock`);
+  const key = (projectId.trim() || "default").replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 120);
+  return join(dir, `sync-project-${key}.lock`);
 }
 
 export type SyncLockHandle = { path: string; fd: number };
 
 /**
  * Exclusive lock for pull/push/restore so UI + CLI cannot race the same project.
+ * Keyed by config.project (not configDir) so host CLI and container runners share one lock.
  * Uses O_EXCL; stale locks older than 2h are removed.
  */
-export function acquireSyncLock(configDir: string, op: string): SyncLockHandle {
-  const path = lockPath(configDir);
+export function acquireSyncLock(projectId: string, op: string): SyncLockHandle {
+  const path = lockPath(projectId);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = openSync(path, "wx");

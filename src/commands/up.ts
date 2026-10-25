@@ -11,6 +11,11 @@ import {
   setEnvValueInContent,
   writeEnvFile,
 } from "../utils/compose-env.js";
+import {
+  resolveHostHome,
+  resolveHostIdentity,
+  resolveHostProjectRoot,
+} from "../utils/host-paths.js";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
@@ -117,6 +122,32 @@ function ensureSecurityEnvDefaults(loaded: LoadedConfig, envPath: string): void 
     next = setEnvValueInContent(next, "WPDEV_HOST_RUNNER_PORT", "7683");
     changed = true;
     changedKeys.push("WPDEV_HOST_RUNNER_PORT");
+  }
+
+  // Persist absolute host paths so compose from the terminal container (docker.sock)
+  // does not resolve relative binds to /workspace/... on the host.
+  const hostRoot = resolveHostProjectRoot(loaded.configDir, envPath);
+  const hostHome = resolveHostHome(envPath);
+  if (readEnvValue(next, "WPDEV_HOST_PROJECT_ROOT") !== hostRoot) {
+    next = setEnvValueInContent(next, "WPDEV_HOST_PROJECT_ROOT", hostRoot);
+    changed = true;
+    changedKeys.push("WPDEV_HOST_PROJECT_ROOT");
+  }
+  if (readEnvValue(next, "WPDEV_HOST_HOME") !== hostHome) {
+    next = setEnvValueInContent(next, "WPDEV_HOST_HOME", hostHome);
+    changed = true;
+    changedKeys.push("WPDEV_HOST_HOME");
+  }
+  const hostId = resolveHostIdentity(loaded.configDir);
+  if (readEnvValue(next, "WPDEV_HOST_UID") !== String(hostId.uid)) {
+    next = setEnvValueInContent(next, "WPDEV_HOST_UID", String(hostId.uid));
+    changed = true;
+    changedKeys.push("WPDEV_HOST_UID");
+  }
+  if (readEnvValue(next, "WPDEV_HOST_GID") !== String(hostId.gid)) {
+    next = setEnvValueInContent(next, "WPDEV_HOST_GID", String(hostId.gid));
+    changed = true;
+    changedKeys.push("WPDEV_HOST_GID");
   }
 
   if (changed) {

@@ -1,7 +1,7 @@
-import { userInfo } from "node:os";
 import type { LoadedConfig } from "../config/load.js";
 import { compose } from "../services/docker-compose.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
+import { resolveHostIdentity } from "../utils/host-paths.js";
 import { logInfo } from "../utils/logger.js";
 import { posixShellQuote } from "../utils/shell-quote.js";
 
@@ -67,10 +67,11 @@ export async function cmdFixPermissions(
   options: FixPermissionsOptions = {},
 ): Promise<void> {
   assertDockerReady();
-  const { uid, gid } = userInfo();
-  if (uid < 0 || gid < 0) {
+  // Prefer WPDEV_HOST_UID/GID: UI/runner pull runs as root in the terminal container.
+  const { uid, gid } = resolveHostIdentity(loaded.configDir);
+  if (uid <= 0 || gid <= 0) {
     throw new Error(
-      "fix-permissions needs a real host uid/gid (not supported on this OS).",
+      "fix-permissions needs a real host uid/gid (set WPDEV_HOST_UID/GID or run from the host).",
     );
   }
   logInfo(`fix-permissions: chown /var/www/html (bind mount) to ${uid}:${gid}`);

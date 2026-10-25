@@ -18,6 +18,23 @@ Shared hosts often differ from VPS layouts. `wp-dev init` guesses may not match 
 3. `wp-dev doctor production --rsync` before first pull.
 4. See [Syncing — first pull checklist](../guides/syncing.md#first-pull-checklist).
 
+## One site per `path` (important)
+
+`staging.path` / `production.path` must be **this site’s** WordPress root — the folder that contains `wp-config.php`.
+
+Do **not** point path at:
+
+- The account home or a parent that also holds other sites or log folders
+- A checkout of the **WP-dev** project (the CLI/admin repo belongs on your workstation, not inside the live docroot)
+
+Sibling sites and logs should sit **beside** that folder.
+
+Safety nets:
+
+- **Setup** → **Verify path** checks SSH + `wp-config.php` at the configured path (and refuses WP-dev tooling in the docroot).
+- **`wp-dev doctor`** fails on multi-site parents or wp-dev-in-docroot.
+- **pull / push / backup / restore / theme sync** refuse unsafe remote paths before touching files.
+
 ## Simply.com DNS API (optional)
 
 With `simply.account` in config and `WPDEV_SIMPLY_API_KEY` in `docker/.env`:

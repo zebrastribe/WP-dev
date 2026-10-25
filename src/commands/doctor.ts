@@ -5,6 +5,10 @@ import { getRemoteEnv, type RemoteEnvName } from "../config/schema.js";
 import { connectSsh } from "../services/ssh.js";
 import { rsyncPull } from "../services/rsync.js";
 import { assertRemoteWpInstalled, isLocalWpInstalled } from "../services/wpcli.js";
+import {
+  inspectLocalWpRootSafety,
+  inspectRemotePathSafety,
+} from "../services/remote-path-safety.js";
 import { getSimplyApiKey, SIMPLY_API_KEY_ENV } from "../services/simply.js";
 import { inferApexFromConfig } from "../services/simply-staging.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
@@ -115,6 +119,16 @@ async function checkLocalSite(
   const { site } = getPublishedLocalAccess(loaded);
   console.error(`\n--- local (${site}) ---`);
 
+  const localWpRoot = resolveFromConfigDir(loaded.configDir, loaded.config.local.wpRoot);
+  const localPathSafety = inspectLocalWpRootSafety(localWpRoot, "local");
+  for (const issue of localPathSafety.issues) {
+    console.error(`${issue.level === "fail" ? "FAIL" : "WARN"}: ${issue.message}`);
+  }
+  if (localPathSafety.ok && localPathSafety.issues.length === 0) {
+    console.error(`Local path safety: OK (${localWpRoot} is a WordPress root, not a WP-dev checkout)`);
+  }
+  if (!localPathSafety.ok) return "fail";
+
   const runtimeWrite = await checkLocalRuntimeWrite(loaded);
   if (runtimeWrite === "fail") return "fail";
 
@@ -217,16 +231,42 @@ async function checkOneRemote(
   }
 
   let sshFailed = false;
+  let pathSafetyFailed = false;
   try {
     logInfo(`doctor ${env}: ssh connect`);
     const ssh = await connectSsh(remote);
     try {
+      const configuredSafety = await inspectRemotePathSafety(ssh, remote.path, env);
+      for (const issue of configuredSafety.issues) {
+        console.error(`${issue.level === "fail" ? "FAIL" : "WARN"}: ${issue.message}`);
+      }
+      if (configuredSafety.ok && configuredSafety.issues.length === 0) {
+        console.error(
+          `Path safety: OK (${remote.path} is a single WordPress root; no WP-dev tooling in docroot)`,
+        );
+      }
+      if (!configuredSafety.ok) {
+        pathSafetyFailed = true;
+        console.error(
+          "Fix: set staging.path / production.path to this site’s wp-config.php directory. Keep other sites and logs as siblings. Never put the WP-dev repo inside the live docroot.",
+        );
+      }
+
       const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
       console.error(
         `SSH + WP-CLI: OK (remote WordPress detected at ${wpPath}` +
           (wpPath !== remote.path ? `; configured ${remote.path}` : "") +
           ")",
       );
+      if (wpPath !== remote.path) {
+        const resolvedSafety = await inspectRemotePathSafety(ssh, wpPath, env);
+        for (const issue of resolvedSafety.issues) {
+          console.error(
+            `${issue.level === "fail" ? "FAIL" : "WARN"} (resolved path): ${issue.message}`,
+          );
+        }
+        if (!resolvedSafety.ok) pathSafetyFailed = true;
+      }
       if (rsyncDryRun) {
         const localWp = resolveFromConfigDir(loaded.configDir, loaded.config.local.wpRoot);
         console.error("rsync: running pull --dry-run (no files written)…");
@@ -245,7 +285,7 @@ async function checkOneRemote(
     );
   }
 
-  if (sshFailed) return "fail";
+  if (sshFailed || pathSafetyFailed) return "fail";
   if (httpCheck) {
     const probe = await probeHttpUrl(remote.url);
     if (!probe.ok) {

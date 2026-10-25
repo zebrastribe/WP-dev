@@ -2,11 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertBackupFileExists,
   backupDirFor,
+  chownBackupArtifact,
+  COMPLETE_BACKUP_TAR_EXCLUDES,
+  FULL_BACKUP_TAR_EXCLUDES,
+  timestampedCompleteName,
   timestampedDbName,
   timestampedFullName,
   timestampedPreRestoreName,
 } from "../src/services/backup.js";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { listRecentBackups } from "../src/commands/backup.js";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { homedir } from "node:os";
@@ -36,6 +41,12 @@ describe("backup service", () => {
     expect(timestampedFullName()).toMatch(/^full-2026-06-17-14-05-\d{2}-\d{3}-[a-z0-9]+\.tar\.gz$/);
   });
 
+  it("timestampedCompleteName uses complete- prefix", () => {
+    expect(timestampedCompleteName()).toMatch(
+      /^complete-2026-06-17-14-05-\d{2}-\d{3}-[a-z0-9]+\.tar\.gz$/,
+    );
+  });
+
   it("timestampedPreRestoreName is distinct", () => {
     expect(timestampedPreRestoreName()).toMatch(/^pre-restore-2026-06-17-14-05-\d{2}-\d{3}-[a-z0-9]+\.sql$/);
     expect(timestampedDbName()).not.toBe(timestampedDbName());
@@ -52,6 +63,45 @@ describe("backup service", () => {
     const file = join(dir, "dump.sql");
     writeFileSync(file, "-- sql");
     expect(() => assertBackupFileExists(file)).not.toThrow();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("FULL_BACKUP_TAR_EXCLUDES drops build junk and stale export temps", () => {
+    expect(FULL_BACKUP_TAR_EXCLUDES).toContain("node_modules");
+    expect(FULL_BACKUP_TAR_EXCLUDES).toContain(".git");
+    expect(FULL_BACKUP_TAR_EXCLUDES).toContain(".wp-dev-export-*.sql");
+  });
+
+  it("COMPLETE_BACKUP_TAR_EXCLUDES omits secrets and build junk", () => {
+    expect(COMPLETE_BACKUP_TAR_EXCLUDES).toContain("wp-config.php");
+    expect(COMPLETE_BACKUP_TAR_EXCLUDES).toContain("node_modules");
+    expect(COMPLETE_BACKUP_TAR_EXCLUDES).toContain(".wp-dev-export-*.sql");
+  });
+
+  it("chownBackupArtifact does not throw on a normal file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wp-dev-backup-chown-"));
+    const file = join(dir, "dump.sql");
+    writeFileSync(file, "-- sql");
+    expect(() => chownBackupArtifact(file)).not.toThrow();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("listRecentBackups orders by mtime, not lexical name", () => {
+    vi.useRealTimers();
+    const project = `mtime-sort-${Date.now()}`;
+    const dir = backupDirFor(project, "local");
+    mkdirSync(dir, { recursive: true });
+    const older = join(dir, "pre-restore-2099-01-01-00-00-00-000-zzz.sql");
+    const newer = join(dir, "db-2020-01-01-00-00-00-000-aaa.sql");
+    writeFileSync(older, "-- old");
+    writeFileSync(newer, "-- new");
+    const tOld = Date.now() / 1000 - 120;
+    const tNew = Date.now() / 1000 - 10;
+    utimesSync(older, tOld, tOld);
+    utimesSync(newer, tNew, tNew);
+    const recent = listRecentBackups(project, "local", 2);
+    expect(recent[0]).toBe(newer);
+    expect(recent[1]).toBe(older);
     rmSync(dir, { recursive: true, force: true });
   });
 });

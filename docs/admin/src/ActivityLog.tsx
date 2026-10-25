@@ -3,14 +3,15 @@ import { clearAdminLog, getAdminLogSnapshot, subscribeAdminLog, type AdminLogEnt
 
 export function ActivityLog() {
   const [rows, setRows] = useState<AdminLogEntry[]>(() => getAdminLogSnapshot());
-  const bottom = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     return subscribeAdminLog(() => setRows(getAdminLogSnapshot()));
   }, []);
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth" });
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [rows.length]);
 
   const copyAll = async () => {
@@ -47,7 +48,10 @@ export function ActivityLog() {
           </button>
         </div>
       </div>
-      <div className="max-h-48 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed">
+      <div
+        ref={listRef}
+        className="max-h-48 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed"
+      >
         {rows.length === 0 ? (
           <p className="text-slate-500">No events yet — wizard and API calls will appear here.</p>
         ) : (
@@ -68,7 +72,6 @@ export function ActivityLog() {
             </div>
           ))
         )}
-        <div ref={bottom} />
       </div>
       <p className="border-t border-slate-200 px-3 py-1.5 text-[10px] text-slate-500 dark:border-slate-800">
         Server-side: <code className="rounded bg-slate-200 px-0.5 dark:bg-slate-800">logs/wp-dev-admin-api.log</code>{" "}

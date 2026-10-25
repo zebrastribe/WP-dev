@@ -17,19 +17,30 @@ export async function confirmRemoteTarget(
   env: RemoteEnvName,
   remote: { host: string; url: string },
   action: "pull" | "push" | "restore",
+  opts: { yes?: boolean; confirmHost?: string } = {},
 ): Promise<boolean> {
-  // Browser runner / CI: no TTY — auto-approve staging; production needs --yes from caller.
-  if (!process.stdin.isTTY) {
-    return env === "staging";
+  const host = remote.host.trim();
+
+  // Non-interactive (admin runner / CI): production needs --yes; staging needs matching --confirm-host.
+  if (!process.stdin.isTTY || opts.yes) {
+    if (env === "production") {
+      return Boolean(opts.yes);
+    }
+    const provided = (opts.confirmHost ?? "").trim();
+    if (!provided || provided !== host) {
+      console.error(
+        `Staging ${action} refused: pass --confirm-host=${host} (SSH host from config) when using --yes / non-TTY.`,
+      );
+      return false;
+    }
+    return true;
   }
+
   if (env === "production") {
-    return confirmProduction(
-      `You are about to ${action} PRODUCTION (${remote.url}).`,
-    );
+    return confirmProduction(`You are about to ${action} PRODUCTION (${remote.url}).`);
   }
   const rl = readline.createInterface({ input, output });
   try {
-    const host = remote.host.trim();
     const answer = await rl.question(
       `You are about to ${action} STAGING (${remote.url} via ${host}). Type the SSH host "${host}" to continue: `,
     );

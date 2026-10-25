@@ -1,7 +1,7 @@
 {
   "name": "wp-dev",
   "version": "0.1.0",
-  "description": "WordPress dev CLI for macOS and Linux: local Docker, pull/push over SSH",
+  "description": "Local WordPress in Docker (Linux, macOS, Windows/WSL2) with Backup / Setup / Sync admin UI and SSH pull/push",
   "type": "module",
   "bin": {
     "wp-dev": "dist/cli.js"

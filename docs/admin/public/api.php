@@ -63,8 +63,8 @@ function wpdev_upsert_dotenv_file(string $path, array $updates): void
         @unlink($tmp);
         throw new RuntimeException('rename_failed');
     }
-    // Keep host CLI and admin API both able to write docker/.env (safe modes, not world-writable).
-    @chmod($path, 0664);
+    // Secrets: owner + www-data group only (host CLI + admin API). Not world-readable.
+    @chmod($path, 0660);
     $dir = dirname($path);
     if (is_dir($dir)) {
         @chmod($dir, 0775);
@@ -413,6 +413,86 @@ function wpdev_admin_api_log(string $message): void
 /**
  * @return array<string, mixed>
  */
+/**
+ * Theme used by theme-only sync (same defaults as CLI resolveTheme*).
+ * @return array{slug: string, name: string, path: string, source: string}
+ */
+function wpdev_resolve_sync_theme(string $configPath, string $wpRoot): array
+{
+    $slug = '';
+    $themePathRel = '';
+    $source = 'default';
+    if (is_file($configPath) && is_readable($configPath)) {
+        $cfg = json_decode((string) file_get_contents($configPath), true);
+        if (is_array($cfg) && isset($cfg['local']) && is_array($cfg['local'])) {
+            $local = $cfg['local'];
+            if (!empty($local['themeSlug']) && is_string($local['themeSlug'])) {
+                $slug = trim($local['themeSlug']);
+                $source = 'themeSlug';
+            }
+            if (!empty($local['themePath']) && is_string($local['themePath'])) {
+                $themePathRel = trim($local['themePath']);
+                if ($slug === '') {
+                    $source = 'themePath';
+                    $slug = basename(rtrim(str_replace('\\', '/', $themePathRel), '/'));
+                }
+            }
+        }
+    }
+    if ($slug === '') {
+        $slug = 'agency-starter';
+        $source = 'default';
+    }
+
+    $absCandidates = [];
+    if ($themePathRel !== '') {
+        // Config paths are repo-relative; in the container the theme usually lives under wpRoot.
+        $absCandidates[] = $wpRoot . '/' . ltrim(preg_replace('#^(\.\./)+#', '', str_replace('\\', '/', $themePathRel)), '/');
+        if (str_contains($themePathRel, 'wp-content/themes/')) {
+            $absCandidates[] = $wpRoot . '/wp-content/themes/' . basename(rtrim(str_replace('\\', '/', $themePathRel), '/'));
+        }
+    }
+    $absCandidates[] = $wpRoot . '/wp-content/themes/' . $slug;
+
+    $themeAbs = '';
+    foreach ($absCandidates as $cand) {
+        if (is_dir($cand)) {
+            $themeAbs = $cand;
+            break;
+        }
+    }
+    if ($themeAbs === '') {
+        $themeAbs = $wpRoot . '/wp-content/themes/' . $slug;
+    }
+
+    $name = $slug;
+    $style = is_file($themeAbs . '/style.css')
+        ? $themeAbs . '/style.css'
+        : (is_file($themeAbs . '/theme/style.css') ? $themeAbs . '/theme/style.css' : '');
+    if ($style !== '') {
+        $header = substr((string) file_get_contents($style), 0, 8192);
+        if (preg_match('/^\s*\*?\s*Theme Name:\s*(.+)$/mi', $header, $m)) {
+            $name = trim($m[1]);
+        }
+        if ($source !== 'themeSlug' && preg_match('/^\s*\*?\s*Text Domain:\s*(.+)$/mi', $header, $m2)) {
+            $fromStyle = strtolower(preg_replace('/[^a-z0-9-]/', '', str_replace(' ', '-', trim($m2[1]))));
+            if ($fromStyle !== '') {
+                $slug = $fromStyle;
+                if ($source === 'default') {
+                    $source = 'style.css';
+                }
+            }
+        }
+    }
+
+    return [
+        'slug' => $slug,
+        'name' => $name,
+        'path' => 'wp-content/themes/' . $slug,
+        'source' => $source,
+    ];
+}
+
 function wpdev_local_status(): array
 {
     global $configPath;
@@ -507,6 +587,8 @@ function wpdev_local_status(): array
         $writable['upgrade'] = is_writable($wpRoot . '/wp-content');
     }
 
+    $theme = wpdev_resolve_sync_theme($configPath, $wpRoot);
+
     return [
         'configPresent' => $configPresent,
         'configIsExample' => $configIsExample,
@@ -522,6 +604,7 @@ function wpdev_local_status(): array
         'writable' => $writable,
         'adminUrl' => '/admin/',
         'installUrl' => '/wp-admin/install.php',
+        'theme' => $theme,
     ];
 }
 
@@ -551,12 +634,11 @@ if ($method === 'POST' && $action === 'auth-bootstrap') {
         wpdev_admin_api_log('POST auth-bootstrap 403 not_local');
         exit;
     }
-    // Require loopback REMOTE_ADDR so Host-header spoofing alone cannot bootstrap.
-    $remoteAddr = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
-    $loopbackAddrs = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
-    if (!in_array($remoteAddr, $loopbackAddrs, true)) {
-        wpdev_json_error(403, 'forbidden', 'Auto unlock requires a loopback client address.');
-        wpdev_admin_api_log('POST auth-bootstrap 403 not_loopback_addr remote=' . $remoteAddr);
+    // Browser same-origin fetch only — blocks in-container PHP/curl (REMOTE_ADDR loopback
+    // alone is unsafe: Apache inside WordPress sees 127.0.0.1 for local RCE clients).
+    if (!wpdev_is_browser_fetch_request()) {
+        wpdev_json_error(403, 'forbidden', 'Auto unlock requires a same-origin browser request.');
+        wpdev_admin_api_log('POST auth-bootstrap 403 not_browser_fetch');
         exit;
     }
     $resolved = $token;
@@ -678,7 +760,7 @@ if ($method === 'GET' && $action === 'docker-env-public') {
 }
 
 if ($method === 'GET' && $action === 'staging-db-secrets') {
-    wpdev_require_admin_token_if_configured($token, 'staging-db-secrets');
+    wpdev_require_admin_token($token, 'GET staging-db-secrets');
     $out = [
         'ok' => true,
         'host' => wpdev_dotenv_value($dockerEnvPath, 'WPDEV_STAGING_DB_HOST'),
@@ -693,7 +775,7 @@ if ($method === 'GET' && $action === 'staging-db-secrets') {
 }
 
 if ($method === 'GET' && $action === 'terminal-runner-secrets') {
-    wpdev_require_admin_token_if_configured($token, 'terminal-runner-secrets');
+    wpdev_require_admin_token($token, 'GET terminal-runner-secrets');
     $auth = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_AUTH');
     $runnerToken = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_TOKEN');
     $runnerOrigin = wpdev_dotenv_value($dockerEnvPath, 'WPDEV_TERMINAL_RUNNER_ORIGIN');
@@ -716,8 +798,8 @@ if ($method === 'GET' && $action === 'terminal-runner-secrets') {
     echo json_encode(
         [
             'ok' => true,
+            // ttyd basic-auth for the embed iframe only (bound to 127.0.0.1). Runner token never leaves PHP.
             'terminalAuth' => $auth,
-            // Runner token stays server-side (PHP proxy). Do not send to the browser.
             'runnerToken' => null,
             'runnerOrigin' => null,
             'terminalPort' => $terminalPort,

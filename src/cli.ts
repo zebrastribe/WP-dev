@@ -62,7 +62,12 @@ async function runWithConfig(
   logInfo(`command ${label}`);
   try {
     await run(loaded);
-    logInfo(`command ${label} finished ok`);
+    // Commands that abort cleanly (e.g. refused confirm) set exitCode without throwing.
+    if (process.exitCode && process.exitCode !== 0) {
+      logInfo(`command ${label} finished exit=${process.exitCode}`);
+    } else {
+      logInfo(`command ${label} finished ok`);
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.stack || e.message : String(e);
     logError(msg);
@@ -210,7 +215,7 @@ async function main(): Promise<void> {
   php
     .command("validate")
     .description("Validate a PHP version (local Docker tags, or remote host strategy)")
-    .argument("<version>", "e.g. 7.4, 8.1, 8.2, 8.3, 8.4")
+    .argument("<version>", "e.g. 8.2, 8.3, 8.4, 8.5")
     .option("--env <name>", "local | staging | production", "local")
     .action(async (version: string, opts: { env?: string }) => {
       const env = parsePhpEnv(opts.env);
@@ -222,7 +227,7 @@ async function main(): Promise<void> {
   php
     .command("set")
     .description("Set PHP version (saves rollback snapshot first)")
-    .argument("<version>", "e.g. 7.4, 8.1, 8.2, 8.3, 8.4")
+    .argument("<version>", "e.g. 8.2, 8.3, 8.4, 8.5")
     .option("--env <name>", "local | staging | production", "local")
     .option("--restart", "Local only: down+up after changing docker/.env")
     .option("--yes", "Skip production confirmation")
@@ -424,7 +429,7 @@ async function main(): Promise<void> {
 
   program
     .command("quickstart")
-    .description("macOS/Linux friendly first run: check tools, start Docker, open setup wizard")
+    .description("First run helper (Linux, macOS, Windows/WSL2): check tools, start Docker, open setup wizard")
     .action(async () => {
       await runWithConfig("quickstart", cmdQuickstart);
     });
@@ -479,24 +484,31 @@ async function main(): Promise<void> {
         "After pull production, skip auto simply setup-staging-dns when staging is still a placeholder",
       )
       .option("--yes", "Skip interactive confirmation (used by admin runner / CI)")
+      .option(
+        "--confirm-host <host>",
+        "With --yes on staging: must equal staging.host from config",
+      )
       .action(
         async (opts: {
           dryRun?: boolean;
           backupLocal?: boolean;
           skipSimplyStagingDns?: boolean;
           yes?: boolean;
+          confirmHost?: string;
         }) => {
           const dry = Boolean(opts.dryRun);
           const backupLocal = Boolean(opts.backupLocal);
           const skipSimplyStagingDns = Boolean(opts.skipSimplyStagingDns);
           const yes = Boolean(opts.yes);
-          const label = `pull ${envName}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}${yes ? " --yes" : ""}`;
+          const confirmHost = opts.confirmHost?.trim();
+          const label = `pull ${envName}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}${yes ? " --yes" : ""}${confirmHost ? ` --confirm-host ${confirmHost}` : ""}`;
           await runWithConfig(label, (loaded) =>
             cmdPull(loaded, envName, {
               dryRun: dry,
               backupLocal,
               skipSimplyStagingDns,
               yes,
+              confirmHost,
             }),
           );
         },
@@ -513,14 +525,16 @@ async function main(): Promise<void> {
     .option("--dry-run", "Show rsync dry-run only")
     .option("--build", "Run theme build (npm run production) before rsync")
     .option("--skip-build-check", "Deploy even if style.css looks like a dev build")
-    .action(async (env: string, opts: { dryRun?: boolean; build?: boolean; skipBuildCheck?: boolean }) => {
+    .option("--yes", "Skip interactive confirmation (used by admin runner / CI)")
+    .action(async (env: string, opts: { dryRun?: boolean; build?: boolean; skipBuildCheck?: boolean; yes?: boolean }) => {
       const e = parseRemoteEnv(env);
       const dry = Boolean(opts.dryRun);
       const build = Boolean(opts.build);
       const skipBuildCheck = Boolean(opts.skipBuildCheck);
-      const label = `push theme ${e}${dry ? " --dry-run" : ""}${build ? " --build" : ""}${skipBuildCheck ? " --skip-build-check" : ""}`;
+      const yes = Boolean(opts.yes);
+      const label = `push theme ${e}${dry ? " --dry-run" : ""}${build ? " --build" : ""}${skipBuildCheck ? " --skip-build-check" : ""}${yes ? " --yes" : ""}`;
       await runWithConfig(label, (loaded) =>
-        cmdPushTheme(loaded, e, { dryRun: dry, build, skipBuildCheck }),
+        cmdPushTheme(loaded, e, { dryRun: dry, build, skipBuildCheck, yes }),
       );
     });
 
@@ -530,12 +544,17 @@ async function main(): Promise<void> {
       .description(`Push local database and files to ${envName} (full site — overwrites remote DB)`)
       .option("--dry-run", "Show rsync dry-run only; skip database steps")
       .option("--yes", "Skip interactive confirmation (used by admin runner / CI)")
-      .action(async (opts: { dryRun?: boolean; yes?: boolean }) => {
+      .option(
+        "--confirm-host <host>",
+        "With --yes on staging: must equal staging.host from config",
+      )
+      .action(async (opts: { dryRun?: boolean; yes?: boolean; confirmHost?: string }) => {
         const dry = Boolean(opts.dryRun);
         const yes = Boolean(opts.yes);
+        const confirmHost = opts.confirmHost?.trim();
         await runWithConfig(
-          `push ${envName}${dry ? " --dry-run" : ""}${yes ? " --yes" : ""}`,
-          (loaded) => cmdPush(loaded, envName, { dryRun: dry, yes }),
+          `push ${envName}${dry ? " --dry-run" : ""}${yes ? " --yes" : ""}${confirmHost ? ` --confirm-host ${confirmHost}` : ""}`,
+          (loaded) => cmdPush(loaded, envName, { dryRun: dry, yes, confirmHost }),
         );
       });
   }
@@ -561,13 +580,15 @@ async function main(): Promise<void> {
     .option("--dry-run", "Show rsync dry-run only")
     .option("--build", "Run theme build before rsync")
     .option("--skip-build-check", "Deploy even if style.css looks like a dev build")
-    .action(async (env: string, opts: { dryRun?: boolean; build?: boolean; skipBuildCheck?: boolean }) => {
+    .option("--yes", "Skip interactive confirmation (used by admin runner / CI)")
+    .action(async (env: string, opts: { dryRun?: boolean; build?: boolean; skipBuildCheck?: boolean; yes?: boolean }) => {
       const e = parseRemoteEnv(env);
       const dry = Boolean(opts.dryRun);
       const build = Boolean(opts.build);
       const skipBuildCheck = Boolean(opts.skipBuildCheck);
+      const yes = Boolean(opts.yes);
       await runWithConfig(`theme push ${e}`, (loaded) =>
-        cmdPushTheme(loaded, e, { dryRun: dry, build, skipBuildCheck }),
+        cmdPushTheme(loaded, e, { dryRun: dry, build, skipBuildCheck, yes }),
       );
     });
 
@@ -584,26 +605,48 @@ async function main(): Promise<void> {
 
   program
     .command("backup")
-    .description("Export database (or DB + wp-content with --files) to ~/.wp-dev/backups/<project>/<env>/")
+    .description(
+      "Export database, content (DB + wp-content), or complete install (DB + WordPress tree) to ~/.wp-dev/backups/<project>/<env>/",
+    )
     .argument("<env>", "local | staging | production")
-    .option("--files", "Include wp-content in a .tar.gz full backup")
-    .action(async (env: string, opts: { files?: boolean }) => {
+    .option("--files", "Content archive: DB + wp-content as .tar.gz")
+    .option(
+      "--complete",
+      "Complete install archive: DB + entire WordPress tree (excludes wp-config.php) for update rollback",
+    )
+    .action(async (env: string, opts: { files?: boolean; complete?: boolean }) => {
       const t = parseBackupTarget(env);
-      await runWithConfig(`backup ${t}${opts.files ? " --files" : ""}`, (loaded) =>
-        cmdBackup(loaded, t, { files: Boolean(opts.files) }),
+      if (opts.files && opts.complete) {
+        throw new Error("Use either --files or --complete, not both");
+      }
+      const flag = opts.complete ? " --complete" : opts.files ? " --files" : "";
+      await runWithConfig(`backup ${t}${flag}`, (loaded) =>
+        cmdBackup(loaded, t, {
+          files: Boolean(opts.files),
+          complete: Boolean(opts.complete),
+        }),
       );
     });
 
   program
     .command("restore")
-    .description("Import a SQL backup (overwrites DB on target)")
+    .description(
+      "Import a .sql or .tar.gz backup (DB, content, or complete install; overwrites target)",
+    )
     .argument("<env>", "local | staging | production")
-    .argument("<file>", "Path to .sql backup file")
+    .argument("<file>", "Path to .sql or .tar.gz backup under ~/.wp-dev/backups/<project>/<env>/")
     .option("--yes", "Skip interactive production confirmation prompt")
-    .action(async (env: string, file: string, opts: { yes?: boolean }) => {
+    .option(
+      "--confirm-host <host>",
+      "With --yes on staging: must equal staging.host from config",
+    )
+    .action(async (env: string, file: string, opts: { yes?: boolean; confirmHost?: string }) => {
       const t = parseRestoreTarget(env);
       await runWithConfig(`restore ${t}`, (loaded) =>
-        cmdRestore(loaded, t, file, { yes: Boolean(opts.yes) }),
+        cmdRestore(loaded, t, file, {
+          yes: Boolean(opts.yes),
+          confirmHost: opts.confirmHost?.trim(),
+        }),
       );
     });
 

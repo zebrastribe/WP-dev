@@ -4,13 +4,15 @@ WP-dev can switch PHP for **Dev (local Docker)** and, when the host supports it,
 
 ## Allowed versions
 
-`7.4`, `8.0`, `8.1`, `8.2`, `8.3`, `8.4`
+`7.4`, `8.0`, `8.1`, `8.2`, `8.3`, `8.4`, `8.5`
+
+This list is maintained in WP-dev (not editable in the UI). It tracks [PHP supported versions](https://www.php.net/supported-versions.php) plus older branches still useful for legacy sites, and only versions that have matching official Docker images (`wordpress:phpX.Y-apache` / `wordpress:cli-phpX.Y`). When a new PHP branch ships and Docker Hub publishes those tags, WP-dev adds it in a release — end users do not register versions themselves.
 
 ## Admin UI
 
-**Services** tab → **PHP versions**: show / apply / rollback for Dev, Staging, and Production (same CLI under the hood). Production asks for a confirm dialog in the browser; runners pass `--yes` so the CLI does not double-prompt.
+**Services** tab → **PHP versions**: Detect shows the running PHP version. A version dropdown + Apply appears **only** when WP-dev can change that environment (Local Docker always; Staging/Production only if `.php-version` or an htaccess PHP handler is already present and writable). Otherwise the UI says to use the hosting panel.
 
-Hosted cloud web UI is not built yet — localhost admin only for now.
+Production confirms in the browser; runners pass `--yes` so the CLI does not double-prompt.
 
 ## Local (Dev)
 
@@ -25,9 +27,9 @@ npm run wp-dev -- php rollback --env local --restart
 
 ## Staging / production
 
-1. `php show --env staging` reports the detected strategy (`dot_php_version`, `htaccess_addhandler`, or `unsupported`).
-2. If **unsupported**, change PHP in the hosting panel — automated set is refused.
-3. If supported:
+1. `php show --env staging` reports current PHP and strategy (`dot_php_version`, `htaccess_addhandler`, or `unsupported`).
+2. **unsupported** (typical on shared hosts with no selector files yet): change PHP in the hosting panel — automated set is refused. Writable web root alone is not enough.
+3. If supported (selector already present and writable):
 
 ```bash
 npm run wp-dev -- php set 8.2 --env staging

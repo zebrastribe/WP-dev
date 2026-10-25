@@ -13,13 +13,22 @@ describe("runner-remote-env.mjs", () => {
     expect(src).not.toContain('eval "$CFG"');
   });
 
-  it("terminal-runner uses validated remote env helper for full backup", () => {
+  it("terminal-runner backs up via CLI (disk preflight) and scopes lists to project", () => {
     const src = readFileSync(
       join(process.cwd(), "docker/terminal-runner.mjs"),
       "utf8",
     );
-    expect(src).toContain("runner-remote-env.mjs");
+    expect(src).toContain("npm run wp-dev -- backup");
+    expect(src).toContain("readProjectId");
     expect(src).not.toContain('eval "$CFG"');
+  });
+});
+
+describe("CLI logging", () => {
+  it("runWithConfig logs exit code when command aborts without throwing", () => {
+    const cli = readFileSync(join(process.cwd(), "src/cli.ts"), "utf8");
+    expect(cli).toContain("finished exit=${process.exitCode}");
+    expect(cli).toMatch(/process\.exitCode && process\.exitCode !== 0/);
   });
 });
 
@@ -30,14 +39,23 @@ describe("pull/push safety guards", () => {
     expect(pull).toContain("rolling back local DB");
     expect(pull).toContain("verifyLocalSiteUrls");
     expect(pull).toContain("confirmRemoteTarget");
-    expect(pull).toContain("!options.yes");
+    expect(pull).toContain("confirmHost");
     expect(wpcli).toContain("--precise");
+  });
+
+  it("pull and pull-theme re-own wordpress/ after rsync (container root bind-mount)", () => {
+    const pull = readFileSync(join(process.cwd(), "src/commands/pull.ts"), "utf8");
+    const theme = readFileSync(join(process.cwd(), "src/commands/pull-theme.ts"), "utf8");
+    expect(pull).toContain("cmdFixPermissions");
+    expect(pull).toMatch(/fix-permissions after rsync/);
+    expect(theme).toContain("cmdFixPermissions");
+    expect(theme).not.toMatch(/cmdFixRuntimeWritePermissions/);
   });
 
   it("push confirms staging and rolls back remote DB on failure", () => {
     const src = readFileSync(join(process.cwd(), "src/commands/push.ts"), "utf8");
     expect(src).toContain("confirmRemoteTarget");
-    expect(src).toContain("!options.yes");
+    expect(src).toContain("confirmHost");
     expect(src).toContain("rolling back remote DB");
     expect(src).toContain("verifyRemoteSiteUrls");
   });

@@ -34,6 +34,7 @@ export function UpdateTab() {
   const [restartStack, setRestartStack] = useState(true);
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
+  const [previewOk, setPreviewOk] = useState(false);
   const [preflight, setPreflight] = useState<UpdatePreflightJson["preflight"] | null>(null);
 
   const refreshPreflight = useCallback(async () => {
@@ -63,6 +64,21 @@ export function UpdateTab() {
         setOutput("Runner is not ready yet.");
         return;
       }
+      if (!dryRun) {
+        if (!previewOk) {
+          setOutput("Run Preview steps first (dry run must succeed), then Update.");
+          return;
+        }
+        if (restartStack) {
+          const ok = window.confirm(
+            "Restart local Docker after update? The admin page will disconnect until the stack is back up.",
+          );
+          if (!ok) return;
+        } else {
+          const ok = window.confirm("Apply update now? (wordpress/ site files are not replaced.)");
+          if (!ok) return;
+        }
+      }
       setBusy(true);
       setOutput(dryRun ? "Planning update…\n" : "Updating wp-dev…\n");
       try {
@@ -77,29 +93,39 @@ export function UpdateTab() {
         );
         if (!started.ok) {
           setOutput(`Runner error: ${started.error}`);
+          if (dryRun) setPreviewOk(false);
           return;
         }
-        for (let i = 0; i < 900; i += 1) {
+        for (let i = 0; i < 1800; i += 1) {
           const st = await getTerminalJobStatus(started.jobId, "sync");
           if (!st.ok) {
             setOutput(`Status error: ${st.error}`);
+            if (dryRun) setPreviewOk(false);
             return;
           }
           setOutput(st.output || "Running…");
           if (st.status === "done") {
             if (st.exitCode !== 0) {
               setOutput((prev) => `${prev}\n\nUpdate failed (exit ${st.exitCode ?? 1}).`);
+              if (dryRun) setPreviewOk(false);
+            } else if (dryRun) {
+              setPreviewOk(true);
+              setOutput((prev) => `${prev}\n\nPreview OK — you can run Update wp-dev now.`);
             }
             return;
           }
           await new Promise((r) => window.setTimeout(r, 1000));
         }
-        setOutput((prev) => `${prev}\n\nTimed out waiting for update.`);
+        setOutput(
+          (prev) =>
+            `${prev}\n\nTimed out after 30 minutes. The job may still be running on the host — check before starting another.`,
+        );
+        if (dryRun) setPreviewOk(false);
       } finally {
         setBusy(false);
       }
     },
-    [canRun, rebuildAdmin, restartStack],
+    [canRun, rebuildAdmin, restartStack, previewOk],
   );
 
   return (
@@ -175,7 +201,10 @@ export function UpdateTab() {
           <input
             type="checkbox"
             checked={rebuildAdmin}
-            onChange={(e) => setRebuildAdmin(e.target.checked)}
+            onChange={(e) => {
+              setRebuildAdmin(e.target.checked);
+              setPreviewOk(false);
+            }}
             disabled={busy}
           />
           Rebuild admin UI (<code className="text-xs">wordpress/admin/</code> only)
@@ -184,29 +213,38 @@ export function UpdateTab() {
           <input
             type="checkbox"
             checked={restartStack}
-            onChange={(e) => setRestartStack(e.target.checked)}
+            onChange={(e) => {
+              setRestartStack(e.target.checked);
+              setPreviewOk(false);
+            }}
             disabled={busy}
           />
           Restart Docker stack after update (<code className="text-xs">wp-dev down && up</code>)
         </label>
+        {previewOk ? (
+          <p className="text-xs text-emerald-700 dark:text-emerald-300">Preview succeeded — Update is unlocked.</p>
+        ) : (
+          <p className="text-xs text-slate-500">Preview steps first (same pattern as Sync).</p>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
           disabled={busy || !canRun}
-          onClick={() => void runUpdate(false)}
+          onClick={() => void runUpdate(true)}
           className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {busy ? "Updating…" : "Update wp-dev now"}
+          {busy ? "Working…" : "Preview steps"}
         </button>
         <button
           type="button"
-          disabled={busy || !canRun}
-          onClick={() => void runUpdate(true)}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm dark:border-slate-600"
+          disabled={busy || !canRun || !previewOk}
+          onClick={() => void runUpdate(false)}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-50 dark:border-slate-600"
+          title={!previewOk ? "Run Preview steps first" : undefined}
         >
-          Preview steps (dry run)
+          {busy ? "Updating…" : "Update wp-dev now"}
         </button>
       </div>
 
