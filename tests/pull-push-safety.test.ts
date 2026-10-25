@@ -31,10 +31,11 @@ describe("CLI logging", () => {
     expect(cli).toMatch(/process\.exitCode && process\.exitCode !== 0/);
   });
 
-  it("runWithConfig logs finished exit when command throws", () => {
+  it("runWithConfig logs finished exit when command throws without rethrowing", () => {
     const cli = readFileSync(join(process.cwd(), "src/cli.ts"), "utf8");
     expect(cli).toMatch(/logInfo\(`command \$\{label\} finished exit=\$\{code\}`\)/);
-    expect(cli).toContain("Thrown refusals/failures must match the exitCode abort contract");
+    expect(cli).toContain("Do not rethrow");
+    expect(cli).toContain("expectedRefuse");
   });
 });
 
