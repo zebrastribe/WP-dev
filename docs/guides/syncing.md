@@ -51,9 +51,11 @@ npm run wp-dev -- doctor production --rsync
 npm run wp-dev -- pull production --yes
 ```
 
-Use **`--yes`** for production (required in non-interactive / scripted runs). Large `uploads/` trees can take tens of minutes; rsync is incremental if a previous pull was interrupted.
+Use **`--yes`** for production (required in non-interactive / scripted runs). Large `uploads/` trees can take tens of minutes.
 
-If a pull crashes mid-way, retry the same command — WP-dev reclaims a sync lock when the previous process is dead. Prefer `local.composeProjectName` (e.g. `myproject-wpdev`) if Docker volumes collide with another stack using the same `project` id.
+**Slow links / shared hosting:** rsync uses SSH keepalives, keeps partial files (`--partial`), and **auto-retries** on connection drops (with backoff). Re-runs are incremental. If a pull still dies (process kill), run the same command again — WP-dev reclaims a sync lock when the previous PID is dead.
+
+Prefer `local.composeProjectName` (e.g. `myproject-wpdev`) if Docker volumes collide with another stack using the same `project` id.
 
 ## First pull checklist
 

@@ -34,6 +34,8 @@ describe("rsync-ssh-env helpers", () => {
     expect(env).toContain("-p 2222");
     expect(env).toContain(`-i '${keyPath}'`);
     expect(env).toContain("BatchMode=yes");
+    expect(env).toContain("ServerAliveInterval=30");
+    expect(env).toContain("TCPKeepAlive=yes");
 
     rmSync(keyPath, { force: true });
   });
@@ -104,6 +106,11 @@ describe("rsyncPull / rsyncPush", () => {
 
   beforeEach(() => {
     execaMock.mockReset();
+    process.env.WPDEV_RSYNC_RETRY_BASE_MS = "0";
+  });
+
+  afterEach(() => {
+    delete process.env.WPDEV_RSYNC_RETRY_BASE_MS;
   });
 
   it("rsyncPull succeeds on first attempt", async () => {
@@ -112,6 +119,23 @@ describe("rsyncPull / rsyncPush", () => {
     await rsyncPull(remote, "/tmp/wp", { dryRun: false });
     expect(execaMock).toHaveBeenCalledTimes(1);
     expect(execaMock.mock.calls[0][0]).toBe("rsync");
+    const args = execaMock.mock.calls[0][1] as string[];
+    expect(args).toContain("--partial");
+    expect(args).toContain("--timeout=300");
+  });
+
+  it("rsyncPull retries on connection reset then succeeds", async () => {
+    execaMock
+      .mockResolvedValueOnce({ exitCode: 255, stderr: "Connection reset by peer" })
+      .mockResolvedValueOnce({ exitCode: 0, stderr: "" });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const { rsyncPull } = await import("../src/services/rsync.js");
+    await rsyncPull(remote, "/tmp/wp", { dryRun: false });
+    expect(execaMock).toHaveBeenCalledTimes(2);
+    expect(stderrSpy.mock.calls.some((c) => String(c[0]).includes("connection dropped"))).toBe(
+      true,
+    );
+    stderrSpy.mockRestore();
   });
 
   it("rsyncPull retries with relative path on change_dir failure", async () => {

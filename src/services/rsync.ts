@@ -9,6 +9,10 @@ import {
   pushRsyncFailureHint,
   pushRsyncFailureHintAbsolutePath,
 } from "../utils/rsync-ssh-env.js";
+import {
+  runRsyncWithConnectionRetries,
+  type RsyncAttemptResult,
+} from "../utils/rsync-retry.js";
 
 export type RsyncOptions = {
   dryRun: boolean;
@@ -17,6 +21,57 @@ export type RsyncOptions = {
   remotePath?: string;
 };
 
+/** Shared flags: archive/compress, keep partial files for resume after drops. */
+const RSYNC_BASE_FLAGS = [
+  "-avz",
+  "--partial",
+  // Idle I/O timeout (seconds) — hung SSH dies so connection retries can resume.
+  "--timeout=300",
+] as const;
+
+function logRsyncRetry(info: {
+  attempt: number;
+  maxAttempts: number;
+  exitCode: number | null;
+  delayMs: number;
+}): void {
+  const next = info.attempt + 1;
+  const waitSec = Math.max(1, Math.round(info.delayMs / 1000));
+  process.stderr.write(
+    `\n[wp-dev] rsync connection dropped (exit ${info.exitCode ?? "?"}); ` +
+      `retry ${next}/${info.maxAttempts} in ${waitSec}s (incremental resume)…\n`,
+  );
+}
+
+async function execRsync(
+  args: string[],
+  options: { dryRun: boolean },
+): Promise<RsyncAttemptResult> {
+  const envBase = Number(process.env.WPDEV_RSYNC_RETRY_BASE_MS);
+  const result = await runRsyncWithConnectionRetries(
+    async () => {
+      const r = await execa("rsync", args, {
+        reject: false,
+        stdout: "inherit",
+        stderr: "pipe",
+      });
+      return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "" };
+    },
+    {
+      // Dry-run is short; still retry a couple of times for flaky SSH.
+      maxAttempts: options.dryRun ? 2 : 5,
+      baseDelayMs: Number.isFinite(envBase) && envBase >= 0 ? envBase : 2_000,
+      onRetry: logRsyncRetry,
+    },
+  );
+  if (result.stderr) process.stderr.write(result.stderr);
+  return result;
+}
+
+function buildExcludeArgs(excludes: string[]): string[] {
+  return excludes.flatMap((e) => ["--exclude", e]);
+}
+
 export async function rsyncPull(
   remote: RemoteEnvConfig,
   localDir: string,
@@ -24,11 +79,10 @@ export async function rsyncPull(
 ): Promise<void> {
   const runPull = async (targetPath: string) => {
     const excludes = options.excludes ?? [...SAFE_SYNC_EXCLUDES];
-    const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
     const remoteUrl = `${remote.user}@${remote.host}:${targetPath.replace(/\/$/, "")}/`;
     const args = [
-      "-avz",
-      ...excludeArgs,
+      ...RSYNC_BASE_FLAGS,
+      ...buildExcludeArgs(excludes),
       "--no-owner",
       "--no-group",
       "-e",
@@ -37,23 +91,17 @@ export async function rsyncPull(
       remoteUrl,
       localDir.replace(/\/$/, "") + "/",
     ];
-    return execa("rsync", args, {
-      reject: false,
-      stdout: "inherit",
-      stderr: "pipe",
-    });
+    return execRsync(args, { dryRun: options.dryRun });
   };
 
   const sourcePath = options.remotePath ?? remote.path;
   const first = await runPull(sourcePath);
-  if (first.stderr) process.stderr.write(first.stderr);
   if (first.exitCode === 0) return;
 
   const firstErr = first.stderr ?? "";
   if (canRetryPullWithRelativePath(sourcePath, firstErr)) {
     const relPath = sourcePath.replace(/^\/+/, "");
     const retry = await runPull(relPath);
-    if (retry.stderr) process.stderr.write(retry.stderr);
     if (retry.exitCode === 0) {
       process.stderr.write(
         `\n[wp-dev] pull retry succeeded using relative remote path "${relPath}" instead of "${sourcePath}".\n` +
@@ -76,11 +124,10 @@ export async function rsyncPushToPath(
 ): Promise<void> {
   const runPush = async (targetPath: string) => {
     const excludes = options.excludes ?? [...SAFE_SYNC_EXCLUDES];
-    const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
     const remoteUrl = `${remote.user}@${remote.host}:${targetPath.replace(/\/$/, "")}/`;
     const args = [
-      "-avz",
-      ...excludeArgs,
+      ...RSYNC_BASE_FLAGS,
+      ...buildExcludeArgs(excludes),
       "--no-owner",
       "--no-group",
       "-e",
@@ -89,22 +136,16 @@ export async function rsyncPushToPath(
       localDir.replace(/\/$/, "") + "/",
       remoteUrl,
     ];
-    return execa("rsync", args, {
-      reject: false,
-      stdout: "inherit",
-      stderr: "pipe",
-    });
+    return execRsync(args, { dryRun: options.dryRun });
   };
 
   const first = await runPush(remoteTargetPath);
-  if (first.stderr) process.stderr.write(first.stderr);
   if (first.exitCode === 0) return;
 
   const firstErr = first.stderr ?? "";
   if (canRetryPushWithRelativePath(remoteTargetPath, firstErr)) {
     const relPath = remoteTargetPath.replace(/^\/+/, "");
     const retry = await runPush(relPath);
-    if (retry.stderr) process.stderr.write(retry.stderr);
     if (retry.exitCode === 0) {
       process.stderr.write(
         `\n[wp-dev] rsync retry succeeded using relative remote path "${relPath}".\n`,
@@ -123,11 +164,10 @@ export async function rsyncPush(
 ): Promise<void> {
   const runPush = async (targetPath: string) => {
     const excludes = options.excludes ?? [...SAFE_SYNC_EXCLUDES];
-    const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
     const remoteUrl = `${remote.user}@${remote.host}:${targetPath.replace(/\/$/, "")}/`;
     const args = [
-      "-avz",
-      ...excludeArgs,
+      ...RSYNC_BASE_FLAGS,
+      ...buildExcludeArgs(excludes),
       "--no-owner",
       "--no-group",
       "-e",
@@ -136,23 +176,17 @@ export async function rsyncPush(
       localDir.replace(/\/$/, "") + "/",
       remoteUrl,
     ];
-    return execa("rsync", args, {
-      reject: false,
-      stdout: "inherit",
-      stderr: "pipe",
-    });
+    return execRsync(args, { dryRun: options.dryRun });
   };
 
   const destPath = options.remotePath ?? remote.path;
   const first = await runPush(destPath);
-  if (first.stderr) process.stderr.write(first.stderr);
   if (first.exitCode === 0) return;
 
   const firstErr = first.stderr ?? "";
   if (canRetryPushWithRelativePath(destPath, firstErr)) {
     const relPath = destPath.replace(/^\/+/, "");
     const retry = await runPush(relPath);
-    if (retry.stderr) process.stderr.write(retry.stderr);
     if (retry.exitCode === 0) {
       process.stderr.write(
         `\n[wp-dev] push retry succeeded using relative remote path "${relPath}" instead of "${destPath}".\n` +
@@ -182,11 +216,10 @@ export async function rsyncPullFromPath(
 ): Promise<void> {
   const runPull = async (sourcePath: string) => {
     const excludes = options.excludes ?? [...SAFE_SYNC_EXCLUDES];
-    const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
     const remoteUrl = `${remote.user}@${remote.host}:${sourcePath.replace(/\/$/, "")}/`;
     const args = [
-      "-avz",
-      ...excludeArgs,
+      ...RSYNC_BASE_FLAGS,
+      ...buildExcludeArgs(excludes),
       "--no-owner",
       "--no-group",
       "-e",
@@ -195,15 +228,10 @@ export async function rsyncPullFromPath(
       remoteUrl,
       localDir.replace(/\/$/, "") + "/",
     ];
-    return execa("rsync", args, {
-      reject: false,
-      stdout: "inherit",
-      stderr: "pipe",
-    });
+    return execRsync(args, { dryRun: options.dryRun });
   };
 
   const first = await runPull(remoteSourcePath);
-  if (first.stderr) process.stderr.write(first.stderr);
   if (first.exitCode === 0) return;
 
   const firstErr = first.stderr ?? "";
@@ -213,7 +241,6 @@ export async function rsyncPullFromPath(
   if (canRetryRelative) {
     const relPath = remoteSourcePath.replace(/^\/+/, "");
     const retry = await runPull(relPath);
-    if (retry.stderr) process.stderr.write(retry.stderr);
     if (retry.exitCode === 0) {
       process.stderr.write(
         `\n[wp-dev] pull retry succeeded using relative remote path "${relPath}".\n`,

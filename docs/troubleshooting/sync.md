@@ -30,7 +30,7 @@ npm run wp-dev -- doctor --local-http
 
 **Database:** WP-dev rolls back from pre-pull/pre-push backup when possible — path in CLI output.
 
-**Files:** Re-run after fixing error, or restore from `wp-dev backup --files`.
+**Files:** Connection drops are auto-retried (SSH keepalive + `--partial` + backoff). If the CLI still exits, re-run the same command — rsync resumes incrementally. Or restore from `wp-dev backup --files`.
 
 ---
 

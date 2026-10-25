@@ -19,7 +19,20 @@ export function buildSshRsyncEnv(remote: RemoteEnvConfig): string {
   assertSafeSshField("host", remote.host);
   assertSafeSshField("user", remote.user);
   assertSafeSshField("path", remote.path);
-  const parts = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"];
+  // Keepalive helps long transfers on shared hosting / flaky links (rsync uses this SSH).
+  const parts = [
+    "ssh",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "StrictHostKeyChecking=accept-new",
+    "-o",
+    "ServerAliveInterval=30",
+    "-o",
+    "ServerAliveCountMax=10",
+    "-o",
+    "TCPKeepAlive=yes",
+  ];
   if (remote.port != null) {
     parts.push("-p", String(remote.port));
   }
