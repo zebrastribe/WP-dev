@@ -1,6 +1,8 @@
 # Permissions and ownership
 
-**This is a core WP-dev contract.** Local WordPress must stay usable for:
+**LOCAL Docker only.** `fix-permissions` / post-pull reconcile run via `docker compose` on the bind-mounted `wordpress/` tree. They do **not** SSH into staging or production and do not change remote ownership. `push` uses rsync `--no-owner --no-group`, so remote hosts keep their existing owners.
+
+**This is a core WP-dev contract for localhost.** Local WordPress must stay usable for:
 
 1. Host `rsync` pull/push (your user)
 2. IDE theme editing (your user)

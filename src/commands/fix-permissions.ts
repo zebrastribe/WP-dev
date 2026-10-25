@@ -5,6 +5,13 @@ import { resolveHostIdentity } from "../utils/host-paths.js";
 import { logInfo } from "../utils/logger.js";
 import { posixShellQuote } from "../utils/shell-quote.js";
 
+/**
+ * LOCAL DOCKER ONLY.
+ * All chown/chmod here run via `docker compose … wordpress` on the bind-mounted
+ * `/var/www/html`. They must **never** run over SSH against staging/production.
+ * Push uses rsync `--no-owner --no-group` so remote ownership is preserved.
+ */
+
 export type FixPermissionsOptions = {
   /**
    * When true, skip the success message on stderr (used when pull runs this automatically).
@@ -136,7 +143,23 @@ export async function cmdFixHostOwnershipOnly(
       "fix-permissions needs a real host uid/gid (set WPDEV_HOST_UID/GID or run from the host).",
     );
   }
-  logInfo(`fix-permissions: chown /var/www/html (bind mount) to ${uid}:${gid} (host-only)`);
+  logInfo(
+    `fix-permissions: LOCAL only — chown /var/www/html (compose wordpress bind mount) to ${uid}:${gid}`,
+  );
+  await composeLocalWordpressChown(loaded, `${uid}:${gid}`);
+  if (!options.quiet) {
+    console.error(
+      "Updated ownership of local wordpress/ (Docker bind mount only — not staging/production). " +
+        "Run fix-runtime-permissions when Apache needs write access again.",
+    );
+  }
+}
+
+/** Compose-only chown of the local WordPress service bind mount — never SSH. */
+async function composeLocalWordpressChown(
+  loaded: LoadedConfig,
+  uidGid: string,
+): Promise<void> {
   await compose(loaded.configDir, loaded.config, [
     "run",
     "--rm",
@@ -147,15 +170,9 @@ export async function cmdFixHostOwnershipOnly(
     "chown",
     "wordpress",
     "-R",
-    `${uid}:${gid}`,
+    uidGid,
     "/var/www/html",
   ]);
-  if (!options.quiet) {
-    console.error(
-      "Updated ownership of wordpress/ for your host user (entire tree). " +
-        "Run fix-runtime-permissions (or full fix-permissions) when Apache needs write access again.",
-    );
-  }
 }
 
 /**
@@ -193,13 +210,28 @@ export async function cmdFixRuntimeWritePermissions(
     );
   }
   logInfo(
-    "fix-runtime-write-permissions: host:www-data on entire tree, then www-data on runtime paths",
+    "fix-runtime-write-permissions: LOCAL only — host:www-data on tree, then www-data on runtime paths",
   );
   // Shared tree FIRST (incl. wp-admin), then runtime override — required for core updates.
   const shell = [
     buildHostSharedWritePermissionsShell(uid),
     buildRuntimeWritePermissionsShell(),
   ].join(" && ");
+  await composeLocalWordpressShell(loaded, shell);
+  if (!options.quiet) {
+    console.error(
+      "Updated local WordPress write access (Docker only — not staging/production): " +
+        `entire tree host:www-data; runtime (${runtimeWritePathsLabel()}) www-data. ` +
+        "Core/theme/plugin updates should work without FTP.",
+    );
+  }
+}
+
+/** Compose-only shell as root in local wordpress — never SSH. */
+async function composeLocalWordpressShell(
+  loaded: LoadedConfig,
+  shell: string,
+): Promise<void> {
   await compose(
     loaded.configDir,
     loaded.config,
@@ -217,11 +249,4 @@ export async function cmdFixRuntimeWritePermissions(
     ],
     { stdio: "pipe" },
   );
-  if (!options.quiet) {
-    console.error(
-      "Updated WordPress write access (FS_METHOD=direct): " +
-        `entire tree host:www-data; runtime (${runtimeWritePathsLabel()}) www-data. ` +
-        "Core/theme/plugin updates should work without FTP.",
-    );
-  }
 }

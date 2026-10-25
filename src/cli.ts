@@ -399,7 +399,7 @@ async function main(): Promise<void> {
   program
     .command("fix-permissions")
     .description(
-      "Chown bind-mounted wordpress/ to your host uid:gid, then restore www-data on RUNTIME_WRITE_PATHS (plugins, uploads, upgrade, ai1wm-backups, …)",
+      "LOCAL Docker only: chown bind-mounted wordpress/ for host + www-data (never touches staging/production)",
     )
     .action(async () => {
       await runWithConfig("fix-permissions", cmdFixPermissions);
@@ -408,7 +408,7 @@ async function main(): Promise<void> {
   program
     .command("fix-runtime-permissions")
     .description(
-      "www-data on runtime paths + host:www-data shared write on themes (fixes FTP prompts / plugin+theme updates)",
+      "LOCAL Docker only: host:www-data tree + www-data runtime paths (never SSH / staging / production)",
     )
     .action(async () => {
       await runWithConfig("fix-runtime-permissions", cmdFixRuntimeWritePermissions);

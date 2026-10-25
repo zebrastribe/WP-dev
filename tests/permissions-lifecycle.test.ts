@@ -69,4 +69,25 @@ describe("WordPress permissions lifecycle (sync contract)", () => {
     expect(sharedIdx).toBeGreaterThan(-1);
     expect(runtimeIdx).toBeGreaterThan(-1);
   });
+
+  it("permission fixes never run on staging/production (compose wordpress only)", () => {
+    const fix = readFileSync(join(root, "src/commands/fix-permissions.ts"), "utf8");
+    const push = readFileSync(join(root, "src/commands/push.ts"), "utf8");
+    const pushTheme = readFileSync(join(root, "src/commands/push-theme.ts"), "utf8");
+    const restore = readFileSync(join(root, "src/commands/restore.ts"), "utf8");
+    expect(fix).toMatch(/LOCAL DOCKER ONLY|LOCAL only/);
+    expect(fix).toContain('"/var/www/html"');
+    expect(fix).toContain("composeLocalWordpress");
+    expect(fix).not.toMatch(/connectSsh|ssh\.exec/);
+    expect(push).not.toMatch(/reconcileAfterPull|cmdFixPermissions|cmdFixRuntimeWritePermissions|reconcileContainerRuntime/);
+    expect(pushTheme).not.toMatch(/reconcileAfterPull|cmdFixPermissions|cmdFixRuntimeWritePermissions/);
+    // Remote restore must not re-chown the live server tree.
+    const remoteFn = restore.slice(restore.indexOf("async function restoreRemoteArchive"));
+    expect(remoteFn).not.toContain("reconcileAfterPull");
+    expect(remoteFn).not.toMatch(/chown|chmod 2775/);
+    // Push must not rewrite remote UIDs from the local Docker tree.
+    const rsync = readFileSync(join(root, "src/services/rsync.ts"), "utf8");
+    expect(rsync).toContain("--no-owner");
+    expect(rsync).toContain("--no-group");
+  });
 });
