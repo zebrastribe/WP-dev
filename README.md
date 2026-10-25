@@ -2,38 +2,17 @@
 
 **WordPress on your computer** (Docker) plus **pull / push** to staging or production over SSH.
 
-WP-dev does **not** host your live servers — it syncs with servers you already have.
+WP-dev does **not** host your live servers — it syncs with hosts you already control.
 
-This repository is the **public localhost tool** (CLI + optional `/admin/` UI). Hosted multi-tenant work (if any) is out of this repo — you do not need it for local work. See [docs/developer/project-structure.md](docs/developer/project-structure.md).
-
----
-
-## Features
-
-- Local WordPress in Docker (MySQL + Apache)
-- **Pull / push** database and files via SSH and rsync
-- Optional browser UI at `/admin/` — **Backup · Setup · Sync** (Advanced for power tools)
-- **Theme-only** day-to-day sync (default); full-site after Preview
-- **DB backups** before destructive sync when WordPress is already installed
-- Staging sync/restore requires **host confirm** (`--confirm-host`); production stays gated
-- Restore paths limited to `~/.wp-dev/backups/<project>/<env>/` (symlinks that escape are refused)
-- Full backups exclude build junk (`node_modules`, `.git`)
-- Bind mounts and `.env` / backup ownership follow the **installing host user** (`WPDEV_HOST_UID`), not a fixed username
-- Service + filesystem managers (ports, health, permissions on up/pull)
-- **Linux**, **macOS**, and **Windows** (via [WSL2](https://learn.microsoft.com/windows/wsl/) + Docker Desktop)
+This repo is the **localhost CLI** (+ optional `/admin/` UI). Hosted / multi-tenant work is out of scope here — see [project structure](docs/developer/project-structure.md).
 
 ---
 
 ## Requirements
 
-- [ ] **Node.js 20+**
-- [ ] **Docker** with Compose v2 (`docker compose version`)
-- [ ] **Git**
-- [ ] For sync: server with **SSH**, **rsync**, and **WP-CLI**
-
-**Platforms:** Linux, macOS (Intel and Apple Silicon), and Windows through **WSL2** (run wp-dev inside the Linux distro — not native `cmd`/`PowerShell`). Keep the project on a Linux filesystem (`~/…` in WSL), not `/mnt/c/…`.
-
-On Mac or Windows, install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and enable WSL2 integration on Windows.
+- **Node.js 20+**, **Docker** Compose v2, **Git**
+- For sync: remote **SSH**, **rsync**, **WP-CLI**
+- **Linux**, **macOS**, or **Windows via WSL2** (run inside Linux, project on `~/…` not `/mnt/c/…`)
 
 ---
 
@@ -42,188 +21,91 @@ On Mac or Windows, install [Docker Desktop](https://www.docker.com/products/dock
 ```bash
 git clone https://github.com/zebrastribe/WP-dev.git
 cd WP-dev
-npm run setup
-```
-
-**macOS (fastest first run):**
-
-```bash
-git clone https://github.com/zebrastribe/WP-dev.git
-cd WP-dev
-npm run quickstart
-```
-
-Verify:
-
-```bash
+npm run setup          # or: npm run quickstart  (macOS)
 npm run check
 ```
 
-→ [Full installation guide](docs/getting-started/installation.md)
+→ [Installation](docs/getting-started/installation.md)
 
 ---
 
-## Update
-
-Update the **tool** — your site in `wordpress/` is kept:
-
-```bash
-npm run wp-dev -- update
-```
-
-Or use **Advanced → Update** in `/admin/`.
-
-→ [Update guide](docs/getting-started/update.md)
-
----
-
-## Configure SSH
-
-WP-dev uses **SSH keys**, not passwords.
-
-**1. Create a key (once per computer):**
-
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
-```
-
-**macOS — remember after reboot:**
-
-```bash
-ssh-add --apple-use-keychain ~/.ssh/id_ed25519
-```
-
-**2. Upload the public key** to your host (control panel or `authorized_keys`):
-
-```bash
-cat ~/.ssh/id_ed25519.pub
-```
-
-**3. Test:**
-
-```bash
-ssh user@your-ssh-host.example.com
-```
-
-**4. Add to WP-dev** — **Setup** in `/admin/` or:
-
-```bash
-npm run wp-dev -- init
-```
-
-→ [SSH setup guide](docs/getting-started/ssh.md)
-
----
-
-## Create your first project
-
-**1. Start WordPress locally:**
+## First run
 
 ```bash
 npm run wp-dev -- up
 ```
 
-**2. Open the browser admin:**
+- Site: `http://localhost:8888`
+- Admin UI: `http://localhost:8888/admin/` — **Backup · Setup · Sync**  
+  Unlock with `WPDEV_ADMIN_SAVE_TOKEN` from `docker/.env` if asked.
 
-```
-http://localhost:8888/admin/
-```
-
-Use **Setup** to save SSH/config, then **Sync** or **Backup** as needed. Unlock with the token in `docker/.env` → `WPDEV_ADMIN_SAVE_TOKEN` if prompted.
-
-**3. Open your site:**
-
-```
-http://localhost:8888
-```
-
-Finish the WordPress installer, or continue to step 4 to copy a live site.
-
-**4. (Optional) Pull an existing site:**
+Configure SSH (keys, not passwords), then pull if you have a live site:
 
 ```bash
+ssh user@your-host          # pin the host key once
+npm run wp-dev -- init      # or use Setup in /admin/
 npm run wp-dev -- doctor production
 npm run wp-dev -- pull production
 ```
 
-→ [First project guide](docs/getting-started/first-project.md)
+→ [First project](docs/getting-started/first-project.md) · [SSH](docs/getting-started/ssh.md)
 
 ---
 
-## Browser admin (optional)
+## Important (read once)
 
-| Tab | Purpose |
-|-----|---------|
-| **Backup** | Snapshot Dev / Staging / Production; restore on the same page |
-| **Setup** | Live SSH + optional staging (or Simply), save config, verify |
-| **Sync** | Theme-only (default) or full-site after Preview → Start |
-| **Advanced** | Restore points, PHP versions, services, terminal, update, docs |
+| Rule | Why |
+|------|-----|
+| Keep `/admin/` and runner ports on **localhost** | Never publish them on the public internet |
+| Prefer **theme-only** Sync for day-to-day | Full-site replaces files **and** database; no one-click Dev→Production |
+| Leave **permissions** to WP-dev | Pull / restore / `up` reconcile ownership automatically — avoid `chmod 777` |
+| Pin SSH hosts with OpenSSH first | Unknown hosts are refused unless you connect once (or lab-only insecure flag) |
 
-Header badges: **Dev** = stack online/offline; **Staging / Production** = host saved in config (not “safe to push”).
+Details: [permissions](docs/guides/permissions.md) · [syncing](docs/guides/syncing.md) · [browser admin](docs/guides/browser-admin.md)
 
-→ [Browser admin guide](docs/guides/browser-admin.md)
+---
+
+## Update
+
+```bash
+npm run wp-dev -- update
+```
+
+Updates the **tool** only (`wordpress/` site files stay). After a major update, run `up` again so Docker picks up compose/mount changes.
+
+→ [Update guide](docs/getting-started/update.md)
 
 ---
 
 ## Common commands
 
-Run from the repo root:
-
 ```bash
 npm run wp-dev -- <command>
 ```
 
-| Command | What it does |
-|---------|----------------|
-| `up` | Start local WordPress |
-| `down` | Stop local stack |
-| `status` | Health check and recent backups |
-| `init` | Set up config in the terminal |
-| `pull production` | Download site from production |
-| `pull staging` | Download site from staging |
-| `push staging` | Upload site to staging |
-| `push theme staging --build` | Deploy theme only (safer day-to-day) |
-| `doctor` | Test SSH and WordPress connections |
-| `doctor --filesystem` | Check permissions and paths |
+| Command | |
+|---------|--|
+| `up` / `down` / `status` | Local stack |
+| `pull production` / `pull staging` | Download site |
+| `push staging` | Upload full site |
+| `push theme staging --build` | Theme only (safer) |
+| `doctor` / `doctor --filesystem` | SSH / permissions checks |
+| `backup local` / `restore local <file>` | Backups under `~/.wp-dev/backups/…` |
 | `update` | Update WP-dev from git |
-| `backup local` | Save database backup |
-| `backup local --files` | Content archive (DB + wp-content; excludes `node_modules`) |
-| `backup local --complete` | Complete install archive (DB + WordPress tree; excludes `wp-config.php`) for update rollback |
-| `restore local <file>` | Restore a backup under `~/.wp-dev/backups/<project>/local/` |
-| `services` | Show ports and service health |
-| `logs` | Show recent log lines |
-| `--help` | Full command list |
-
-**Port conflicts:**
-
-```bash
-npm run wp-dev -- up --relocate-ports
-npm run wp-dev -- up --reclaim-ports
-```
+| `--help` | Full list |
 
 → [Command reference](docs/reference/commands.md)
 
 ---
 
-## Where to learn more
+## Docs
 
-| Topic | Documentation |
-|-------|----------------|
-| **All documentation** | [docs/README.md](docs/README.md) |
-| Sync pull and push | [guides/syncing.md](docs/guides/syncing.md) |
-| Theme deploy | [guides/theme-deploy.md](docs/guides/theme-deploy.md) |
-| Backups and restore | [guides/backups.md](docs/guides/backups.md) |
-| Browser admin | [guides/browser-admin.md](docs/guides/browser-admin.md) |
-| Permissions | [guides/permissions.md](docs/guides/permissions.md) |
-| Ports | [guides/ports.md](docs/guides/ports.md) |
-| Shared hosting | [guides/shared-hosting.md](docs/guides/shared-hosting.md) |
-| Troubleshooting | [troubleshooting/](docs/troubleshooting/index.md) |
-| FAQ | [reference/faq.md](docs/reference/faq.md) |
-| Configuration | [reference/configuration.md](docs/reference/configuration.md) |
-| Environment variables | [reference/environment-variables.md](docs/reference/environment-variables.md) |
-| Contribute | [developer/contributing.md](docs/developer/contributing.md) |
-| Repo layout (public vs private cloud) | [developer/project-structure.md](docs/developer/project-structure.md) |
-| Optional import / content recovery | [content-recovery-workspace/README.md](content-recovery-workspace/README.md) |
+| | |
+|--|--|
+| Index | [docs/README.md](docs/README.md) |
+| Sync · theme · backups | [syncing](docs/guides/syncing.md) · [theme deploy](docs/guides/theme-deploy.md) · [backups](docs/guides/backups.md) |
+| Permissions · ports · shared hosting | [permissions](docs/guides/permissions.md) · [ports](docs/guides/ports.md) · [shared hosting](docs/guides/shared-hosting.md) |
+| Troubleshooting · FAQ · config | [troubleshooting](docs/troubleshooting/index.md) · [FAQ](docs/reference/faq.md) · [configuration](docs/reference/configuration.md) |
 
 ---
 
