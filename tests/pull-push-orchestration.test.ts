@@ -7,15 +7,31 @@ import type { LoadedConfig } from "../src/config/load.js";
 
 const rsyncPullMock = vi.fn();
 const rsyncPushMock = vi.fn();
+const connectSshMock = vi.fn();
 
 vi.mock("../src/services/rsync.js", () => ({
   rsyncPull: (...args: unknown[]) => rsyncPullMock(...args),
   rsyncPush: (...args: unknown[]) => rsyncPushMock(...args),
 }));
 
+vi.mock("../src/services/ssh.js", () => ({
+  connectSsh: (...args: unknown[]) => connectSshMock(...args),
+}));
+
 vi.mock("../src/utils/host-prereq.js", () => ({
   assertHostSyncTools: vi.fn(),
 }));
+
+function mockSafeSshSession() {
+  return {
+    exec: vi.fn().mockResolvedValue({
+      code: 0,
+      stdout: "WPDEV_PATH_SAFETY has_wp=1 child_wp=0 markers=",
+      stderr: "",
+    }),
+    dispose: vi.fn(),
+  };
+}
 
 function makeLoaded(configDir: string, config = minimalWpDevConfig()): LoadedConfig {
   mkdirSync(join(configDir, "docker"), { recursive: true });
@@ -30,6 +46,7 @@ describe("cmdPull orchestration", () => {
   beforeEach(() => {
     rsyncPullMock.mockReset();
     rsyncPullMock.mockResolvedValue(undefined);
+    connectSshMock.mockReset().mockResolvedValue(mockSafeSshSession());
     loaded = makeLoaded(mkdtempSync(join(tmpdir(), "wp-dev-pull-")));
   });
 
@@ -55,6 +72,7 @@ describe("cmdPush orchestration", () => {
   beforeEach(() => {
     rsyncPushMock.mockReset();
     rsyncPushMock.mockResolvedValue(undefined);
+    connectSshMock.mockReset().mockResolvedValue(mockSafeSshSession());
     loaded = makeLoaded(mkdtempSync(join(tmpdir(), "wp-dev-push-")));
   });
 

@@ -57,7 +57,14 @@ describe("cmdPushTheme build-before-dry-run", () => {
       installed: true,
       path: "/var/www/staging",
     });
-    connectSshMock.mockReset().mockResolvedValue({ dispose: vi.fn() });
+    connectSshMock.mockReset().mockResolvedValue({
+      exec: vi.fn().mockResolvedValue({
+        code: 0,
+        stdout: "WPDEV_PATH_SAFETY has_wp=1 child_wp=0 markers=",
+        stderr: "",
+      }),
+      dispose: vi.fn(),
+    });
     loaded = makeLoaded(mkdtempSync(join(tmpdir(), "wp-dev-theme-")));
   });
 
