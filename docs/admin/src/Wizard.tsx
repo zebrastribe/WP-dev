@@ -123,6 +123,12 @@ type Remote = {
     password: string;
     prefix?: string;
   };
+  /** Staging browser HTTP basic auth (Apache .htaccess). */
+  httpAuth?: {
+    enabled: boolean;
+    username: string;
+    password: string;
+  };
 };
 
 export type WizardData = {
@@ -142,6 +148,36 @@ export type WizardData = {
 
 function emptyRemote(): Remote {
   return { host: "", user: "", path: "", url: "" };
+}
+
+function generateHttpAuthPassword(): string {
+  const bytes = new Uint8Array(18);
+  crypto.getRandomValues(bytes);
+  let s = "";
+  for (const b of bytes) s += b.toString(16).padStart(2, "0");
+  return s;
+}
+
+function defaultHttpAuth(): NonNullable<Remote["httpAuth"]> {
+  return { enabled: true, username: "staging", password: generateHttpAuthPassword() };
+}
+
+function parseHttpAuthFromConfig(staging: Remote | undefined): Remote["httpAuth"] | undefined {
+  const raw = staging?.httpAuth;
+  if (!raw || typeof raw !== "object") return undefined;
+  const username = String(raw.username ?? "").trim();
+  const password = String(raw.password ?? "");
+  if (!username || !password) return undefined;
+  return {
+    enabled: raw.enabled !== false,
+    username,
+    password,
+  };
+}
+
+function maskHttpAuthPassword(password: string): string {
+  if (password.length <= 4) return "••••";
+  return `${"•".repeat(Math.min(12, password.length - 4))}${password.slice(-4)}`;
 }
 
 function defaults(): WizardData {
@@ -179,12 +215,27 @@ function toJson(
   data: WizardData,
   existing: Record<string, unknown> | null = null,
 ): Record<string, unknown> {
-  const normalizeRemote = (r: Remote): Remote => {
+  const normalizeRemote = (r: Remote, opts?: { keepHttpAuth?: boolean }): Remote => {
     // Keep DB secrets out of wp-dev.config.json; they are stored in local docker/.env.
-    return {
+    // staging.httpAuth stays in config (needed to re-apply / show credentials).
+    const out: Remote = {
       ...r,
       db: undefined,
     };
+    if (!opts?.keepHttpAuth) {
+      delete out.httpAuth;
+    } else if (out.httpAuth) {
+      if (!out.httpAuth.password?.trim()) {
+        out.httpAuth = {
+          ...out.httpAuth,
+          password: generateHttpAuthPassword(),
+        };
+      }
+      if (!out.httpAuth.username?.trim()) {
+        out.httpAuth = { ...out.httpAuth, username: "staging" };
+      }
+    }
+    return out;
   };
   // Preserve on-disk local keys the form does not edit (themePath, themeSlug, …).
   const prevLocal =
@@ -202,7 +253,7 @@ function toJson(
   const o: Record<string, unknown> = existing ? { ...existing } : {};
   o.project = data.project.trim();
   o.local = local;
-  o.staging = normalizeRemote(data.staging);
+  o.staging = normalizeRemote(data.staging, { keepHttpAuth: true });
   o.production = normalizeRemote(data.production);
   if (data.simply?.account?.trim()) {
     o.simply = { account: data.simply.account.trim().toUpperCase() };
@@ -259,6 +310,7 @@ export function Wizard() {
   /** Full on-disk config so Wizard save does not drop unknown keys (e.g. sync.*). */
   const [existingConfig, setExistingConfig] = useState<Record<string, unknown> | null>(null);
   const [hasStagingServer, setHasStagingServer] = useState(false);
+  const [httpAuthPasswordVisible, setHttpAuthPasswordVisible] = useState(false);
   const [useProviderIntegration, setUseProviderIntegration] = useState(false);
   const [terminalAuthDraft, setTerminalAuthDraft] = useState("");
   const [terminalWorkdir, setTerminalWorkdir] = useState("/workspace");
@@ -373,6 +425,7 @@ export function Wizard() {
                   : undefined,
               identityFile: String((loaded.staging as Remote)?.identityFile ?? ""),
               db: parseStagingDbFromConfig(loaded.staging as Remote),
+              httpAuth: parseHttpAuthFromConfig(loaded.staging as Remote),
             },
             production: {
               host: String((loaded.production as Remote)?.host ?? ""),
@@ -478,9 +531,12 @@ export function Wizard() {
   useEffect(() => {
     const t = window.setTimeout(() => {
       try {
-        // Never persist DB passwords or other secrets in the draft.
+        // Never persist DB / HTTP-auth passwords in the draft.
         const draft = structuredClone(data) as typeof data;
         if (draft.staging?.db) draft.staging.db = { ...draft.staging.db, password: "" };
+        if (draft.staging?.httpAuth) {
+          draft.staging.httpAuth = { ...draft.staging.httpAuth, password: "" };
+        }
         if (draft.production?.db) {
           draft.production.db = { ...draft.production.db, password: "" };
         }
@@ -785,7 +841,15 @@ export function Wizard() {
         }
       }
       const staging = hasStagingServer
-        ? data.staging
+        ? {
+            ...data.staging,
+            httpAuth:
+              data.staging.httpAuth?.enabled === false
+                ? { ...(data.staging.httpAuth ?? defaultHttpAuth()), enabled: false }
+                : data.staging.httpAuth?.username && data.staging.httpAuth.password
+                  ? { ...data.staging.httpAuth, enabled: true }
+                  : defaultHttpAuth(),
+          }
         : { ...STAGING_PLACEHOLDER, user: production.user || data.staging.user || "deploy" };
       const payload = toJson({ ...data, staging, production }, existingConfig);
       const res = await saveWpDevConfig(payload);
@@ -1453,6 +1517,17 @@ export function Wizard() {
                 const v = e.target.checked;
                 logAdmin("info", `Wizard: staging server toggle → ${v ? "real" : "placeholder"}`);
                 setHasStagingServer(v);
+                if (v) {
+                  setData((d) => ({
+                    ...d,
+                    staging: {
+                      ...d.staging,
+                      httpAuth: d.staging.httpAuth?.username
+                        ? { ...d.staging.httpAuth, enabled: d.staging.httpAuth.enabled !== false }
+                        : defaultHttpAuth(),
+                    },
+                  }));
+                }
               }}
               className="rounded border-slate-300"
             />
@@ -1470,6 +1545,124 @@ export function Wizard() {
                   />
                 </label>
               ))}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
+                <label className="flex items-start gap-2 text-sm text-slate-800 dark:text-slate-100">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 rounded border-slate-300"
+                    checked={data.staging.httpAuth?.enabled !== false}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      setData((d) => ({
+                        ...d,
+                        staging: {
+                          ...d.staging,
+                          httpAuth: {
+                            ...(d.staging.httpAuth ?? defaultHttpAuth()),
+                            enabled,
+                          },
+                        },
+                      }));
+                    }}
+                  />
+                  <span>
+                    <span className="font-semibold">Protect staging with HTTP user/password</span>
+                    <span className="mt-0.5 block text-xs font-normal text-slate-600 dark:text-slate-400">
+                      Recommended. Visitors must sign in before seeing the site (Apache{" "}
+                      <code className="text-[11px]">.htaccess</code>). SSH sync does not use this password.
+                    </span>
+                  </span>
+                </label>
+                {data.staging.httpAuth?.enabled !== false && (
+                  <div className="mt-3 space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                        Username
+                      </span>
+                      <input
+                        className={input}
+                        value={data.staging.httpAuth?.username ?? "staging"}
+                        onChange={(e) =>
+                          setData((d) => ({
+                            ...d,
+                            staging: {
+                              ...d.staging,
+                              httpAuth: {
+                                ...(d.staging.httpAuth ?? defaultHttpAuth()),
+                                username: e.target.value,
+                              },
+                            },
+                          }))
+                        }
+                      />
+                    </label>
+                    <div>
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                        Password
+                      </span>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <code className="rounded bg-white px-2 py-1 text-xs dark:bg-slate-800">
+                          {httpAuthPasswordVisible
+                            ? data.staging.httpAuth?.password ?? ""
+                            : maskHttpAuthPassword(data.staging.httpAuth?.password ?? "")}
+                        </code>
+                        <button
+                          type="button"
+                          className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium dark:border-slate-600 dark:bg-slate-800"
+                          onClick={() => setHttpAuthPasswordVisible((v) => !v)}
+                        >
+                          {httpAuthPasswordVisible ? "Hide" : "Reveal"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium dark:border-slate-600 dark:bg-slate-800"
+                          onClick={() => {
+                            const pw = data.staging.httpAuth?.password ?? "";
+                            void navigator.clipboard?.writeText(pw);
+                          }}
+                        >
+                          Copy
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium dark:border-slate-600 dark:bg-slate-800"
+                          onClick={() =>
+                            setData((d) => ({
+                              ...d,
+                              staging: {
+                                ...d.staging,
+                                httpAuth: {
+                                  ...(d.staging.httpAuth ?? defaultHttpAuth()),
+                                  password: generateHttpAuthPassword(),
+                                },
+                              },
+                            }))
+                          }
+                        >
+                          Regenerate
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      After Save, apply on the server:{" "}
+                      <code className="text-[11px]">npm run wp-dev -- staging-http-auth enable</code>
+                    </p>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                      onClick={() =>
+                        void runTerminalCommand(
+                          "npm run wp-dev -- staging-http-auth enable",
+                          "plain",
+                          "wpdev_staging_http_auth_enable",
+                        )
+                      }
+                    >
+                      Apply HTTP auth on staging
+                    </button>
+                  </div>
+                )}
+              </div>
               {terminalPanel}
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
                 <p className="font-semibold text-slate-800 dark:text-slate-100">Test staging SSH access</p>

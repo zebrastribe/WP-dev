@@ -18,6 +18,17 @@ const remoteEnvSchema = z.object({
   db: remoteDbSchema.optional(),
 });
 
+/** Apache/nginx-panel HTTP basic auth for the staging site (browser gate). Staging only. */
+const stagingHttpAuthSchema = z.object({
+  enabled: z.boolean(),
+  username: z.string().min(1),
+  password: z.string().min(1),
+});
+
+const stagingEnvSchema = remoteEnvSchema.extend({
+  httpAuth: stagingHttpAuthSchema.optional(),
+});
+
 /** Optional [Simply.com REST API](https://www.simply.com/en/docs/api/) — use for DNS/hosting automation; API key via `WPDEV_SIMPLY_API_KEY`. */
 const simplySchema = z.object({
   account: z
@@ -81,7 +92,7 @@ export const wpDevConfigSchema = z.object({
   /** Used for backup paths and (unless overridden) Docker Compose project isolation. */
   project: z.string().min(1),
   local: localSchema,
-  staging: remoteEnvSchema,
+  staging: stagingEnvSchema,
   production: remoteEnvSchema,
   simply: simplySchema.optional(),
   sync: syncSchema,
@@ -91,6 +102,8 @@ export const wpDevConfigSchema = z.object({
 export type WpDevConfig = z.infer<typeof wpDevConfigSchema>;
 export type RemoteEnvName = "staging" | "production";
 export type RemoteEnvConfig = z.infer<typeof remoteEnvSchema>;
+export type StagingEnvConfig = z.infer<typeof stagingEnvSchema>;
+export type StagingHttpAuth = z.infer<typeof stagingHttpAuthSchema>;
 
 export function getRemoteEnv(
   config: WpDevConfig,

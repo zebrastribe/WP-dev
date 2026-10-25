@@ -18,6 +18,7 @@ export const SAFE_SYNC_EXCLUDES = [
   "wp-content/cache",
   "wp-content/uploads/cache",
   ".DS_Store",
+  ".htpasswd",
 ] as const;
 
 /** On by default for push; user can disable via sync.disabledRecommended. */
@@ -27,6 +28,7 @@ export const RECOMMENDED_PUSH_EXCLUDES: Readonly<
   "node-modules": { pattern: "**/node_modules", label: "node_modules (theme/build)" },
   "debug-log": { pattern: "wp-content/debug.log", label: "Debug log" },
   "upgrade-temp": { pattern: "wp-content/upgrade", label: "Upgrade temp folder" },
+  "htpasswd": { pattern: ".htpasswd", label: "HTTP auth password file (staging)" },
 };
 
 /** Common dev-only plugins — offered as toggles when installed locally. */

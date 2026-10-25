@@ -109,6 +109,28 @@
                 "password"
               ],
               "additionalProperties": false
+            },
+            "httpAuth": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "username": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "password": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "enabled",
+                "username",
+                "password"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [

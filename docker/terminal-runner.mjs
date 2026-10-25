@@ -194,6 +194,12 @@ function commandForAction(action, args) {
     if (env === "local" && safeArg(args?.restart) === "1") flags.push("--restart");
     return `npm run wp-dev -- php set ${version} ${flags.join(" ")}`;
   }
+  if (action === "wpdev_staging_http_auth_enable") {
+    return "npm run wp-dev -- staging-http-auth enable";
+  }
+  if (action === "wpdev_staging_http_auth_disable") {
+    return "npm run wp-dev -- staging-http-auth disable";
+  }
   if (action === "wpdev_php_rollback") {
     const env = safeArg(args?.env) || "local";
     if (!["local", "staging", "production"].includes(env)) return null;

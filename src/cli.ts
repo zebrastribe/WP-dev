@@ -15,6 +15,7 @@ import { cmdStatus } from "./commands/status.js";
 import { cmdValidate } from "./commands/validate.js";
 import { cmdQuickstart } from "./commands/quickstart.js";
 import { cmdSimplySetupStagingDns, cmdSimplyTest } from "./commands/simply.js";
+import { cmdStagingHttpAuth } from "./commands/staging-http-auth.js";
 import {
   cmdFixPermissions,
   cmdFixRuntimeWritePermissions,
@@ -198,6 +199,48 @@ async function main(): Promise<void> {
     .description("Disable localhost HTTPS and switch local.url back to HTTP")
     .action(async () => {
       await runWithConfig("ssl disable", cmdSslDisable);
+    });
+
+  const stagingHttpAuth = program
+    .command("staging-http-auth")
+    .description(
+      "Protect staging URL with Apache HTTP basic auth (.htaccess + .htpasswd); credentials in staging.httpAuth",
+    );
+
+  stagingHttpAuth
+    .command("enable")
+    .description("Generate/save credentials if needed and apply HTTP auth on the staging host")
+    .action(async () => {
+      await runWithConfig("staging-http-auth enable", (loaded) =>
+        cmdStagingHttpAuth(loaded, "enable"),
+      );
+    });
+
+  stagingHttpAuth
+    .command("apply")
+    .description("Re-apply existing staging.httpAuth credentials to the staging host")
+    .action(async () => {
+      await runWithConfig("staging-http-auth apply", (loaded) =>
+        cmdStagingHttpAuth(loaded, "apply"),
+      );
+    });
+
+  stagingHttpAuth
+    .command("disable")
+    .description("Remove WP-dev HTTP auth block and .htpasswd from staging")
+    .action(async () => {
+      await runWithConfig("staging-http-auth disable", (loaded) =>
+        cmdStagingHttpAuth(loaded, "disable"),
+      );
+    });
+
+  stagingHttpAuth
+    .command("show")
+    .description("Show staging HTTP auth username and masked password")
+    .action(async () => {
+      await runWithConfig("staging-http-auth show", (loaded) =>
+        cmdStagingHttpAuth(loaded, "show"),
+      );
     });
 
   const php = program

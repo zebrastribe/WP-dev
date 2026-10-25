@@ -751,6 +751,8 @@ export type TerminalAction =
   | "wpdev_php_show"
   | "wpdev_php_set"
   | "wpdev_php_rollback"
+  | "wpdev_staging_http_auth_enable"
+  | "wpdev_staging_http_auth_disable"
   | "backup_create"
   | "backup_list"
   | "restore_env"

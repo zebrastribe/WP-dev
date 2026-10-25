@@ -15,7 +15,12 @@ export const EXAMPLE_WP_DEV_CONFIG = {
     "host": "staging.example.invalid",
     "user": "deploy",
     "path": "/var/www/staging-not-used",
-    "url": "https://staging.example.invalid"
+    "url": "https://staging.example.invalid",
+    "httpAuth": {
+      "enabled": true,
+      "username": "staging",
+      "password": "change-me-on-real-staging"
+    }
   },
   "production": {
     "host": "example.com",
