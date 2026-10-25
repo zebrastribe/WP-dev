@@ -24,6 +24,7 @@ export { detectPlatform, assertUnixOwnershipSupport } from "./platform/detect.js
 export {
   reconcileSharedConfig,
   reconcileHostEditable,
+  reconcileHostWritableForRsync,
   reconcileContainerRuntime,
   reconcileAllProfiles,
   reconcileAfterPull,

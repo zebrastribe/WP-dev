@@ -18,6 +18,18 @@ Shared hosts often differ from VPS layouts. `wp-dev init` guesses may not match 
 3. `wp-dev doctor production --rsync` before first pull.
 4. See [Syncing — first pull checklist](../guides/syncing.md#first-pull-checklist).
 
+## SSH keys on Simply.com / UnoEuro (authorized_keys)
+
+Many shared hosts enable SSH only after you install a public key yourself:
+
+1. Generate a key locally: `ssh-keygen -t ed25519 -f ~/.ssh/site_ed25519 -N ""`
+2. Create `~/.ssh` on the account (via FTP/file manager if needed) and upload `authorized_keys` containing your **public** key line.
+3. Permissions on the host: `.ssh` → `700`, `authorized_keys` → `600` (owner = FTP/SSH user).
+4. Set `production.identityFile` (and staging if used) in `wp-dev.config.json` to that private key path.
+5. `npm run wp-dev -- doctor production` then `doctor production --rsync`.
+
+Password-only FTP accounts often cannot use key SSH until this file exists.
+
 ## One site per `path` (important)
 
 `staging.path` / `production.path` must be **this site’s** WordPress root — the folder that contains `wp-config.php`.
@@ -34,6 +46,20 @@ Safety nets:
 - **Setup** → **Verify path** checks SSH + `wp-config.php` at the configured path (and refuses WP-dev tooling in the docroot).
 - **`wp-dev doctor`** fails on multi-site parents or wp-dev-in-docroot.
 - **pull / push / backup / restore / theme sync** refuse unsafe remote paths before touching files.
+
+## Staging HTTP password (recommended)
+
+Protect the staging URL with Apache HTTP basic auth so visitors cannot browse unfinished work:
+
+1. In **Setup** → staging, leave **Protect staging with HTTP user/password** on (default).
+2. **Save** config (credentials are stored in `staging.httpAuth`).
+3. Run **Apply HTTP auth on staging** (or `npm run wp-dev -- staging-http-auth enable`).
+
+Username is shown in Setup; password is masked with Reveal/Copy. SSH pull/push do **not** use this password.
+
+Disable later with `npm run wp-dev -- staging-http-auth disable`.
+
+Hosts that ignore `.htaccess` Auth* directives need panel “directory protection” instead — WP-dev cannot force that.
 
 ## Simply.com DNS API (optional)
 

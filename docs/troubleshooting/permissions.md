@@ -1,19 +1,20 @@
 # Permission troubleshooting
 
-## mkstemp Permission denied on pull
+## mkstemp / rsync permission denied on pull
 
-**Symptoms:** `pull` fails writing under `wordpress/`.
+**Symptoms:** `pull` fails writing under `wordpress/` (often `uploads/` or `plugins/`); rsync exit 23.
 
-**Cause:** Docker owns files as www-data; rsync runs as your user.
+**Cause:** Runtime paths owned by www-data while host-side rsync runs as your user. Pull should chown the tree to the host user **before** rsync, then restore www-data on runtime paths after.
 
 **Fix:**
 
 ```bash
 npm run wp-dev -- up
 npm run wp-dev -- doctor --filesystem
+npm run wp-dev -- fix-permissions
 ```
 
-**Verify:** `pull production --dry-run` succeeds.
+**Verify:** `npm run wp-dev -- pull production --yes --dry-run` succeeds (then a real pull without `--dry-run`).
 
 ---
 

@@ -44,13 +44,24 @@ npm run wp-dev -- pull theme production
 
 See [Theme deploy](./theme-deploy.md).
 
+## First production pull (large sites)
+
+```bash
+npm run wp-dev -- doctor production --rsync
+npm run wp-dev -- pull production --yes
+```
+
+Use **`--yes`** for production (required in non-interactive / scripted runs). Large `uploads/` trees can take tens of minutes; rsync is incremental if a previous pull was interrupted.
+
+If a pull crashes mid-way, retry the same command — WP-dev reclaims a sync lock when the previous process is dead. Prefer `local.composeProjectName` (e.g. `myproject-wpdev`) if Docker volumes collide with another stack using the same `project` id.
+
 ## First pull checklist
 
 1. `npm run setup` and `wp-dev init` with real SSH host, user, path, and `production.url`.
 2. `npm run wp-dev -- doctor` (add `--rsync` for pull dry-run).
 3. `npm run wp-dev -- up`, open `local.url`.
 4. If pull fails with **Permission denied** under `wordpress/`, run `wp-dev up` again (auto-reconciles) or `wp-dev doctor --filesystem`.
-5. `npm run wp-dev -- pull production` (or `pull staging`).
+5. `npm run wp-dev -- pull production --yes` (or `pull staging` with `--confirm-host=<staging.host>` when non-interactive).
 6. If warned about **table prefix**, set `WORDPRESS_TABLE_PREFIX` in `docker/.env`, then `down` and `up`.
 
 ## URL search-replace

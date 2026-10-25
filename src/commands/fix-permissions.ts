@@ -56,13 +56,13 @@ export function buildRuntimeWritePermissionsShell(
 }
 
 /**
- * chown bind-mounted wordpress/ to the host user so host rsync can write after Docker
- * created files as www-data, then restore www-data ownership on runtime-only paths.
+ * chown bind-mounted wordpress/ to the host user only (no www-data runtime paths).
+ * Use before host-side rsync so uploads/plugins are writable by the host user.
  *
  * Uses `--entrypoint chown` so the WordPress image entrypoint does not reset ownership
  * to www-data before our command runs. Uses `--no-deps` so MySQL does not need to be up.
  */
-export async function cmdFixPermissions(
+export async function cmdFixHostOwnershipOnly(
   loaded: LoadedConfig,
   options: FixPermissionsOptions = {},
 ): Promise<void> {
@@ -74,7 +74,7 @@ export async function cmdFixPermissions(
       "fix-permissions needs a real host uid/gid (set WPDEV_HOST_UID/GID or run from the host).",
     );
   }
-  logInfo(`fix-permissions: chown /var/www/html (bind mount) to ${uid}:${gid}`);
+  logInfo(`fix-permissions: chown /var/www/html (bind mount) to ${uid}:${gid} (host-only)`);
   await compose(loaded.configDir, loaded.config, [
     "run",
     "--rm",
@@ -88,6 +88,23 @@ export async function cmdFixPermissions(
     `${uid}:${gid}`,
     "/var/www/html",
   ]);
+  if (!options.quiet) {
+    console.error(
+      "Updated ownership of wordpress/ for your host user (entire tree). " +
+        "Run fix-runtime-permissions (or full fix-permissions) when Apache needs to write uploads/plugins again.",
+    );
+  }
+}
+
+/**
+ * Host-own the tree, then restore www-data on runtime paths (uploads, plugins, …).
+ * Do **not** call this immediately before host rsync — use `cmdFixHostOwnershipOnly` first.
+ */
+export async function cmdFixPermissions(
+  loaded: LoadedConfig,
+  options: FixPermissionsOptions = {},
+): Promise<void> {
+  await cmdFixHostOwnershipOnly(loaded, { quiet: true });
   await cmdFixRuntimeWritePermissions(loaded, { quiet: true });
   if (!options.quiet) {
     console.error(

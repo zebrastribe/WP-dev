@@ -50,6 +50,8 @@ export async function cmdPullTheme(
 
     const source = remoteThemePath(remoteWp.path, slug);
     logInfo(`pull theme ${env}: rsync ${source} → ${deployDir}`);
+    // Dispose control SSH before host rsync (idle node-ssh must not crash mid-transfer).
+    ssh.dispose();
 
     await rsyncPullFromPath(remote, source, deployDir, {
       dryRun: options.dryRun,

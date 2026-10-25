@@ -37,7 +37,7 @@ npm run wp-dev -- down --remove-orphans
 ## Sync
 
 ```bash
-npm run wp-dev -- pull production
+npm run wp-dev -- pull production --yes
 npm run wp-dev -- pull staging --dry-run
 npm run wp-dev -- push staging
 npm run wp-dev -- sync-preview pull production

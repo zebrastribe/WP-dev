@@ -22,7 +22,7 @@ Main config file: **`wp-dev.config.json`** at the repo root (gitignored). Copy f
 | `composeFile` | Compose file name (usually `docker-compose.yml`) |
 | `composeService` | WP-CLI service name (usually `wpcli`) |
 | `wpRoot` | Relative path to WordPress files (usually `./wordpress`) |
-| `composeProjectName` | Optional override for Compose `-p` |
+| `composeProjectName` | Optional override for Compose `-p`. Defaults to top-level `project` (also used for locks/backups under `~/.wp-dev`). Set e.g. `myproject-wpdev` if that name collides with another Docker/MariaDB stack. |
 | `themePath` | Optional theme source for `theme build` |
 | `themeSlug` | Optional theme slug for deploy |
 

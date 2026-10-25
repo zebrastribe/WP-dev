@@ -269,6 +269,9 @@ async function checkOneRemote(
       }
       if (rsyncDryRun) {
         const localWp = resolveFromConfigDir(loaded.configDir, loaded.config.local.wpRoot);
+        // Dispose control SSH before host rsync (same pattern as pull) so an idle
+        // node-ssh socket cannot crash the process during a long dry-run.
+        ssh.dispose();
         console.error("rsync: running pull --dry-run (no files written)…");
         await rsyncPull(remote, localWp, { dryRun: true, remotePath: wpPath });
         console.error("rsync: OK (dry-run completed)");

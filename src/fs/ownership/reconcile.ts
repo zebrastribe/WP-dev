@@ -2,6 +2,7 @@ import type { LoadedConfig } from "../../config/load.js";
 import { compose } from "../../services/docker-compose.js";
 import { resolveHostIdentity } from "../../utils/host-paths.js";
 import {
+  cmdFixHostOwnershipOnly,
   cmdFixPermissions,
   cmdFixRuntimeWritePermissions,
 } from "../../commands/fix-permissions.js";
@@ -87,11 +88,20 @@ export async function reconcileSharedConfig(loaded: LoadedConfig): Promise<void>
   });
 }
 
+/**
+ * Entire wordpress/ tree owned by the host user — safe for host-side rsync/CLI edits.
+ * Does **not** apply www-data runtime ownership (that blocks host rsync into uploads/plugins).
+ */
 export async function reconcileHostEditable(loaded: LoadedConfig): Promise<void> {
-  await cmdFixPermissions(loaded, { quiet: true });
+  await cmdFixHostOwnershipOnly(loaded, { quiet: true });
   fsAuditLog(loaded.configDir, loaded.config.project, "fs.reconcile", {
     profile: "HOST_EDITABLE",
   });
+}
+
+/** Alias: host-writable before rsync (same as reconcileHostEditable). */
+export async function reconcileHostWritableForRsync(loaded: LoadedConfig): Promise<void> {
+  await reconcileHostEditable(loaded);
 }
 
 export async function reconcileContainerRuntime(loaded: LoadedConfig): Promise<void> {
@@ -116,8 +126,8 @@ export async function reconcileAllProfiles(loaded: LoadedConfig): Promise<void> 
 }
 
 export async function reconcileAfterPull(loaded: LoadedConfig): Promise<void> {
-  await reconcileHostEditable(loaded);
-  await reconcileContainerRuntime(loaded);
+  // Full host own + runtime www-data + shared config (post-sync).
+  await cmdFixPermissions(loaded, { quiet: true });
   await reconcileSharedConfig(loaded);
 }
 

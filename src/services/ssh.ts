@@ -2,8 +2,12 @@ import { NodeSSH } from "node-ssh";
 import { statSync } from "node:fs";
 import type { RemoteEnvConfig } from "../config/schema.js";
 import { buildSshConnectAttempts } from "../utils/ssh-helpers.js";
+import { logInfo } from "../utils/logger.js";
 
 const SSH_READY_TIMEOUT_MS = 20_000;
+/** Keep the control channel alive during short gaps; still dispose before long rsync. */
+const SSH_KEEPALIVE_INTERVAL_MS = 15_000;
+const SSH_KEEPALIVE_COUNT_MAX = 12;
 
 export type SshSession = {
   exec(
@@ -22,7 +26,12 @@ export async function connectSsh(remote: RemoteEnvConfig): Promise<SshSession> {
   const errors: string[] = [];
   for (const a of attempts) {
     try {
-      await ssh.connect({ ...a.opts, readyTimeout: SSH_READY_TIMEOUT_MS });
+      await ssh.connect({
+        ...a.opts,
+        readyTimeout: SSH_READY_TIMEOUT_MS,
+        keepaliveInterval: SSH_KEEPALIVE_INTERVAL_MS,
+        keepaliveCountMax: SSH_KEEPALIVE_COUNT_MAX,
+      });
       errors.length = 0;
       break;
     } catch (e) {
@@ -36,6 +45,13 @@ export async function connectSsh(remote: RemoteEnvConfig): Promise<SshSession> {
     );
   }
 
+  // Late resets must not take down the whole CLI (e.g. after we intended to dispose).
+  const raw = ssh.connection as { on?: (event: string, fn: (err: Error) => void) => void } | undefined;
+  raw?.on?.("error", (err: Error) => {
+    logInfo(`ssh: connection error (non-fatal): ${err.message}`);
+  });
+
+  let disposed = false;
   return {
     async exec(command, options) {
       const result = await ssh.execCommand(command, {
@@ -63,7 +79,14 @@ export async function connectSsh(remote: RemoteEnvConfig): Promise<SshSession> {
       return ssh.putFile(localPath, remotePath);
     },
     dispose() {
-      ssh.dispose();
+      if (disposed) return;
+      disposed = true;
+      try {
+        ssh.dispose();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logInfo(`ssh: dispose ignored error: ${msg}`);
+      }
     },
   };
 }

@@ -86,6 +86,8 @@ export async function cmdPushTheme(
 
     const target = remoteThemePath(remoteWp.path, slug);
     logInfo(`push theme ${env}: rsync ${deployDir} → ${target}`);
+    // Dispose control SSH before host rsync (idle node-ssh must not crash mid-transfer).
+    ssh.dispose();
 
     await rsyncPushToPath(remote, deployDir, target, {
       dryRun: options.dryRun,

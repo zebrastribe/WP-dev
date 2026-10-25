@@ -13,7 +13,21 @@ describe("fix-permissions runtime paths", () => {
   it("cmdFixPermissions uses resolveHostIdentity (not raw userInfo) for container pulls", () => {
     const src = readFileSync(join(process.cwd(), "src/commands/fix-permissions.ts"), "utf8");
     expect(src).toContain("resolveHostIdentity");
+    expect(src).toContain("cmdFixHostOwnershipOnly");
     expect(src).not.toMatch(/from "node:os".*userInfo|userInfo\(\)/s);
+  });
+
+  it("reconcileHostEditable is host-only (no runtime www-data before rsync)", () => {
+    const src = readFileSync(join(process.cwd(), "src/fs/ownership/reconcile.ts"), "utf8");
+    expect(src).toMatch(
+      /export async function reconcileHostEditable[\s\S]*?cmdFixHostOwnershipOnly/,
+    );
+    expect(src).toContain("reconcileHostWritableForRsync");
+    // Must not call full cmdFixPermissions (which applies www-data) inside HostEditable.
+    const fn = src.slice(src.indexOf("export async function reconcileHostEditable"));
+    const body = fn.slice(0, fn.indexOf("export async function reconcileContainerRuntime"));
+    expect(body).not.toContain("cmdFixPermissions");
+    expect(body).not.toContain("cmdFixRuntimeWritePermissions");
   });
 
   it("lists runtime write paths without themes", () => {

@@ -24,6 +24,12 @@ export async function confirmRemoteTarget(
   // Non-interactive (admin runner / CI): production needs --yes; staging needs matching --confirm-host.
   if (!process.stdin.isTTY || opts.yes) {
     if (env === "production") {
+      if (!opts.yes) {
+        console.error(
+          `Production ${action} refused: re-run with --yes to confirm ` +
+            `(e.g. npm run wp-dev -- ${action} production --yes).`,
+        );
+      }
       return Boolean(opts.yes);
     }
     const provided = (opts.confirmHost ?? "").trim();

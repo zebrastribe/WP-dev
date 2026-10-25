@@ -45,7 +45,7 @@ Create a key, upload the `.pub` file to your host, add host/user/path to config.
 
 ```bash
 npm run wp-dev -- init
-npm run wp-dev -- pull production
+npm run wp-dev -- pull production --yes
 ```
 
 See [Syncing](../guides/syncing.md).

@@ -21,10 +21,21 @@ function lockPath(projectId: string): string {
 
 export type SyncLockHandle = { path: string; fd: number };
 
+/** True if the process that wrote the lock is still running. */
+export function isLockPidAlive(pid: number | undefined): boolean {
+  if (pid == null || !Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Exclusive lock for pull/push/restore so UI + CLI cannot race the same project.
  * Keyed by config.project (not configDir) so host CLI and container runners share one lock.
- * Uses O_EXCL; stale locks older than 2h are removed.
+ * Uses O_EXCL; reclaim if lock is older than 2h **or** the lock PID is dead.
  */
 export function acquireSyncLock(projectId: string, op: string): SyncLockHandle {
   const path = lockPath(projectId);
@@ -41,7 +52,9 @@ export function acquireSyncLock(projectId: string, op: string): SyncLockHandle {
           const raw = readFileSync(path, "utf8");
           const parsed = JSON.parse(raw) as { at?: string; op?: string; pid?: number };
           const at = parsed.at ? Date.parse(parsed.at) : 0;
-          if (at && Date.now() - at > STALE_MS) {
+          const staleByAge = Boolean(at && Date.now() - at > STALE_MS);
+          const staleByPid = !isLockPidAlive(parsed.pid);
+          if (staleByAge || staleByPid) {
             unlinkSync(path);
             continue;
           }

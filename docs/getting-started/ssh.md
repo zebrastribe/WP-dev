@@ -31,7 +31,7 @@ cat ~/.ssh/id_ed25519.pub
 ```
 
 - **VPS:** add to `~/.ssh/authorized_keys` for your deploy user.
-- **Shared hosting:** paste into the control panel (SSH / SFTP / SSH keys section).
+- **Shared hosting:** paste into the control panel (SSH / SFTP / SSH keys section). On Simply.com / UnoEuro, you may need to upload `authorized_keys` via FTP — see [Shared hosting](../guides/shared-hosting.md#ssh-keys-on-simplycom--unoeuro-authorized_keys).
 
 Never upload the private key (the file **without** `.pub`).
 

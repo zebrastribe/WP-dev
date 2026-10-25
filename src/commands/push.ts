@@ -150,9 +150,10 @@ export async function cmdPush(
   }
 
   logInfo(`push ${env}: connect ssh ${remote.user}@${remote.host}`);
-  const ssh = await connectSsh(remote);
+  let ssh = await connectSsh(remote);
   let prePushBackup = "";
   let bootstrappedFreshRemote = false;
+  let wpPath = remote.path;
   try {
     assertLocalFreeSpace(tmpdir(), DISK_NEED.dbBackupLocal, `push ${env}`);
     await assertRemoteFreeSpace(ssh, "/tmp", DISK_NEED.dbBackupRemoteTmp, `push ${env}`);
@@ -166,11 +167,13 @@ export async function cmdPush(
     }
     if (shouldBootstrapStaging) {
       logInfo(`push ${env}: remote WP not installed yet — bootstrap files only`);
+      ssh.dispose();
       await rsyncPush(remote, localWpRoot, {
         dryRun: false,
         excludes: pushExcludePatterns(configDir, config, localWpRoot),
         remotePath: remote.path,
       });
+      ssh = await connectSsh(remote);
       await purgeRemoteWpDevAdmin(ssh, remote.path);
       if (!remote.db) {
         console.error(
@@ -193,7 +196,7 @@ export async function cmdPush(
       bootstrappedFreshRemote = true;
       logInfo(`push ${env}: bootstrap config created at ${bootPath}; proceeding with DB import`);
     }
-    const wpPath = remoteWp.path ?? remote.path;
+    wpPath = remoteWp.path ?? remote.path;
     if (wpPath !== remote.path) {
       logInfo(`push ${env}: using remote wp path ${wpPath} (configured: ${remote.path})`);
     }
@@ -212,6 +215,9 @@ export async function cmdPush(
       logInfo(`push ${env}: bootstrap mode — skipping pre-push remote DB backup`);
     }
 
+    // Release control SSH before long rsync (separate OpenSSH process).
+    ssh.dispose();
+
     logInfo(`push ${env}: rsync files -> remote (${wpPath})`);
     try {
       await rsyncPush(remote, localWpRoot, {
@@ -219,6 +225,7 @@ export async function cmdPush(
         excludes: pushExcludePatterns(configDir, config, localWpRoot),
         remotePath: wpPath,
       });
+      ssh = await connectSsh(remote);
       await purgeRemoteWpDevAdmin(ssh, wpPath);
 
       const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-push-"));
