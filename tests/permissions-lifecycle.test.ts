@@ -81,10 +81,16 @@ describe("WordPress permissions lifecycle (sync contract)", () => {
     expect(fix).not.toMatch(/connectSsh|ssh\.exec/);
     expect(push).not.toMatch(/reconcileAfterPull|cmdFixPermissions|cmdFixRuntimeWritePermissions|reconcileContainerRuntime/);
     expect(pushTheme).not.toMatch(/reconcileAfterPull|cmdFixPermissions|cmdFixRuntimeWritePermissions/);
-    // Remote restore must not re-chown the live server tree.
-    const remoteFn = restore.slice(restore.indexOf("async function restoreRemoteArchive"));
+    // Remote restore must not re-apply local Docker permission reconcile on the live server.
+    const remoteStart = restore.indexOf("async function restoreRemoteArchive");
+    const remoteEnd = restore.indexOf("export async function cmdRestore");
+    const remoteFn = restore.slice(remoteStart, remoteEnd === -1 ? undefined : remoteEnd);
+    expect(remoteFn).toContain("connectSsh");
     expect(remoteFn).not.toContain("reconcileAfterPull");
-    expect(remoteFn).not.toMatch(/chown|chmod 2775/);
+    expect(remoteFn).not.toContain("cmdFixPermissions");
+    expect(remoteFn).not.toContain("cmdFixRuntimeWritePermissions");
+    expect(remoteFn).not.toContain("chmod 2775");
+    expect(remoteFn).not.toContain("/var/www/html");
     // Push must not rewrite remote UIDs from the local Docker tree.
     const rsync = readFileSync(join(root, "src/services/rsync.ts"), "utf8");
     expect(rsync).toContain("--no-owner");
