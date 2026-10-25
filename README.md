@@ -4,7 +4,7 @@
 
 WP-dev does **not** host your live servers — it syncs with servers you already have.
 
-This repository is the **public localhost tool** (CLI + optional `/admin/` UI). A future private cloud control plane (if used) is a separate repo — you do not need it for local work. See [docs/developer/project-structure.md](docs/developer/project-structure.md).
+This repository is the **public localhost tool** (CLI + optional `/admin/` UI). Hosted multi-tenant work (if any) is out of this repo — you do not need it for local work. See [docs/developer/project-structure.md](docs/developer/project-structure.md).
 
 ---
 

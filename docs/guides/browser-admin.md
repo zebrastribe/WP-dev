@@ -4,7 +4,7 @@ The optional browser UI lives at **`http://localhost:<WP_PORT>/admin/`** — sam
 
 CLI remains fully usable without this UI (`wp-dev pull|push|backup|doctor|…`).
 
-**Localhost only.** Do not expose `/admin/`, Docker runners, or the terminal on the public internet. Hosted control plane lives in the private [WP-dev-cloud](https://github.com/zebrastribe/WP-dev-cloud) plan.
+**Localhost only.** Do not expose `/admin/`, Docker runners, or the terminal on the public internet.
 
 ## Open admin
 

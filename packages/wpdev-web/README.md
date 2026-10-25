@@ -3,7 +3,7 @@
 Shared WP-dev web UI for:
 
 - **Public localhost** — `docs/admin/` (thin Vite shell + `LocalAdapter` / `@wpdev/web-host`)
-- **Private hosted** — future `control-web` in [WP-dev-cloud](https://github.com/zebrastribe/WP-dev-cloud) with a `CloudAdapter`
+- **Private hosted** — future cloud shell uses a `CloudAdapter` (separate private repo; not in this tree)
 
 ## Primary IA (binding)
 
