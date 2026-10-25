@@ -158,16 +158,18 @@ export function SyncPage() {
         }
       }
       logAdmin("info", "SyncPage: theme", label);
-      const result = await adapter.runJob(
-        action,
-        {
-          env: themeEnv,
-          // Build on preview too so Start ships the same tree.
-          ...(themeDirection === "push" && buildTheme ? { build: "1" } : {}),
-        },
-        label,
-        "sync",
-      );
+      const themeArgs: Record<string, string> = {
+        env: themeEnv,
+        // Build on preview too so Start ships the same tree.
+        ...(themeDirection === "push" && buildTheme ? { build: "1" } : {}),
+      };
+      if (!dryRun && themeDirection === "push" && themeEnv === "production") {
+        themeArgs.confirm = "SYNC_PRODUCTION";
+      }
+      if (!dryRun && themeDirection === "push" && themeEnv === "staging") {
+        themeArgs.confirm = remoteMeta.staging.host || "staging";
+      }
+      const result = await adapter.runJob(action, themeArgs, label, "sync");
       if (dryRun) setPreviewKey(result.ok ? keyAtStart : null);
       return;
     }

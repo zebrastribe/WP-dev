@@ -3,7 +3,12 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { safeArg, wpdevPullPushCommand, restoreEnvConfirmOk } from "./runner-sync-gates.mjs";
+import {
+  safeArg,
+  wpdevPullPushCommand,
+  wpdevPushThemeCommand,
+  restoreEnvConfirmOk,
+} from "./runner-sync-gates.mjs";
 
 const PORT = Number(process.env.WPDEV_TERMINAL_RUNNER_PORT || 7682);
 const AUTH = process.env.WPDEV_TERMINAL_AUTH || "wpdev:wpdev";
@@ -136,10 +141,7 @@ function commandForAction(action, args) {
     return `npm run wp-dev -- push ${env} --dry-run`;
   }
   if (action === "wpdev_push_theme") {
-    const env = safeArg(args?.env);
-    if (!["staging", "production"].includes(env)) return null;
-    const build = safeArg(args?.build) === "1" ? " --build" : "";
-    return `npm run wp-dev -- push theme ${env} --yes${build}`;
+    return wpdevPushThemeCommand(args?.env, args?.confirm, safeArg(args?.build));
   }
   if (action === "wpdev_push_theme_dry") {
     const env = safeArg(args?.env);

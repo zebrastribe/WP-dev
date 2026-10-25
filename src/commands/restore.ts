@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execa } from "execa";
@@ -16,16 +16,32 @@ import { assertRemotePathSafe } from "../services/remote-path-safety.js";
 import {
   assertLocalWpInstalled,
   assertRemoteWpInstalled,
+  assertTablePrefixesCompatible,
   wpLocalDbExportToFile,
   wpLocalDbImportFromFile,
+  wpLocalGetTablePrefix,
   wpRemoteDbExport,
   wpRemoteDbImport,
+  wpRemoteGetTablePrefix,
 } from "../services/wpcli.js";
+import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
+import { assertValidSqlDump } from "../utils/sql-dump-validate.js";
 import { confirmRemoteTarget } from "../utils/confirm.js";
 import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
 import { logInfo } from "../utils/logger.js";
 import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
-import { reconcileAfterPull } from "../fs/index.js";
+import { runLocalWordpressFileMutation } from "../fs/index.js";
+import {
+  buildRemoteArchiveRsyncShell,
+  remoteExtractDbPath,
+  remotePreRestoreDumpPath,
+  type RestoreArchiveKind,
+} from "../utils/restore-archive-order.js";
+import {
+  DISK_NEED,
+  assertLocalFreeSpace,
+  assertRemoteFreeSpace,
+} from "../utils/disk-space.js";
 
 export type RestoreTarget = RemoteEnvName | "local";
 
@@ -35,7 +51,7 @@ export type RestoreOptions = {
   confirmHost?: string;
 };
 
-type ArchiveKind = "content" | "complete";
+type ArchiveKind = RestoreArchiveKind;
 
 function detectArchiveKind(extractDir: string): ArchiveKind {
   const hasDb = existsSync(join(extractDir, "db.sql"));
@@ -58,7 +74,7 @@ async function extractArchiveLocal(archivePath: string, destDir: string): Promis
 }
 
 /**
- * Restore a local content or complete archive: DB + files.
+ * Restore a local content or complete archive: files first, then DB (F-018).
  * Complete archives preserve the live wp-config.php (secrets stay on the install).
  */
 async function restoreLocalArchive(
@@ -72,41 +88,64 @@ async function restoreLocalArchive(
   try {
     await extractArchiveLocal(archivePath, tmp);
     const kind = detectArchiveKind(tmp);
+    const dbSql = join(tmp, "db.sql");
+    const sql = readFileSync(dbSql, "utf8");
+    assertValidSqlDump(sql, "Restore archive db.sql");
+    const dumpPrefix = detectTablePrefixFromSqlDump(sql);
+    const localPrefix = await wpLocalGetTablePrefix(configDir, config);
+    assertTablePrefixesCompatible(dumpPrefix, localPrefix, "restore local");
+
+    assertLocalFreeSpace(tmpdir(), DISK_NEED.dbBackupLocal, "restore local");
+
     await wpLocalDbExportToFile(configDir, config, preRestore);
     chownBackupArtifact(preRestore, configDir);
-    await wpLocalDbImportFromFile(configDir, config, join(tmp, "db.sql"));
 
-    if (kind === "content") {
-      const dest = join(wpRoot, "wp-content");
-      await execa("mkdir", ["-p", dest]);
-      await execa(
-        "rsync",
-        ["-a", "--delete", `${join(tmp, "wp-content")}/`, `${dest}/`],
-        { reject: true },
-      );
-    } else {
-      // Preserve live secrets; archive deliberately omits wp-config.php.
-      await execa(
-        "rsync",
-        [
-          "-a",
-          "--delete",
-          "--exclude",
-          "wp-config.php",
-          "--exclude",
-          "wp-config-*.php",
-          `${join(tmp, "site")}/`,
-          `${wpRoot}/`,
-        ],
-        { reject: true },
-      );
-    }
+    // Single permissions envelope (same as pull) — do not call host/post reconcile ad hoc.
+    await runLocalWordpressFileMutation(loaded, { label: "restore local" }, async () => {
+      // Files before DB — failed rsync must not leave a replaced database.
+      try {
+        if (kind === "content") {
+          const dest = join(wpRoot, "wp-content");
+          await execa("mkdir", ["-p", dest]);
+          await execa(
+            "rsync",
+            ["-a", "--delete", `${join(tmp, "wp-content")}/`, `${dest}/`],
+            { reject: true },
+          );
+        } else {
+          await execa(
+            "rsync",
+            [
+              "-a",
+              "--delete",
+              "--exclude",
+              "wp-config.php",
+              "--exclude",
+              "wp-config-*.php",
+              `${join(tmp, "site")}/`,
+              `${wpRoot}/`,
+            ],
+            { reject: true },
+          );
+        }
+      } catch (rsyncErr) {
+        const msg = rsyncErr instanceof Error ? rsyncErr.message : String(rsyncErr);
+        throw new Error(
+          `restore local: rsync failed (database unchanged): ${msg}. ` +
+            `If this is a permission error, run: npm run wp-dev -- fix-permissions`,
+        );
+      }
 
-    try {
-      await reconcileAfterPull(loaded);
-    } catch {
-      /* best-effort */
-    }
+      try {
+        await wpLocalDbImportFromFile(configDir, config, dbSql);
+      } catch (dbErr) {
+        const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+        throw new Error(
+          `Local archive files were restored, but DB import failed (${msg}). ` +
+            `Pre-restore DB backup is at ${preRestore}. Re-import it manually if needed, then retry.`,
+        );
+      }
+    });
     return kind;
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -114,7 +153,8 @@ async function restoreLocalArchive(
 }
 
 /**
- * Restore a remote content or complete archive taken from the same env (no URL rewrite).
+ * Restore a remote content or complete archive: files first, then DB (F-018).
+ * On DB import failure after successful rsync, attempts DB rollback from remote pre.sql.
  */
 async function restoreRemoteArchive(
   loaded: LoadedConfig,
@@ -127,14 +167,20 @@ async function restoreRemoteArchive(
   const ssh = await connectSsh(remote);
   const remoteWork = `/tmp/wpdev-restore-${Date.now()}`;
   const remoteArchive = `${remoteWork}/backup.tar.gz`;
+  const remotePreDump = remotePreRestoreDumpPath(remoteWork);
+  const remoteDbSql = remoteExtractDbPath(remoteWork);
+  let filesSynced = false;
+
   try {
     await assertRemotePathSafe(ssh, remote.path, env);
     const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
     const wpQ = posixShellQuote(wpPath);
 
+    await assertRemoteFreeSpace(ssh, "/tmp", DISK_NEED.dbBackupRemoteTmp, `restore ${env}`);
+    assertLocalFreeSpace(tmpdir(), DISK_NEED.dbBackupLocal, `restore ${env}`);
+
     logInfo(`restore ${env}: pre-restore remote db backup -> ${preRestoreLocal}`);
-    const remotePreDump = `${remoteWork}/pre.sql`;
-    await ssh.exec(`mkdir -p ${remoteWork}`);
+    await ssh.exec(`mkdir -p ${posixShellQuote(remoteWork)}`);
     await wpRemoteDbExport(ssh, wpPath, remotePreDump);
     await ssh.getFile(remotePreDump, preRestoreLocal);
     chownBackupArtifact(preRestoreLocal, configDir);
@@ -145,7 +191,7 @@ async function restoreRemoteArchive(
         "set -e",
         `mkdir -p ${remoteWork}/extract`,
         `tar -xzf ${remoteArchive} -C ${remoteWork}/extract`,
-        `test -f ${remoteWork}/extract/db.sql`,
+        `test -f ${remoteDbSql}`,
       ].join("; "),
     );
     if (unpacked.code !== 0) {
@@ -169,31 +215,48 @@ async function restoreRemoteArchive(
     }
     const kind = kindRaw as ArchiveKind;
 
-    await wpRemoteDbImport(ssh, wpPath, `${remoteWork}/extract/db.sql`);
+    const localDbDir = mkdtempSync(join(tmpdir(), "wpdev-restore-db-"));
+    const localDbProbe = join(localDbDir, "db.sql");
+    try {
+      await ssh.getFile(remoteDbSql, localDbProbe);
+      const sql = readFileSync(localDbProbe, "utf8");
+      assertValidSqlDump(sql, "Remote restore archive db.sql");
+      const dumpPrefix = detectTablePrefixFromSqlDump(sql);
+      const remotePrefix = await wpRemoteGetTablePrefix(ssh, wpPath);
+      assertTablePrefixesCompatible(dumpPrefix, remotePrefix, `restore ${env}`);
+    } finally {
+      rmSync(localDbDir, { recursive: true, force: true });
+    }
 
-    if (kind === "content") {
-      const sync = await ssh.exec(
-        [
-          "set -e",
-          `mkdir -p ${wpQ}/wp-content`,
-          `rsync -a --delete ${remoteWork}/extract/wp-content/ ${wpQ}/wp-content/`,
-        ].join("; "),
+    logInfo(`restore ${env}: rsync archive files (before DB import)`);
+    const sync = await ssh.exec(buildRemoteArchiveRsyncShell(kind, remoteWork, wpQ));
+    if (sync.code !== 0) {
+      throw new Error(
+        `Remote ${kind} restore rsync failed (database unchanged): ${sync.stderr || sync.stdout}`,
       );
-      if (sync.code !== 0) {
+    }
+    filesSynced = true;
+
+    try {
+      await wpRemoteDbImport(ssh, wpPath, remoteDbSql);
+    } catch (dbErr) {
+      const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+      logInfo(`restore ${env}: DB import failed after files sync — rolling back remote DB`);
+      let rolledBack = false;
+      try {
+        await wpRemoteDbImport(ssh, wpPath, remotePreDump);
+        rolledBack = true;
+      } catch (rollbackErr) {
+        const rb = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
         throw new Error(
-          `Remote content restore rsync failed: ${sync.stderr || sync.stdout}`,
+          `Remote archive files were restored; DB import failed (${msg}); ` +
+            `DB rollback also failed (${rb}). Pre-restore dump kept at ${preRestoreLocal} and ${remotePreDump}.`,
         );
       }
-    } else {
-      const sync = await ssh.exec(
-        [
-          "set -e",
-          `rsync -a --delete --exclude=wp-config.php --exclude='wp-config-*.php' ${remoteWork}/extract/site/ ${wpQ}/`,
-        ].join("; "),
-      );
-      if (sync.code !== 0) {
+      if (rolledBack) {
         throw new Error(
-          `Remote complete restore rsync failed: ${sync.stderr || sync.stdout}`,
+          `Remote archive files were restored, but DB import failed (${msg}). ` +
+            `Remote DB was rolled back from pre-restore dump. Local copy: ${preRestoreLocal}.`,
         );
       }
     }
@@ -201,10 +264,17 @@ async function restoreRemoteArchive(
     await ssh.exec(remoteRmRf(remoteWork));
     return kind;
   } catch (e) {
-    try {
-      await ssh.exec(remoteRmRf(remoteWork));
-    } catch {
-      /* cleanup */
+    if (!filesSynced) {
+      try {
+        await ssh.exec(remoteRmRf(remoteWork));
+      } catch {
+        /* cleanup */
+      }
+    } else {
+      // Keep remoteWork (includes pre.sql) when files changed and recovery may need it.
+      console.error(
+        `Warning: leaving ${remoteWork} on remote for recovery (includes pre.sql). Remove when done.`,
+      );
     }
     throw e;
   } finally {
@@ -223,22 +293,24 @@ export async function cmdRestore(
   const isArchive = resolvedFile.endsWith(".tar.gz");
 
   logInfo(`restore ${env} from ${resolvedFile}`);
+
+  // Confirm before taking the sync lock (do not block other syncs while prompting).
+  if (env !== "local") {
+    const remote = getRemoteEnv(config, env);
+    const ok = await confirmRemoteTarget(env, remote, "restore", {
+      yes: Boolean(opts.yes) || process.env.WPDEV_ASSUME_YES === "1",
+      confirmHost: opts.confirmHost,
+    });
+    if (!ok) {
+      logInfo(`restore ${env}: user aborted at confirmation`);
+      console.error("Aborted.");
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   const syncLock = acquireSyncLock(config.project, `restore:${env}`);
   try {
-    if (env !== "local") {
-      const remote = getRemoteEnv(config, env);
-      const ok = await confirmRemoteTarget(env, remote, "restore", {
-        yes: Boolean(opts.yes),
-        confirmHost: opts.confirmHost,
-      });
-      if (!ok) {
-        logInfo(`restore ${env}: user aborted at confirmation`);
-        console.error("Aborted.");
-        process.exitCode = 1;
-        return;
-      }
-    }
-
     const backupDir = ensureBackupDir(config.project, env);
     const preRestore = join(backupDir, timestampedPreRestoreName());
 
@@ -256,6 +328,11 @@ export async function cmdRestore(
         return;
       }
       logInfo(`restore local: pre-restore db backup -> ${preRestore}`);
+      const sql = readFileSync(resolvedFile, "utf8");
+      assertValidSqlDump(sql, "Restore SQL dump");
+      const dumpPrefix = detectTablePrefixFromSqlDump(sql);
+      const localPrefix = await wpLocalGetTablePrefix(configDir, config);
+      assertTablePrefixesCompatible(dumpPrefix, localPrefix, "restore local");
       await wpLocalDbExportToFile(configDir, config, preRestore);
       chownBackupArtifact(preRestore, configDir);
       await wpLocalDbImportFromFile(configDir, config, resolvedFile);
@@ -283,19 +360,41 @@ export async function cmdRestore(
     const remote = getRemoteEnv(config, env);
     const ssh = await connectSsh(remote);
     const remoteImport = `/tmp/wp-dev-restore-${Date.now()}.sql`;
+    const remotePreDump = `/tmp/wp-dev-pre-restore-${Date.now()}.sql`;
     try {
       await assertRemotePathSafe(ssh, remote.path, env);
       const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
-      logInfo(`restore ${env}: pre-restore remote db backup -> ${preRestore}`);
-      const remotePreDump = `/tmp/wp-dev-pre-restore-${Date.now()}.sql`;
-      await wpRemoteDbExport(ssh, wpPath, remotePreDump);
-      await ssh.getFile(remotePreDump, preRestore);
-      chownBackupArtifact(preRestore, configDir);
-      await ssh.exec(remoteRmFile(remotePreDump));
+      await assertRemoteFreeSpace(ssh, "/tmp", DISK_NEED.dbBackupRemoteTmp, `restore ${env}`);
 
-      await ssh.putFile(resolvedFile, remoteImport);
-      await wpRemoteDbImport(ssh, wpPath, remoteImport);
-      await ssh.exec(remoteRmFile(remoteImport));
+      logInfo(`restore ${env}: pre-restore remote db backup -> ${preRestore}`);
+      try {
+        await wpRemoteDbExport(ssh, wpPath, remotePreDump);
+        await ssh.getFile(remotePreDump, preRestore);
+        chownBackupArtifact(preRestore, configDir);
+      } finally {
+        try {
+          await ssh.exec(remoteRmFile(remotePreDump));
+        } catch {
+          /* best-effort */
+        }
+      }
+
+      const sqlText = readFileSync(resolvedFile, "utf8");
+      assertValidSqlDump(sqlText, "Restore SQL dump");
+      const dumpPrefix = detectTablePrefixFromSqlDump(sqlText);
+      const remotePrefix = await wpRemoteGetTablePrefix(ssh, wpPath);
+      assertTablePrefixesCompatible(dumpPrefix, remotePrefix, `restore ${env}`);
+
+      try {
+        await ssh.putFile(resolvedFile, remoteImport);
+        await wpRemoteDbImport(ssh, wpPath, remoteImport);
+      } finally {
+        try {
+          await ssh.exec(remoteRmFile(remoteImport));
+        } catch {
+          /* best-effort */
+        }
+      }
     } finally {
       ssh.dispose();
     }

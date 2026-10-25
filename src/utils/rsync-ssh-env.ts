@@ -25,7 +25,8 @@ export function buildSshRsyncEnv(remote: RemoteEnvConfig): string {
     "-o",
     "BatchMode=yes",
     "-o",
-    "StrictHostKeyChecking=accept-new",
+    // Align with node-ssh assertSshHostPinned: refuse unknown/changed keys (no TOFU).
+    "StrictHostKeyChecking=yes",
     "-o",
     "ServerAliveInterval=30",
     "-o",

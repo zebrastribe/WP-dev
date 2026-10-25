@@ -34,6 +34,8 @@ describe("rsync-ssh-env helpers", () => {
     expect(env).toContain("-p 2222");
     expect(env).toContain(`-i '${keyPath}'`);
     expect(env).toContain("BatchMode=yes");
+    expect(env).toContain("StrictHostKeyChecking=yes");
+    expect(env).not.toContain("accept-new");
     expect(env).toContain("ServerAliveInterval=30");
     expect(env).toContain("TCPKeepAlive=yes");
 

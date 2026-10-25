@@ -40,7 +40,7 @@ export function sshOptsShell(remote) {
   const parts = [
     "-o BatchMode=yes",
     "-o ConnectTimeout=15",
-    "-o StrictHostKeyChecking=accept-new",
+    "-o StrictHostKeyChecking=yes",
   ];
   if (remote.port) parts.push(`-o Port=${remote.port}`);
   if (remote.key) parts.push(`-i ${shellQuote(remote.key)}`);

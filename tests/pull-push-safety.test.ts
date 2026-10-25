@@ -53,10 +53,8 @@ describe("pull/push safety guards", () => {
   it("pull and pull-theme reconcile permissions after rsync (FS_METHOD=direct)", () => {
     const pull = readFileSync(join(process.cwd(), "src/commands/pull.ts"), "utf8");
     const theme = readFileSync(join(process.cwd(), "src/commands/pull-theme.ts"), "utf8");
-    expect(pull).toContain("reconcileAfterPull");
-    expect(pull).toContain("reconcileHostWritableForRsync");
-    expect(theme).toContain("reconcileAfterPull");
-    expect(theme).toContain("reconcileHostWritableForRsync");
+    expect(pull).toContain("runLocalWordpressFileMutation");
+    expect(theme).toContain("runLocalWordpressFileMutation");
   });
 
   it("push confirms staging and rolls back remote DB on failure", () => {

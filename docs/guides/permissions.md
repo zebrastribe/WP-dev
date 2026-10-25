@@ -12,12 +12,17 @@ WordPress in Docker runs as **www-data** (uid 33). WP-dev reconciles ownership o
 
 ## Sync lifecycle (always)
 
-| Phase | Command path | Ownership |
-|-------|----------------|-----------|
-| **Before host rsync** | `reconcileHostWritableForRsync` | Entire `wordpress/` → your uid:gid (so pull can write) |
-| **After pull / up / restore** | `reconcileAfterPull` → `fix-runtime-permissions` | Entire tree → **host:www-data** (2775/664); then runtime dirs → **www-data** |
+Do **not** call pre/post permission helpers ad hoc from new commands. Use the envelope:
 
-Skipping the after-sync step leaves core updates failing (“some files could not be copied”) or FTP prompts.
+`runLocalWordpressFileMutation(loaded, { label }, work)`
+
+| Phase | Inside the envelope | Ownership |
+|-------|---------------------|-----------|
+| **1. Before host rsync** | `reconcileHostWritableForRsync` | Entire `wordpress/` → your uid:gid (so pull/restore can write) |
+| **2. Work** | Your rsync / extract / DB import | — |
+| **3. After success** | `reconcileAfterPull` → runtime + shared config | Entire tree → **host:www-data** (2775/664); then runtime dirs → **www-data** |
+
+Skipping step 1 → host rsync **Permission denied**. Skipping step 3 → core updates fail (“some files could not be copied”) or FTP prompts.
 
 ## The problem (without WP-dev)
 
@@ -31,15 +36,15 @@ Skipping the after-sync step leaves core updates failing (“some files could no
 | When | Action |
 |------|--------|
 | `wp-dev up` | Shared tree + runtime writability (`reconcileContainerRuntime`) |
-| `wp-dev pull` / `pull theme` | Host-own before rsync; `reconcileAfterPull` after |
-| `wp-dev restore local` (files) | `reconcileAfterPull` after extract |
+| `wp-dev pull` / `pull theme` | `runLocalWordpressFileMutation` (host → rsync → after) |
+| `wp-dev restore local` (archive) | Same envelope around local rsync + DB import |
 | `wp-dev doctor` | Probes www-data write on runtime + `wp-admin` / themes |
 
 ## Ownership profiles
 
 | Profile | Paths | Owner |
 |---------|-------|-------|
-| **Shared config** | `wp-dev.config.json`, `docker/.env` | Your user, mode 664 |
+| **Shared config** | `wp-dev.config.json`, `docker/.env` | Your user, mode 664 / 660 |
 | **Shared (FS_METHOD=direct)** | Entire `wordpress/` tree | Your user : www-data group (dirs 2775, files 664) — core/theme updates + IDE |
 | **Container runtime** | `plugins`, `uploads`, `upgrade`, `upgrade-temp-backup`, `cache`, `languages`, `mu-plugins`, `ai1wm-backups` | www-data (uid 33) — applied after the shared pass |
 

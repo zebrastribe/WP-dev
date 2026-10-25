@@ -140,6 +140,56 @@ export async function reconcileAfterPull(loaded: LoadedConfig): Promise<void> {
   await reconcileSharedConfig(loaded);
 }
 
+export type LocalWordpressFileMutationOptions = {
+  /** Short label for errors (e.g. `pull staging`, `restore local`). */
+  label: string;
+  /** Default: warn and continue — matches pull/restore UX. */
+  onPostReconcileFail?: "warn" | "throw";
+};
+
+/**
+ * **Required** envelope for any host-side mutation of the local `wordpress/` tree
+ * (pull, pull theme, local archive restore). Callers must not invent their own
+ * pre/post permission order — that is how restore previously skipped host-writable.
+ *
+ * 1. `reconcileHostWritableForRsync` (host uid — rsync can write)
+ * 2. `work()` (rsync / extract / etc. — and usually DB import)
+ * 3. `reconcileAfterPull` (host:www-data + runtime www-data + shared config)
+ */
+export async function runLocalWordpressFileMutation<T>(
+  loaded: LoadedConfig,
+  options: LocalWordpressFileMutationOptions,
+  work: () => Promise<T>,
+): Promise<T> {
+  const label = options.label;
+  try {
+    await reconcileHostWritableForRsync(loaded);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `${label}: filesystem reconcile failed (${msg}). Run: npm run wp-dev -- doctor --filesystem`,
+    );
+  }
+
+  const result = await work();
+
+  try {
+    await reconcileAfterPull(loaded);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (options.onPostReconcileFail === "throw") {
+      throw new Error(`${label}: post-sync permission reconcile failed (${msg})`);
+    }
+    logInfo(`${label}: post-sync permission reconcile failed (${msg})`);
+    console.error(
+      `Warning: could not apply WordPress write permissions after ${label}. ` +
+        `Run: npm run wp-dev -- fix-permissions   then retry wp-admin updates.`,
+    );
+  }
+
+  return result;
+}
+
 export function getManagedPathsForProbe(loaded: LoadedConfig): string[] {
   return [
     projectConfigPath(loaded.configDir),

@@ -130,6 +130,21 @@ describe("runner smoke", () => {
     expect(content).not.toMatch(/^-\s+\.\.\/wordpress:/m);
   });
 
+  it("wordpress service does not mount whole docker/ RW or inject admin save token env", () => {
+    const content = readFileSync(composePath, "utf8");
+    expect(content).toContain(
+      "${WPDEV_HOST_PROJECT_ROOT}/docker/.env:/wp-dev-repo/docker/.env:rw",
+    );
+    expect(content).toContain(
+      "${WPDEV_HOST_PROJECT_ROOT}/docker/.env.example:/wp-dev-repo/docker/.env.example:ro",
+    );
+    expect(content).not.toMatch(
+      /\$\{WPDEV_HOST_PROJECT_ROOT\}\/docker:\/wp-dev-repo\/docker:rw/,
+    );
+    const wpBlock = content.slice(content.indexOf("wordpress:"), content.indexOf("local_ssl_proxy:"));
+    expect(wpBlock).not.toMatch(/WPDEV_ADMIN_SAVE_TOKEN:/);
+  });
+
   it("terminal container starts via start-terminal-services.sh", () => {
     const dockerfile = readFileSync(join(root, "docker/terminal.Dockerfile"), "utf8");
     expect(dockerfile).toContain("start-terminal-services.sh");

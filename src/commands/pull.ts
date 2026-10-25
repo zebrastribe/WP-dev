@@ -32,10 +32,7 @@ import { logInfo } from "../utils/logger.js";
 import { assertValidSqlDump } from "../utils/sql-dump-validate.js";
 import { remoteRmFile } from "../utils/shell-quote.js";
 import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
-import {
-  reconcileAfterPull,
-  reconcileHostWritableForRsync,
-} from "../fs/index.js";
+import { runLocalWordpressFileMutation } from "../fs/index.js";
 import { registerTempDir, unregisterTempDir } from "../fs/temp-registry.js";
 import { cmdSimplySetupStagingDns } from "./simply.js";
 import { getSimplyApiKey } from "../services/simply.js";
@@ -144,9 +141,16 @@ export async function cmdPull(
 
       const remoteDump = `/tmp/wp-dev-pull-${Date.now()}.sql`;
       logInfo(`pull ${env}: remote wp db export`);
-      await wpRemoteDbExport(ssh, wpPath, remoteDump);
-      await ssh.getFile(remoteDump, localDump);
-      await ssh.exec(remoteRmFile(remoteDump));
+      try {
+        await wpRemoteDbExport(ssh, wpPath, remoteDump);
+        await ssh.getFile(remoteDump, localDump);
+      } finally {
+        try {
+          await ssh.exec(remoteRmFile(remoteDump));
+        } catch {
+          /* best-effort cleanup of remote dump */
+        }
+      }
     } finally {
       // Do not hold node-ssh open across long host rsync — idle control channel ECONNRESET
       // would crash the CLI even while OpenSSH rsync is still transferring.
@@ -154,82 +158,62 @@ export async function cmdPull(
     }
 
     logInfo(`pull ${env}: rsync files -> ${localWpRoot}`);
-    try {
-      // Host-own only (no www-data on uploads/plugins) so host rsync can write.
-      await reconcileHostWritableForRsync(loaded);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(
-        `pull ${env}: filesystem reconcile failed (${msg}). Run: npm run wp-dev -- doctor --filesystem`,
-      );
-    }
-    try {
-      await rsyncPull(remote, localWpRoot, {
-        dryRun: false,
-        excludes: pullExcludePatterns(configDir, config),
-        remotePath: wpPath,
-      });
+    // Single permissions envelope: host-writable → work → reconcileAfterPull (do not split).
+    await runLocalWordpressFileMutation(loaded, { label: `pull ${env}` }, async () => {
+      try {
+        await rsyncPull(remote, localWpRoot, {
+          dryRun: false,
+          excludes: pullExcludePatterns(configDir, config),
+          remotePath: wpPath,
+        });
 
-      const sql = readFileSync(localDump, "utf8");
-      assertValidSqlDump(sql, "Downloaded SQL dump");
-      const tablePrefix = detectTablePrefixFromSqlDump(sql);
+        const sql = readFileSync(localDump, "utf8");
+        assertValidSqlDump(sql, "Downloaded SQL dump");
+        const tablePrefix = detectTablePrefixFromSqlDump(sql);
 
-      logInfo(`pull ${env}: local wp db import`);
-      await wpLocalDbImportFromFile(configDir, config, localDump);
-      if (tablePrefix) {
-        logInfo(
-          `pull ${env}: align local table prefix to "${tablePrefix}" (docker/.env + wp-config.php)`,
-        );
-        await wpLocalAlignTablePrefixAfterImport(configDir, config, tablePrefix);
-      }
-      const fromCandidates = getUrlVariants(remote.url).filter(
-        (candidate) => candidate !== config.local.url,
-      );
-      for (const fromUrl of fromCandidates) {
-        logInfo(`pull ${env}: search-replace ${fromUrl} -> ${config.local.url}`);
-        await wpLocalSearchReplace(configDir, config, fromUrl, config.local.url);
-      }
-      logInfo(`pull ${env}: force option home/siteurl -> ${config.local.url}`);
-      await wpLocalForceSiteUrls(configDir, config, config.local.url);
-
-      const urlCheck = await verifyLocalSiteUrls(configDir, config, config.local.url);
-      if (!urlCheck.ok) {
-        throw new Error(
-          `Post-sync URL verification failed: home=${urlCheck.home ?? "?"} siteurl=${urlCheck.siteurl ?? "?"} expected=${urlCheck.expected}`,
-        );
-      }
-    } catch (syncErr) {
-      if (prePullBackup) {
-        logInfo(`pull ${env}: sync failed — rolling back local DB from ${prePullBackup}`);
-        try {
-          await wpLocalDbImportFromFile(configDir, config, prePullBackup);
-          console.error(
-            `Rolled back local DB from pre-pull backup: ${prePullBackup}\n` +
-              "Files may still differ from before pull — re-run pull or restore from a full backup.",
+        logInfo(`pull ${env}: local wp db import`);
+        await wpLocalDbImportFromFile(configDir, config, localDump);
+        if (tablePrefix) {
+          logInfo(
+            `pull ${env}: align local table prefix to "${tablePrefix}" (docker/.env + wp-config.php)`,
           );
-        } catch (rollbackErr) {
-          const rb = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
-          console.error(
-            `Warning: could not roll back local DB (${rb}). Pre-pull backup kept at: ${prePullBackup}`,
+          await wpLocalAlignTablePrefixAfterImport(configDir, config, tablePrefix);
+        }
+        const fromCandidates = getUrlVariants(remote.url).filter(
+          (candidate) => candidate !== config.local.url,
+        );
+        for (const fromUrl of fromCandidates) {
+          logInfo(`pull ${env}: search-replace ${fromUrl} -> ${config.local.url}`);
+          await wpLocalSearchReplace(configDir, config, fromUrl, config.local.url);
+        }
+        logInfo(`pull ${env}: force option home/siteurl -> ${config.local.url}`);
+        await wpLocalForceSiteUrls(configDir, config, config.local.url);
+
+        const urlCheck = await verifyLocalSiteUrls(configDir, config, config.local.url);
+        if (!urlCheck.ok) {
+          throw new Error(
+            `Post-sync URL verification failed: home=${urlCheck.home ?? "?"} siteurl=${urlCheck.siteurl ?? "?"} expected=${urlCheck.expected}`,
           );
         }
+      } catch (syncErr) {
+        if (prePullBackup) {
+          logInfo(`pull ${env}: sync failed — rolling back local DB from ${prePullBackup}`);
+          try {
+            await wpLocalDbImportFromFile(configDir, config, prePullBackup);
+            console.error(
+              `Rolled back local DB from pre-pull backup: ${prePullBackup}\n` +
+                "Files may still differ from before pull — re-run pull or restore from a full backup.",
+            );
+          } catch (rollbackErr) {
+            const rb = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+            console.error(
+              `Warning: could not roll back local DB (${rb}). Pre-pull backup kept at: ${prePullBackup}`,
+            );
+          }
+        }
+        throw syncErr;
       }
-      throw syncErr;
-    }
-    try {
-      // Key WP-dev contract: after pull, tree is FS_METHOD=direct ready (host:www-data + runtime www-data).
-      logInfo(
-        `pull ${env}: reconcile after rsync (host:www-data tree + www-data runtime paths — core/theme updates work)`,
-      );
-      await reconcileAfterPull(loaded);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      logInfo(`pull ${env}: post-pull permission reconcile failed (${msg})`);
-      console.error(
-        "Warning: could not apply WordPress write permissions after pull. " +
-          "Run: npm run wp-dev -- fix-runtime-permissions   then retry wp-admin updates.",
-      );
-    }
+    });
   } finally {
     unregisterTempDir(loaded.configDir, tempId);
     rmSync(tmpDir, { recursive: true, force: true });

@@ -3,7 +3,7 @@
  * wp-dev admin: load/save wp-dev.config.json from the browser (same origin as /admin/).
  * Config and logs are bind-mounted at /wp-dev-repo/ (see docker-compose.yml).
  * Auth: unlock via POST action=auth (HttpOnly session + X-WP-DEV-Nonce on mutations), or legacy header X-WP-DEV-Admin-Token.
- * POST action=save-docker-env: JSON {"WPDEV_SIMPLY_API_KEY":"…"} → upserts into host docker/.env (requires ../docker mount).
+ * POST action=save-docker-env: JSON {"WPDEV_SIMPLY_API_KEY":"…"} → upserts into bind-mounted docker/.env (not the whole docker/ tree).
  * Validation uses wp-dev.config.schema.json (generated from Zod via `npm run generate:schema`).
  * Appends one line per request to /wp-dev-repo/logs/wp-dev-admin-api.log (no request body logged).
  */
@@ -50,7 +50,9 @@ function wpdev_upsert_dotenv_file(string $path, array $updates): void
         $line = $k . '=' . $v;
         $pat = '/^' . preg_quote($k, '/') . '=.*$/m';
         if (preg_match($pat, $next) === 1) {
-            $next = preg_replace($pat, $line, $next, 1);
+            // Escape $ and \ so secret values like "$1pass" are not mangled by preg_replace.
+            $repl = str_replace(['\\', '$'], ['\\\\', '\\$'], $line);
+            $next = preg_replace($pat, $repl, $next, 1);
         } else {
             $next = $next === '' ? ($line . "\n") : (rtrim($next) . "\n" . $line . "\n");
         }
@@ -67,6 +69,7 @@ function wpdev_upsert_dotenv_file(string $path, array $updates): void
     @chmod($path, 0660);
     $dir = dirname($path);
     if (is_dir($dir)) {
+        // Never 0777 — keep group-writable for host tools, not world-writable.
         @chmod($dir, 0775);
     }
 }
@@ -204,7 +207,22 @@ function wpdev_require_admin_token_if_configured(string $token, string $action):
 function wpdev_is_blocked_db_host(string $host): bool
 {
     $h = strtolower(trim($host));
-    if ($h === '' || $h === 'db' || $h === 'localhost' || $h === '127.0.0.1' || $h === '::1') {
+    // mysqli persistent prefix — strip before checks.
+    if (str_starts_with($h, 'p:')) {
+        $h = substr($h, 2);
+    }
+    if (
+        $h === '' ||
+        $h === 'db' ||
+        $h === 'wordpress' ||
+        $h === 'terminal' ||
+        $h === 'localhost' ||
+        $h === '127.0.0.1' ||
+        $h === '127.1' ||
+        $h === '0.0.0.0' ||
+        $h === '::1' ||
+        $h === 'host.docker.internal'
+    ) {
         return true;
     }
     if (filter_var($h, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
@@ -217,6 +235,10 @@ function wpdev_is_blocked_db_host(string $host): bool
         if (str_starts_with($h, '169.254.')) {
             return true;
         }
+    }
+    // IPv6 ULA / link-local / loopback forms.
+    if (str_starts_with($h, 'fe80:') || str_starts_with($h, 'fc') || str_starts_with($h, 'fd') || str_starts_with($h, '::ffff:127.')) {
+        return true;
     }
     return false;
 }
@@ -358,9 +380,13 @@ function wpdev_http_request(
         : [];
     $status = wpdev_parse_http_status_from_headers($respHeaders);
     if ($res === false && $status === 0) {
-        return ['status' => 0, 'body' => ''];
+        return ['status' => 0, 'body' => '', 'headers' => []];
     }
-    return ['status' => $status, 'body' => is_string($res) ? $res : ''];
+    return [
+        'status' => $status,
+        'body' => is_string($res) ? $res : '',
+        'headers' => $respHeaders,
+    ];
 }
 
 /**
@@ -1180,6 +1206,8 @@ if ($method === 'POST' && $action === 'save-docker-env') {
         'WPDEV_STAGING_DB_USER',
         'WPDEV_STAGING_DB_PASSWORD',
         'WPDEV_STAGING_DB_PREFIX',
+        'WPDEV_TERMINAL_AUTH',
+        'WPDEV_TERMINAL_WORKDIR',
     ];
     $updates = [];
     foreach ($allowed as $key) {
@@ -1209,17 +1237,21 @@ if ($method === 'POST' && $action === 'save-docker-env') {
         wpdev_admin_api_log('POST save-docker-env 400 no_updates');
         exit;
     }
-    if (!is_dir($dockerDir) || !is_writable($dockerDir)) {
+    // .env is bind-mounted as a file; the docker/ directory need not be writable.
+    if (
+        (is_file($dockerEnvPath) && !is_writable($dockerEnvPath)) ||
+        (!is_file($dockerEnvPath) && (!is_dir($dockerDir) || !is_writable($dockerDir)))
+    ) {
         http_response_code(500);
         echo json_encode(
             [
                 'ok' => false,
-                'error' => 'docker_dir_not_writable',
+                'error' => 'docker_env_not_writable',
                 'detail' => 'Mount ../docker into the wordpress service (see docker-compose.yml).',
             ],
             JSON_UNESCAPED_SLASHES
         );
-        wpdev_admin_api_log('POST save-docker-env 500 docker_dir_not_writable');
+        wpdev_admin_api_log('POST save-docker-env 500 docker_env_not_writable');
         exit;
     }
     if (!is_file($dockerEnvPath)) {
@@ -1288,18 +1320,14 @@ if ($method === 'POST' && $action === 'staging-https-check') {
     }
 
     $httpsRes = wpdev_http_request('GET', $url, ['Accept' => 'text/html'], null);
-    $httpsHeaders = isset($http_response_header) && is_array($http_response_header)
-        ? $http_response_header
-        : [];
+    $httpsHeaders = is_array($httpsRes['headers'] ?? null) ? $httpsRes['headers'] : [];
     $httpsStatus = $httpsRes['status'];
     $httpsOk = $httpsStatus >= 200 && $httpsStatus < 400;
     $httpsLocation = wpdev_header_value($httpsHeaders, 'Location');
 
     $httpUrl = preg_replace('#^https://#i', 'http://', $url) ?? $url;
     $httpRes = wpdev_http_request('GET', $httpUrl, ['Accept' => 'text/html'], null, false);
-    $httpHeaders = isset($http_response_header) && is_array($http_response_header)
-        ? $http_response_header
-        : [];
+    $httpHeaders = is_array($httpRes['headers'] ?? null) ? $httpRes['headers'] : [];
     $httpStatus = $httpRes['status'];
     $httpLocation = wpdev_header_value($httpHeaders, 'Location');
     $httpRedirectsToHttps =
@@ -1400,18 +1428,14 @@ if ($method === 'POST' && $action === 'staging-domain-check') {
     $dnsOk = count($records) > 0;
 
     $httpsRes = wpdev_http_request('GET', $url, ['Accept' => 'text/html'], null);
-    $httpsHeaders = isset($http_response_header) && is_array($http_response_header)
-        ? $http_response_header
-        : [];
+    $httpsHeaders = is_array($httpsRes['headers'] ?? null) ? $httpsRes['headers'] : [];
     $httpsStatus = $httpsRes['status'];
     $httpsLocation = wpdev_header_value($httpsHeaders, 'Location');
     $httpsOk = $httpsStatus >= 200 && $httpsStatus < 400;
 
     $httpUrl = preg_replace('#^https://#i', 'http://', $url) ?? $url;
     $httpRes = wpdev_http_request('GET', $httpUrl, ['Accept' => 'text/html'], null, false);
-    $httpHeaders = isset($http_response_header) && is_array($http_response_header)
-        ? $http_response_header
-        : [];
+    $httpHeaders = is_array($httpRes['headers'] ?? null) ? $httpRes['headers'] : [];
     $httpStatus = $httpRes['status'];
     $httpLocation = wpdev_header_value($httpHeaders, 'Location');
     $httpRedirectsToHttps =

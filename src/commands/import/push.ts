@@ -75,22 +75,23 @@ export async function cmdImportPush(
     console.log("[wp-dev] import push: WPDEV_IMPORT_TOKEN is set (ensure the same value is on the remote PHP env)");
   }
 
-  console.log(`[wp-dev] import push ${env}: ${importDir} → ${remoteImport}/`);
-  await rsyncPushToPath(remote, importDir, remoteImport, { dryRun });
-
-  if (!dryRun) {
-    const ssh = await connectSsh(remote);
-    try {
+  // Pin SSH host before any rsync (rsync uses StrictHostKeyChecking=yes).
+  const ssh = await connectSsh(remote);
+  try {
+    if (!dryRun) {
       const mkdir = await ssh.exec(`mkdir -p ${posixShellQuote(remoteStorage)}`);
       if (mkdir.code !== 0) {
         throw new Error(
           `Failed to create remote storage directory ${remoteStorage}: ${mkdir.stderr || mkdir.stdout}`,
         );
       }
-    } finally {
-      ssh.dispose();
     }
+  } finally {
+    ssh.dispose();
   }
+
+  console.log(`[wp-dev] import push ${env}: ${importDir} → ${remoteImport}/`);
+  await rsyncPushToPath(remote, importDir, remoteImport, { dryRun });
 
   console.log(`[wp-dev] import push ${env}: storage → ${remoteStorage}/`);
   await rsyncPushToPath(remote, storageDir, remoteStorage, { dryRun });

@@ -10,6 +10,7 @@ import {
   formatUpdatePreflight,
 } from "../services/update-preflight.js";
 import { acquireUpdateLock, releaseUpdateLock } from "../fs/update-lock.js";
+import { acquireSyncLock, releaseSyncLock, type SyncLockHandle } from "../utils/sync-lock.js";
 
 export const UPDATE_WORDPRESS_SAFETY =
   "This updates the wp-dev tool only. Your wordpress/ site (themes, plugins, uploads, database) is not replaced.";
@@ -66,7 +67,7 @@ async function runShellStep(configDir: string, shell: string): Promise<void> {
 }
 
 export async function cmdUpdate(loaded: LoadedConfig, options: UpdateOptions = {}): Promise<void> {
-  const { configDir } = loaded;
+  const { configDir, config } = loaded;
   const preflight = await collectUpdatePreflight(configDir, loaded);
 
   if (options.preflightOnly && options.json) {
@@ -113,22 +114,31 @@ export async function cmdUpdate(loaded: LoadedConfig, options: UpdateOptions = {
     }
   }
 
+  let syncLock: SyncLockHandle | null = null;
   try {
-  for (const step of steps) {
-    logInfo(`update: ${step.label}`);
-    console.error(`→ ${step.label}`);
+    for (const step of steps) {
+      logInfo(`update: ${step.label}`);
+      console.error(`→ ${step.label}`);
 
-    if (step.shell.startsWith("npm run wp-dev -- down")) {
-      await cmdDown(loaded);
-      await cmdUp(loaded);
-      continue;
+      if (step.shell.startsWith("npm run wp-dev -- down")) {
+        // Serialize with pull/push/restore so stack restart cannot race a sync.
+        syncLock = acquireSyncLock(config.project, "update:restart");
+        try {
+          await cmdDown(loaded);
+          await cmdUp(loaded);
+        } finally {
+          releaseSyncLock(syncLock);
+          syncLock = null;
+        }
+        continue;
+      }
+
+      await runShellStep(configDir, step.shell);
     }
 
-    await runShellStep(configDir, step.shell);
-  }
-
-  console.error("\nwp-dev update finished successfully.\n");
+    console.error("\nwp-dev update finished successfully.\n");
   } finally {
+    releaseSyncLock(syncLock);
     if (!options.dryRun && !options.preflightOnly) {
       releaseUpdateLock(configDir);
     }

@@ -12,11 +12,13 @@ import {
   assertRemoteWpInstalled,
   resolveRemoteWpPath,
   wpLocalDbExportToFile,
+  assertTablePrefixesCompatible,
   wpLocalGetTablePrefix,
   wpRemoteBootstrapConfigFromRemoteDb,
   wpRemoteDbExport,
   wpRemoteForceSiteUrls,
   wpRemoteDbImport,
+  wpRemoteGetTablePrefix,
   wpRemoteSearchReplace,
 } from "../services/wpcli.js";
 import {
@@ -38,6 +40,11 @@ import { pushExcludePatterns } from "../services/sync-excludes.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
 import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
 import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
+import {
+  buildRemoteWpDevAdminProbeCommand,
+  remoteLooksLikeWpDevAdmin,
+  remoteWpDevAdminDir,
+} from "../utils/remote-admin-purge.js";
 
 export type PushOptions = {
   dryRun: boolean;
@@ -47,12 +54,25 @@ export type PushOptions = {
   confirmHost?: string;
 };
 
-/** wp-dev admin must never remain on staging/production (local dev tool only). */
+/**
+ * wp-dev admin must never remain on staging/production (local dev tool only).
+ * Only deletes remote …/admin when api.php contains the wp-dev marker — never a
+ * customer's own /admin application.
+ */
 async function purgeRemoteWpDevAdmin(
-  ssh: { exec: (command: string) => Promise<{ code: number | null }> },
+  ssh: {
+    exec: (
+      command: string,
+    ) => Promise<{ code: number | null; stdout?: string; stderr?: string }>;
+  },
   remoteWpPath: string,
 ): Promise<void> {
-  const adminDir = `${remoteWpPath.replace(/\/$/, "")}/admin`;
+  const adminDir = remoteWpDevAdminDir(remoteWpPath);
+  const probe = await ssh.exec(buildRemoteWpDevAdminProbeCommand(adminDir));
+  if (!remoteLooksLikeWpDevAdmin(probe.stdout ?? "")) {
+    logInfo(`push: skip remote admin purge (no wp-dev admin marker at ${adminDir})`);
+    return;
+  }
   logInfo(`push: remove remote wp-dev admin at ${adminDir}`);
   const result = await ssh.exec(remoteRmRf(adminDir));
   if (result.code !== 0 && result.code != null) {
@@ -207,10 +227,17 @@ export async function cmdPush(
       prePushBackup = join(backupDir, `pre-push-${preName}`);
       const remotePreDump = `/tmp/wp-dev-pre-push-${Date.now()}.sql`;
       logInfo(`push ${env}: remote pre-push db backup -> ${prePushBackup}`);
-      await wpRemoteDbExport(ssh, wpPath, remotePreDump);
-      await ssh.getFile(remotePreDump, prePushBackup);
-      chownBackupArtifact(prePushBackup, configDir);
-      await ssh.exec(remoteRmFile(remotePreDump));
+      try {
+        await wpRemoteDbExport(ssh, wpPath, remotePreDump);
+        await ssh.getFile(remotePreDump, prePushBackup);
+        chownBackupArtifact(prePushBackup, configDir);
+      } finally {
+        try {
+          await ssh.exec(remoteRmFile(remotePreDump));
+        } catch {
+          /* best-effort */
+        }
+      }
     } else {
       logInfo(`push ${env}: bootstrap mode — skipping pre-push remote DB backup`);
     }
@@ -227,6 +254,12 @@ export async function cmdPush(
       });
       ssh = await connectSsh(remote);
       await purgeRemoteWpDevAdmin(ssh, wpPath);
+
+      if (!bootstrappedFreshRemote) {
+        const localPrefix = await wpLocalGetTablePrefix(configDir, config);
+        const remotePrefix = await wpRemoteGetTablePrefix(ssh, wpPath);
+        assertTablePrefixesCompatible(localPrefix, remotePrefix, `push ${env}`);
+      }
 
       const tmpDir = mkdtempSync(join(tmpdir(), "wp-dev-push-"));
       const localDump = join(tmpDir, "local.sql");

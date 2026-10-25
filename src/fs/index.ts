@@ -28,8 +28,10 @@ export {
   reconcileContainerRuntime,
   reconcileAllProfiles,
   reconcileAfterPull,
+  runLocalWordpressFileMutation,
   buildSharedConfigReconcileShell,
 } from "./ownership/reconcile.js";
+export type { LocalWordpressFileMutationOptions } from "./ownership/reconcile.js";
 export { buildOwnershipManifest, classifyRelativePath } from "./ownership/profiles.js";
 export {
   runFilesystemRecovery,

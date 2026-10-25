@@ -3,6 +3,7 @@ import {
   restoreEnvConfirmOk,
   safeArg,
   wpdevPullPushCommand,
+  wpdevPushThemeCommand,
 } from "../docker/runner-sync-gates.mjs";
 
 describe("runner-sync-gates", () => {
@@ -42,5 +43,16 @@ describe("runner-sync-gates", () => {
     expect(restoreEnvConfirmOk("production", "RESTORE_PRODUCTION")).toBe(true);
     expect(restoreEnvConfirmOk("production", "SYNC_PRODUCTION")).toBe(false);
     expect(restoreEnvConfirmOk("production", "")).toBe(false);
+  });
+
+  it("wpdevPushThemeCommand requires SYNC_PRODUCTION for production", () => {
+    expect(wpdevPushThemeCommand("production", "SYNC_PRODUCTION", "1")).toBe(
+      "npm run wp-dev -- push theme production --yes --build",
+    );
+    expect(wpdevPushThemeCommand("production", "yes", false)).toBeNull();
+    expect(wpdevPushThemeCommand("staging", "staging.example.com", "")).toBe(
+      "npm run wp-dev -- push theme staging --yes",
+    );
+    expect(wpdevPushThemeCommand("staging", "", false)).toBeNull();
   });
 });

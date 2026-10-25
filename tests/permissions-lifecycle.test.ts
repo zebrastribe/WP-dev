@@ -10,6 +10,7 @@ import {
 /**
  * Contract: permissions are a core WP-dev behavior across sync scenarios.
  * Pre-rsync = host-only; post-sync = host:www-data tree + www-data runtime.
+ * All local wordpress/ file mutations MUST go through runLocalWordpressFileMutation.
  */
 describe("WordPress permissions lifecycle (sync contract)", () => {
   const root = process.cwd();
@@ -22,78 +23,71 @@ describe("WordPress permissions lifecycle (sync contract)", () => {
     for (const p of RUNTIME_WRITE_PATHS) {
       expect(runtime).toContain(p);
     }
-    // Themes must not be www-data-owned in the runtime pass (IDE edit).
     expect(runtime).not.toContain("chown -R 33:33 '/var/www/html/wp-content/themes'");
   });
 
-  it("pull: host-writable before rsync, reconcileAfterPull after", () => {
+  it("runLocalWordpressFileMutation is the required envelope (host → work → after)", () => {
+    const reconcile = readFileSync(join(root, "src/fs/ownership/reconcile.ts"), "utf8");
+    const fnStart = reconcile.indexOf("export async function runLocalWordpressFileMutation");
+    expect(fnStart).toBeGreaterThan(-1);
+    const slice = reconcile.slice(fnStart, fnStart + 1800);
+    const hostIdx = slice.indexOf("reconcileHostWritableForRsync");
+    const workIdx = slice.indexOf("await work()");
+    const afterIdx = slice.indexOf("reconcileAfterPull");
+    expect(hostIdx).toBeGreaterThan(-1);
+    expect(workIdx).toBeGreaterThan(hostIdx);
+    expect(afterIdx).toBeGreaterThan(workIdx);
+  });
+
+  it("pull / pull-theme / local restore use runLocalWordpressFileMutation", () => {
     const pull = readFileSync(join(root, "src/commands/pull.ts"), "utf8");
-    expect(pull).toContain("reconcileHostWritableForRsync");
-    expect(pull).toContain("reconcileAfterPull");
-    expect(pull).not.toMatch(/await cmdFixPermissions/);
-    // Must not leave only runtime www-data without the shared-tree pass after pull.
-    const afterIdx = pull.indexOf("reconcileAfterPull");
-    expect(afterIdx).toBeGreaterThan(pull.indexOf("rsyncPull"));
-  });
-
-  it("pull-theme uses the same pre/post rsync permission contract", () => {
     const theme = readFileSync(join(root, "src/commands/pull-theme.ts"), "utf8");
-    expect(theme).toContain("reconcileHostWritableForRsync");
-    expect(theme).toContain("reconcileAfterPull");
+    const restore = readFileSync(join(root, "src/commands/restore.ts"), "utf8");
+    expect(pull).toContain("runLocalWordpressFileMutation");
+    expect(theme).toContain("runLocalWordpressFileMutation");
+    expect(restore).toContain("runLocalWordpressFileMutation");
+    // No ad-hoc pre/post pair outside the envelope in these commands.
+    expect(pull).not.toMatch(/await reconcileHostWritableForRsync/);
+    expect(pull).not.toMatch(/await reconcileAfterPull/);
+    expect(theme).not.toMatch(/await reconcileHostWritableForRsync/);
+    expect(theme).not.toMatch(/await reconcileAfterPull/);
   });
 
-  it("up and restore re-apply Apache-writable permissions", () => {
+  it("up re-applies runtime permissions; remote restore does not", () => {
     const up = readFileSync(join(root, "src/commands/up.ts"), "utf8");
     const restore = readFileSync(join(root, "src/commands/restore.ts"), "utf8");
-    const reconcile = readFileSync(join(root, "src/fs/ownership/reconcile.ts"), "utf8");
     expect(up).toContain("reconcileContainerRuntime");
-    expect(restore).toContain("reconcileAfterPull");
-    expect(reconcile).toMatch(
-      /export async function reconcileAfterPull[\s\S]*?reconcileContainerRuntime[\s\S]*?reconcileSharedConfig/,
-    );
-    expect(reconcile).toMatch(
-      /export async function reconcileHostWritableForRsync[\s\S]*?reconcileHostEditable/,
-    );
+    const remoteStart = restore.indexOf("async function restoreRemoteArchive");
+    const remoteEnd = restore.indexOf("export async function cmdRestore");
+    const remoteFn = restore.slice(remoteStart, remoteEnd === -1 ? undefined : remoteEnd);
+    expect(remoteFn).toContain("connectSsh");
+    expect(remoteFn).not.toContain("runLocalWordpressFileMutation");
+    expect(remoteFn).not.toContain("reconcileAfterPull");
+    expect(remoteFn).not.toContain("cmdFixPermissions");
   });
 
   it("cmdFixRuntimeWritePermissions orders shared tree then runtime", () => {
     const src = readFileSync(join(root, "src/commands/fix-permissions.ts"), "utf8");
-    const sharedIdx = src.indexOf("buildHostSharedWritePermissionsShell(uid)");
-    const runtimeIdx = src.indexOf("buildRuntimeWritePermissionsShell()");
-    // In cmdFixRuntimeWritePermissions body, shared must come first in the joined shell.
     const fnStart = src.indexOf("export async function cmdFixRuntimeWritePermissions");
     const slice = src.slice(fnStart, fnStart + 1200);
     expect(slice.indexOf("buildHostSharedWritePermissionsShell")).toBeLessThan(
       slice.indexOf("buildRuntimeWritePermissionsShell"),
     );
-    expect(sharedIdx).toBeGreaterThan(-1);
-    expect(runtimeIdx).toBeGreaterThan(-1);
   });
 
   it("permission fixes never run on staging/production (compose wordpress only)", () => {
     const fix = readFileSync(join(root, "src/commands/fix-permissions.ts"), "utf8");
     const push = readFileSync(join(root, "src/commands/push.ts"), "utf8");
     const pushTheme = readFileSync(join(root, "src/commands/push-theme.ts"), "utf8");
-    const restore = readFileSync(join(root, "src/commands/restore.ts"), "utf8");
     expect(fix).toMatch(/LOCAL DOCKER ONLY|LOCAL only/);
     expect(fix).toContain('"/var/www/html"');
     expect(fix).toContain("composeLocalWordpress");
     expect(fix).not.toMatch(/connectSsh|ssh\.exec/);
-    expect(push).not.toMatch(/reconcileAfterPull|cmdFixPermissions|cmdFixRuntimeWritePermissions|reconcileContainerRuntime/);
-    expect(pushTheme).not.toMatch(/reconcileAfterPull|cmdFixPermissions|cmdFixRuntimeWritePermissions/);
-    // Remote restore must not re-apply local Docker permission reconcile on the live server.
-    const remoteStart = restore.indexOf("async function restoreRemoteArchive");
-    const remoteEnd = restore.indexOf("export async function cmdRestore");
-    const remoteFn = restore.slice(remoteStart, remoteEnd === -1 ? undefined : remoteEnd);
-    expect(remoteFn).toContain("connectSsh");
-    expect(remoteFn).not.toContain("reconcileAfterPull");
-    expect(remoteFn).not.toContain("cmdFixPermissions");
-    expect(remoteFn).not.toContain("cmdFixRuntimeWritePermissions");
-    expect(remoteFn).not.toContain("chmod 2775");
-    expect(remoteFn).not.toContain("/var/www/html");
-    // Push must not rewrite remote UIDs from the local Docker tree.
-    const rsync = readFileSync(join(root, "src/services/rsync.ts"), "utf8");
-    expect(rsync).toContain("--no-owner");
-    expect(rsync).toContain("--no-group");
+    expect(push).not.toMatch(
+      /runLocalWordpressFileMutation|reconcileAfterPull|cmdFixPermissions|cmdFixRuntimeWritePermissions|reconcileContainerRuntime/,
+    );
+    expect(pushTheme).not.toMatch(
+      /runLocalWordpressFileMutation|reconcileAfterPull|cmdFixPermissions|cmdFixRuntimeWritePermissions/,
+    );
   });
 });

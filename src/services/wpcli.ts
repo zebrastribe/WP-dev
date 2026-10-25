@@ -301,6 +301,44 @@ export async function wpLocalGetTablePrefix(
   return prefix !== "" ? prefix : undefined;
 }
 
+export async function wpRemoteGetTablePrefix(
+  ssh: SshSession,
+  remotePath: string,
+): Promise<string | undefined> {
+  const r = await wpRemoteExec(ssh, remotePath, [
+    "config",
+    "get",
+    "table_prefix",
+    "--type=variable",
+  ]);
+  if (r.code !== 0) return undefined;
+  const prefix = (r.stdout || "").trim();
+  return prefix !== "" ? prefix : undefined;
+}
+
+/** Fail closed when local dump prefix would not match remote wp-config table_prefix. */
+export function assertTablePrefixesCompatible(
+  localPrefix: string | undefined,
+  remotePrefix: string | undefined,
+  context: string,
+): void {
+  const local = (localPrefix ?? "").trim();
+  const remote = (remotePrefix ?? "").trim();
+  if (!local || !remote) {
+    throw new Error(
+      `${context}: could not read table_prefix (local=${local || "?"}, remote=${remote || "?"}). ` +
+        `Refusing DB import to avoid orphan tables. Fix wp-config table_prefix on both sides and retry.`,
+    );
+  }
+  if (local !== remote) {
+    throw new Error(
+      `${context}: table_prefix mismatch (local "${local}" vs remote "${remote}"). ` +
+        `Align remote wp-config.php $table_prefix (excluded from rsync) with local before push/restore, ` +
+        `or change the local prefix to match. Refusing DB import.`,
+    );
+  }
+}
+
 export async function wpRemoteBootstrapConfigFromRemoteDb(
   ssh: SshSession,
   remotePath: string,

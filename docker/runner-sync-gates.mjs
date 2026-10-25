@@ -34,3 +34,17 @@ export function restoreEnvConfirmOk(env, confirm) {
   if (e === "staging" && !c) return false;
   return true;
 }
+
+/**
+ * Theme push: production requires confirm === SYNC_PRODUCTION (same bar as full push).
+ * Staging needs a non-empty confirm token (host). Returns CLI command or null.
+ */
+export function wpdevPushThemeCommand(env, confirm, buildFlag) {
+  const e = safeArg(env);
+  const c = safeArg(confirm);
+  if (!["staging", "production"].includes(e)) return null;
+  if (e === "production" && c !== "SYNC_PRODUCTION") return null;
+  if (e === "staging" && !c) return null;
+  const build = buildFlag === "1" || buildFlag === true ? " --build" : "";
+  return `npm run wp-dev -- push theme ${e} --yes${build}`;
+}
