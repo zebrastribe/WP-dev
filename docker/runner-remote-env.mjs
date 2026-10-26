@@ -3,6 +3,7 @@
  * Validates SSH-related fields against a strict allowlist before quoting.
  */
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolveIdentityFile } from "../dist/utils/remote-config-helpers.js";
 
 const SAFE = /^[a-zA-Z0-9._:@~/-]+$/;
@@ -37,10 +38,15 @@ export function readRemoteEnv(envName) {
 }
 
 export function sshOptsShell(remote) {
+  // -F /dev/null: host ~/.ssh/config is bind-mounted and owned by the workstation
+  // user; OpenSSH as root rejects it ("Bad owner or permissions").
+  const knownHosts = `${homedir()}/.ssh/known_hosts`;
   const parts = [
+    "-F /dev/null",
     "-o BatchMode=yes",
     "-o ConnectTimeout=15",
     "-o StrictHostKeyChecking=yes",
+    `-o UserKnownHostsFile=${shellQuote(knownHosts)}`,
   ];
   if (remote.port) parts.push(`-o Port=${remote.port}`);
   if (remote.key) parts.push(`-i ${shellQuote(remote.key)}`);

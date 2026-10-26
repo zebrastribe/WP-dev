@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as os from "node:os";
 import {
@@ -33,6 +33,8 @@ describe("rsync-ssh-env helpers", () => {
     });
     expect(env).toContain("-p 2222");
     expect(env).toContain(`-i '${keyPath}'`);
+    expect(env).toContain("-F /dev/null");
+    expect(env).toContain("UserKnownHostsFile=");
     expect(env).toContain("BatchMode=yes");
     expect(env).toContain("StrictHostKeyChecking=yes");
     expect(env).not.toContain("accept-new");
@@ -185,6 +187,18 @@ describe("compose-env", () => {
     const content = readFileSync(path, "utf8");
     expect(readEnvValue(content, "WP_PORT")).toBe("8888");
     expect(readEnvValue(content, "WPDEV_TERMINAL_PORT")).toBe("7681");
+  });
+
+  it("writeEnvFile keeps the same inode (file bind-mount safe)", async () => {
+    const { writeEnvFile, readEnvValue } = await import("../src/utils/compose-env.js");
+    const path = join(dir, ".env");
+    writeFileSync(path, "WP_PORT=8888\n", { mode: 0o660 });
+    const before = statSync(path).ino;
+    writeEnvFile(path, "WP_PORT=8894\nWORDPRESS_TABLE_PREFIX=wp_\n");
+    const after = statSync(path);
+    expect(after.ino).toBe(before);
+    expect(readEnvValue(readFileSync(path, "utf8"), "WP_PORT")).toBe("8894");
+    expect(statSync(`${path}.bak`).isFile()).toBe(true);
   });
 
   it("parseDockerEnvPorts applies defaults", async () => {

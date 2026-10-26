@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { RemoteEnvConfig } from "../config/schema.js";
 import { resolveIdentityFile } from "./remote-config-helpers.js";
 
@@ -19,14 +21,21 @@ export function buildSshRsyncEnv(remote: RemoteEnvConfig): string {
   assertSafeSshField("host", remote.host);
   assertSafeSshField("user", remote.user);
   assertSafeSshField("path", remote.path);
-  // Keepalive helps long transfers on shared hosting / flaky links (rsync uses this SSH).
+  // Ignore bind-mounted ~/.ssh/config: OpenSSH as root rejects a host-owned config
+  // ("Bad owner or permissions"). Identity + known_hosts are passed explicitly.
+  const knownHosts = join(homedir(), ".ssh", "known_hosts");
+  assertSafeSshField("knownHosts", knownHosts);
   const parts = [
     "ssh",
+    "-F",
+    "/dev/null",
     "-o",
     "BatchMode=yes",
     "-o",
     // Align with node-ssh assertSshHostPinned: refuse unknown/changed keys (no TOFU).
     "StrictHostKeyChecking=yes",
+    "-o",
+    `UserKnownHostsFile=${shellQuote(knownHosts)}`,
     "-o",
     "ServerAliveInterval=30",
     "-o",

@@ -1,7 +1,7 @@
-import { chmodSync, chownSync, existsSync, readFileSync } from "node:fs";
+import { chmodSync, chownSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { LoadedConfig } from "../config/load.js";
 import { writeWpDevConfig } from "../config/load.js";
-import { writeFileAtomic } from "../fs/atomic-write.js";
+import { fsAuditLog } from "../fs/audit-log.js";
 import { resolveHostIdentity } from "./host-paths.js";
 
 export type DockerEnvPortKey =
@@ -51,12 +51,19 @@ export function writeEnvFile(
   meta?: { configDir: string; projectId: string },
 ): void {
   const normalized = content.endsWith("\n") ? content : `${content}\n`;
-  writeFileAtomic(path, normalized, {
-    configDir: meta?.configDir,
-    projectId: meta?.projectId,
-    backup: true,
-    mode: 0o660,
-  });
+  // docker/.env is a Docker *file* bind-mount. Atomic rename replaces the host inode
+  // while the container keeps the old one (nlink=0), so never rename-replace here.
+  if (existsSync(path)) {
+    try {
+      copyFileSync(path, `${path}.bak`);
+    } catch {
+      /* non-fatal */
+    }
+  }
+  writeFileSync(path, normalized, { mode: 0o660 });
+  if (meta?.configDir && meta.projectId) {
+    fsAuditLog(meta.configDir, meta.projectId, "fs.write_atomic", { path });
+  }
   // When the CLI runs as root inside the terminal container, keep host:www-data
   // ownership so host CLI + Apache can both read secrets (and UI job polls don't
   // briefly see runner_secrets_unavailable).

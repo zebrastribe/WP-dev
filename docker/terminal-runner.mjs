@@ -109,7 +109,7 @@ function commandForAction(action, args) {
     // Verify the configured site root before listing — catches mistyped parents early.
     // Keep $P as a remote shell var (escape $ so Node template literals do not eat it).
     return (
-      `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} ` +
+      `ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no -o UserKnownHostsFile=/root/.ssh/known_hosts ${user}@${host} ` +
       `'set -e; P=${path}; ` +
       `test -d "\$P" || { echo "FAIL: path does not exist: \$P"; exit 1; }; ` +
       `if [ ! -f "\$P/wp-config.php" ] && [ ! -f "\$P/wp-config-sample.php" ]; then ` +
