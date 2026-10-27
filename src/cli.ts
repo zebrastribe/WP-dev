@@ -367,12 +367,17 @@ async function main(): Promise<void> {
     )
     .option("--lifecycle", "Check service manager lock, registry, and shutdown state")
     .option("--filesystem", "Check filesystem ownership profiles and writable paths")
-    .action(async (env: string | undefined, opts: { rsync?: boolean; http?: boolean; localHttp?: boolean; lifecycle?: boolean; filesystem?: boolean }) => {
+    .option(
+      "--local",
+      "Localhost only: skip staging/production SSH and DNS (safe for dogfood)",
+    )
+    .action(async (env: string | undefined, opts: { rsync?: boolean; http?: boolean; localHttp?: boolean; lifecycle?: boolean; filesystem?: boolean; local?: boolean }) => {
       const rsync = Boolean(opts.rsync);
       const http = Boolean(opts.http);
       const localHttp = Boolean(opts.localHttp);
       const lifecycle = Boolean(opts.lifecycle);
       const filesystem = Boolean(opts.filesystem);
+      const localOnly = Boolean(opts.local);
       const envTrim = env?.trim();
       const parsedEnv =
         envTrim && envTrim.length > 0 ? parseRemoteEnv(envTrim) : undefined;
@@ -382,6 +387,7 @@ async function main(): Promise<void> {
         localHttp ? " --local-http" : "",
         lifecycle ? " --lifecycle" : "",
         filesystem ? " --filesystem" : "",
+        localOnly ? " --local" : "",
       ].join("");
       const label = parsedEnv ? `doctor ${parsedEnv}${flags}` : `doctor${flags}`;
       await runWithConfig(label, (loaded) =>
@@ -392,6 +398,7 @@ async function main(): Promise<void> {
           localHttpCheck: localHttp,
           lifecycleCheck: lifecycle,
           filesystemCheck: filesystem,
+          localOnly,
         }),
       );
     });

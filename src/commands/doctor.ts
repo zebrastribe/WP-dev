@@ -40,6 +40,8 @@ export type DoctorOptions = {
   localHttpCheck: boolean;
   lifecycleCheck?: boolean;
   filesystemCheck?: boolean;
+  /** Skip staging/production SSH/DNS (localhost-only). */
+  localOnly?: boolean;
 };
 
 function printSimplyStagingDnsHint(loaded: LoadedConfig): void {
@@ -400,6 +402,16 @@ export async function cmdDoctor(loaded: LoadedConfig, options: DoctorOptions): P
   if (options.filesystemCheck) {
     const fs = await checkFilesystem(loaded);
     if (fs === "fail") failed += 1;
+  }
+
+  if (options.localOnly) {
+    console.error("");
+    if (failed > 0) {
+      console.error(`doctor finished with ${failed} failure(s). Fix issues above, then retry.`);
+      throw new Error(`wp-dev doctor: ${failed} check(s) failed`);
+    }
+    console.error("doctor: local checks passed (remotes skipped via --local).");
+    return;
   }
 
   const targets: RemoteEnvName[] = options.env
