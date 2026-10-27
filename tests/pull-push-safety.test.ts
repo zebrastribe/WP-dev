@@ -48,6 +48,7 @@ describe("pull/push safety guards", () => {
     expect(pull).toContain("confirmRemoteTarget");
     expect(pull).toContain("confirmHost");
     expect(wpcli).toContain("--precise");
+    expect(wpcli).toContain("--all-tables-with-prefix");
   });
 
   it("pull and pull-theme reconcile permissions after rsync (FS_METHOD=direct)", () => {

@@ -259,6 +259,8 @@ export async function wpRemoteSearchReplace(
     to,
     "--skip-columns=guid",
     "--precise",
+    // Yoast / other plugin tables share the prefix but are not always registered.
+    "--all-tables-with-prefix",
   ]);
   if (r.code !== 0) {
     throw new Error(`Remote wp search-replace failed: ${r.stderr || r.stdout}`);
@@ -540,7 +542,15 @@ async function wpLocalSearchReplaceRaw(
   to: string,
   regex: boolean,
 ): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
-  const args = ["search-replace", from, to, "--skip-columns=guid", "--precise"];
+  const args = [
+    "search-replace",
+    from,
+    to,
+    "--skip-columns=guid",
+    "--precise",
+    // Yoast / other plugin tables share the prefix but are not always registered.
+    "--all-tables-with-prefix",
+  ];
   if (regex) args.push("--regex");
   const r = await wpLocalRaw(configDir, config, args);
   return {
