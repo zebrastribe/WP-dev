@@ -54,4 +54,19 @@ describe("restore-archive-order (F-018)", () => {
     expect(slice).toContain("runLocalWordpressFileMutation");
     expect(slice.indexOf("runLocalWordpressFileMutation")).toBeLessThan(slice.indexOf('rsync"'));
   });
+
+  it("local SQL restore rolls back from pre-restore on import failure", () => {
+    const src = readFileSync(join("src/commands/restore.ts"), "utf8");
+    const start = src.indexOf("restore local: pre-restore db backup");
+    const slice = src.slice(start, src.indexOf("if (isArchive)", start));
+    expect(slice).toContain("rolling back DB from ${preRestore}");
+    expect(slice).toContain("await wpLocalDbImportFromFile(configDir, config, preRestore)");
+  });
+
+  it("local archive DB import failure rolls back from pre-restore", () => {
+    const src = readFileSync(join("src/commands/restore.ts"), "utf8");
+    const fnStart = src.indexOf("async function restoreLocalArchive");
+    const slice = src.slice(fnStart, src.indexOf("async function restoreRemoteArchive"));
+    expect(slice).toContain("rolling back from ${preRestore}");
+  });
 });

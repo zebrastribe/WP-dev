@@ -140,10 +140,23 @@ async function restoreLocalArchive(
         await wpLocalDbImportFromFile(configDir, config, dbSql);
       } catch (dbErr) {
         const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
-        throw new Error(
-          `Local archive files were restored, but DB import failed (${msg}). ` +
-            `Pre-restore DB backup is at ${preRestore}. Re-import it manually if needed, then retry.`,
-        );
+        logInfo(`restore local archive: DB import failed — rolling back from ${preRestore}`);
+        try {
+          await wpLocalDbImportFromFile(configDir, config, preRestore);
+          throw new Error(
+            `Local archive files were restored, but DB import failed (${msg}). ` +
+              `DB rolled back from pre-restore backup: ${preRestore}.`,
+          );
+        } catch (rollbackErr) {
+          if (rollbackErr instanceof Error && rollbackErr.message.includes("DB rolled back")) {
+            throw rollbackErr;
+          }
+          const rb = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+          throw new Error(
+            `Local archive files were restored, but DB import failed (${msg}). ` +
+              `DB rollback also failed (${rb}). Pre-restore dump: ${preRestore}.`,
+          );
+        }
       }
     });
     return kind;
@@ -335,7 +348,24 @@ export async function cmdRestore(
       assertTablePrefixesCompatible(dumpPrefix, localPrefix, "restore local");
       await wpLocalDbExportToFile(configDir, config, preRestore);
       chownBackupArtifact(preRestore, configDir);
-      await wpLocalDbImportFromFile(configDir, config, resolvedFile);
+      try {
+        await wpLocalDbImportFromFile(configDir, config, resolvedFile);
+      } catch (importErr) {
+        logInfo(`restore local: import failed — rolling back DB from ${preRestore}`);
+        try {
+          await wpLocalDbImportFromFile(configDir, config, preRestore);
+          console.error(
+            `Local restore failed; rolled back DB from pre-restore backup: ${preRestore}`,
+          );
+        } catch (rollbackErr) {
+          const rb = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+          console.error(
+            `Warning: local restore failed and DB rollback also failed (${rb}). ` +
+              `Pre-restore dump kept at: ${preRestore}`,
+          );
+        }
+        throw importErr;
+      }
       console.error(`Local database restored from backup. Pre-restore DB backup: ${preRestore}`);
       return;
     }

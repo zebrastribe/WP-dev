@@ -659,6 +659,9 @@ if ($method === 'GET' && $action === 'auth-status') {
     ];
     if ($authenticated) {
         $payload['nonce'] = wpdev_admin_session_nonce();
+    } elseif (wpdev_is_local_admin_request()) {
+        // Challenge cookie for a later auth-bootstrap POST (blocks one-shot header spoof).
+        wpdev_issue_bootstrap_challenge();
     }
     wpdev_admin_api_log('GET auth-status 200 authenticated=' . ($authenticated ? '1' : '0'));
     echo json_encode($payload, JSON_UNESCAPED_SLASHES);
@@ -671,11 +674,15 @@ if ($method === 'POST' && $action === 'auth-bootstrap') {
         wpdev_admin_api_log('POST auth-bootstrap 403 not_local');
         exit;
     }
-    // Browser same-origin fetch only — blocks in-container PHP/curl (REMOTE_ADDR loopback
-    // alone is unsafe: Apache inside WordPress sees 127.0.0.1 for local RCE clients).
+    // Browser same-origin fetch + Origin match — Sec-Fetch-Site alone is spoofable.
     if (!wpdev_is_browser_fetch_request()) {
         wpdev_json_error(403, 'forbidden', 'Auto unlock requires a same-origin browser request.');
         wpdev_admin_api_log('POST auth-bootstrap 403 not_browser_fetch');
+        exit;
+    }
+    if (!wpdev_consume_bootstrap_challenge()) {
+        wpdev_json_error(403, 'forbidden', 'Auto unlock requires a prior auth-status challenge.');
+        wpdev_admin_api_log('POST auth-bootstrap 403 missing_bootstrap_challenge');
         exit;
     }
     $resolved = $token;

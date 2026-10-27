@@ -36,7 +36,8 @@ describe("assertValidSqlDump", () => {
   const validDump =
     "-- MySQL dump 10.13\n" +
     "CREATE TABLE `wp_options` (\n`option_id` bigint\n);\n" +
-    "INSERT INTO `wp_options` VALUES (1,'siteurl','http://localhost');\n".repeat(8);
+    "INSERT INTO `wp_options` VALUES (1,'siteurl','http://localhost');\n".repeat(8) +
+    "\n-- Dump completed on 2026-10-27 17:54:15\n";
 
   it("accepts a normal mysqldump export", () => {
     expect(() => assertValidSqlDump(validDump)).not.toThrow();
@@ -44,6 +45,14 @@ describe("assertValidSqlDump", () => {
 
   it("rejects tiny dumps", () => {
     expect(() => assertValidSqlDump("CREATE TABLE x;")).toThrow(/too small/i);
+  });
+
+  it("rejects dumps missing the completed footer (truncated)", () => {
+    const truncated =
+      "-- MySQL dump 10.13\n" +
+      "CREATE TABLE `wp_options` (\n`option_id` bigint\n);\n" +
+      "INSERT INTO `wp_options` VALUES (1,'siteurl','http://localhost');\n".repeat(8);
+    expect(() => assertValidSqlDump(truncated)).toThrow(/dump-completed footer/i);
   });
 });
 

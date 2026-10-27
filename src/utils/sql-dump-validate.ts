@@ -10,6 +10,8 @@ export function assertValidSqlDump(content: string, label = "SQL dump"): void {
   const hasHeader = /(?:^|\n)-- (?:MySQL|MariaDB) dump/i.test(content);
   const hasCreate = /CREATE TABLE/i.test(content);
   const hasData = /INSERT INTO|LOCK TABLES/i.test(content);
+  // mysqldump / MariaDB finish with this line — truncated mid-import dumps lack it.
+  const hasCompletedFooter = /(?:^|\n)-- Dump completed on /i.test(content);
   if (!hasCreate) {
     throw new Error(`${label} is missing CREATE TABLE statements.`);
   }
@@ -18,6 +20,11 @@ export function assertValidSqlDump(content: string, label = "SQL dump"): void {
   }
   if (!hasHeader && content.length < 512) {
     throw new Error(`${label} does not look like a mysqldump export.`);
+  }
+  if (!hasCompletedFooter) {
+    throw new Error(
+      `${label} is missing the dump-completed footer (file may be truncated or incomplete).`,
+    );
   }
 }
 

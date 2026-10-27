@@ -11,7 +11,7 @@ import {
   timestampedPreRestoreName,
 } from "../src/services/backup.js";
 import { listRecentBackups } from "../src/commands/backup.js";
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { homedir } from "node:os";
@@ -103,5 +103,14 @@ describe("backup service", () => {
     expect(recent[0]).toBe(newer);
     expect(recent[1]).toBe(older);
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("cmdBackup acquires the project sync lock before work", () => {
+    const src = readFileSync(join("src/commands/backup.ts"), "utf8");
+    const fn = src.indexOf("export async function cmdBackup");
+    const body = src.slice(fn, src.indexOf("async function cmdBackupFull"));
+    expect(body).toContain("acquireSyncLock(loaded.config.project, `backup:${env}`)");
+    expect(body).toContain("releaseSyncLock(syncLock)");
+    expect(body.indexOf("acquireSyncLock")).toBeLessThan(body.indexOf("wpLocalDbExportToFile"));
   });
 });

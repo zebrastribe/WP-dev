@@ -32,6 +32,7 @@ import {
 } from "../utils/disk-space.js";
 import { logInfo } from "../utils/logger.js";
 import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
+import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
 
 export type BackupTarget = RemoteEnvName | "local";
 
@@ -71,58 +72,63 @@ export async function cmdBackup(
   env: BackupTarget,
   options: BackupOptions = {},
 ): Promise<void> {
-  if (options.complete) {
-    await cmdBackupComplete(loaded, env);
-    return;
-  }
-  if (options.files) {
-    await cmdBackupFull(loaded, env);
-    return;
-  }
+  const syncLock = acquireSyncLock(loaded.config.project, `backup:${env}`);
+  try {
+    if (options.complete) {
+      await cmdBackupComplete(loaded, env);
+      return;
+    }
+    if (options.files) {
+      await cmdBackupFull(loaded, env);
+      return;
+    }
 
-  const { config, configDir } = loaded;
-  const dir = ensureBackupDir(config.project, env);
-  const name = timestampedDbName();
-  const outPath = join(dir, name);
+    const { config, configDir } = loaded;
+    const dir = ensureBackupDir(config.project, env);
+    const name = timestampedDbName();
+    const outPath = join(dir, name);
 
-  logInfo(`backup ${env} -> ${outPath}`);
-  assertLocalFreeSpace(dir, DISK_NEED.dbBackupLocal, `backup ${env} (database)`);
+    logInfo(`backup ${env} -> ${outPath}`);
+    assertLocalFreeSpace(dir, DISK_NEED.dbBackupLocal, `backup ${env} (database)`);
 
-  if (env === "local") {
-    await assertLocalWpInstalled(configDir, config);
+    if (env === "local") {
+      await assertLocalWpInstalled(configDir, config);
+      try {
+        await wpLocalDbExportToFile(configDir, config, outPath);
+      } catch (e) {
+        throw wrapNoSpaceError(e, `backup ${env} (database)`);
+      }
+      chownBackupArtifact(outPath, configDir);
+      console.error(`Local database backup written to ${outPath}`);
+      return;
+    }
+
+    const remote = getRemoteEnv(config, env);
+    const ssh = await connectSsh(remote);
     try {
-      await wpLocalDbExportToFile(configDir, config, outPath);
+      await assertRemotePathSafe(ssh, remote.path, env);
+      await assertRemoteFreeSpace(
+        ssh,
+        "/tmp",
+        DISK_NEED.dbBackupRemoteTmp,
+        `backup ${env} (database)`,
+      );
+      const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
+      const remoteDump = `/tmp/wp-dev-backup-${Date.now()}.sql`;
+      await wpRemoteDbExport(ssh, wpPath, remoteDump);
+      await ssh.getFile(remoteDump, outPath);
+      await ssh.exec(remoteRmFile(remoteDump));
     } catch (e) {
       throw wrapNoSpaceError(e, `backup ${env} (database)`);
+    } finally {
+      ssh.dispose();
     }
+
     chownBackupArtifact(outPath, configDir);
-    console.error(`Local database backup written to ${outPath}`);
-    return;
-  }
-
-  const remote = getRemoteEnv(config, env);
-  const ssh = await connectSsh(remote);
-  try {
-    await assertRemotePathSafe(ssh, remote.path, env);
-    await assertRemoteFreeSpace(
-      ssh,
-      "/tmp",
-      DISK_NEED.dbBackupRemoteTmp,
-      `backup ${env} (database)`,
-    );
-    const wpPath = await assertRemoteWpInstalled(ssh, remote.path);
-    const remoteDump = `/tmp/wp-dev-backup-${Date.now()}.sql`;
-    await wpRemoteDbExport(ssh, wpPath, remoteDump);
-    await ssh.getFile(remoteDump, outPath);
-    await ssh.exec(remoteRmFile(remoteDump));
-  } catch (e) {
-    throw wrapNoSpaceError(e, `backup ${env} (database)`);
+    console.error(`${env} database backup written to ${outPath}`);
   } finally {
-    ssh.dispose();
+    releaseSyncLock(syncLock);
   }
-
-  chownBackupArtifact(outPath, configDir);
-  console.error(`${env} database backup written to ${outPath}`);
 }
 
 async function cmdBackupFull(

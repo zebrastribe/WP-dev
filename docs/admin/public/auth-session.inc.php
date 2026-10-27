@@ -155,16 +155,79 @@ function wpdev_is_local_admin_request(): bool
 }
 
 /**
- * True for same-origin browser fetches (Sec-Fetch-Site). In-container PHP/curl
- * typically omits these headers — blocks RCE→admin-session without extra unlock steps.
+ * True for same-origin browser fetches. Requires Sec-Fetch-Site + Sec-Fetch-Mode
+ * and an Origin that matches HTTP_HOST — spoofing only Sec-Fetch-Site is not enough.
  */
 function wpdev_is_browser_fetch_request(): bool
 {
     $site = strtolower(trim((string) ($_SERVER['HTTP_SEC_FETCH_SITE'] ?? '')));
-    if ($site === '') {
+    if ($site !== 'same-origin') {
         return false;
     }
-    return $site === 'same-origin';
+    $mode = strtolower(trim((string) ($_SERVER['HTTP_SEC_FETCH_MODE'] ?? '')));
+    if ($mode !== 'cors' && $mode !== 'navigate') {
+        return false;
+    }
+    return wpdev_request_origin_matches_host();
+}
+
+/** Origin host[:port] must match HTTP_HOST (blocks header-only spoof without Origin). */
+function wpdev_request_origin_matches_host(): bool
+{
+    $origin = trim((string) ($_SERVER['HTTP_ORIGIN'] ?? ''));
+    $hostHeader = strtolower(trim((string) ($_SERVER['HTTP_HOST'] ?? '')));
+    if ($origin === '' || $hostHeader === '') {
+        return false;
+    }
+    $parts = parse_url($origin);
+    if (!is_array($parts) || empty($parts['host'])) {
+        return false;
+    }
+    $originHost = strtolower((string) $parts['host']);
+    if (isset($parts['port'])) {
+        $originHost .= ':' . (int) $parts['port'];
+    }
+    return hash_equals($hostHeader, $originHost);
+}
+
+/** Issue a short-lived HttpOnly challenge cookie (requires prior GET auth-status). */
+function wpdev_issue_bootstrap_challenge(): void
+{
+    wpdev_session_start();
+    $existing = $_SESSION['wpdev_bootstrap_challenge'] ?? null;
+    if (!is_string($existing) || $existing === '') {
+        $existing = bin2hex(random_bytes(16));
+        $_SESSION['wpdev_bootstrap_challenge'] = $existing;
+    }
+    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+    setcookie('WPDEV_BOOTSTRAP', $existing, [
+        'expires' => time() + 600,
+        'path' => '/admin/',
+        'secure' => $secure,
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
+}
+
+/** Validate and consume the bootstrap challenge cookie + session value. */
+function wpdev_consume_bootstrap_challenge(): bool
+{
+    wpdev_session_start();
+    $expected = $_SESSION['wpdev_bootstrap_challenge'] ?? null;
+    unset($_SESSION['wpdev_bootstrap_challenge']);
+    $provided = $_COOKIE['WPDEV_BOOTSTRAP'] ?? '';
+    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+    setcookie('WPDEV_BOOTSTRAP', '', [
+        'expires' => time() - 42000,
+        'path' => '/admin/',
+        'secure' => $secure,
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
+    if (!is_string($expected) || $expected === '' || !is_string($provided) || $provided === '') {
+        return false;
+    }
+    return hash_equals($expected, $provided);
 }
 
 /** Refuse wp-dev admin API on public hosts (staging/production). */
