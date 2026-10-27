@@ -8,8 +8,18 @@ const remoteDbSchema = z.object({
   prefix: z.string().min(1).optional(),
 });
 
+/** Hostname / IP — reject spaces and shell metacharacters (dogfood injection canaries). */
+const sshHostSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .regex(
+    /^[a-zA-Z0-9._:-]+$/,
+    "must be a hostname or IP (letters, digits, . _ : - only)",
+  );
+
 const remoteEnvSchema = z.object({
-  host: z.string().min(1),
+  host: sshHostSchema,
   user: z.string().min(1),
   path: z.string().min(1),
   url: z.string().url(),

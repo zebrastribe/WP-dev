@@ -4,8 +4,27 @@ import {
   existsSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { ZodError } from "zod";
 import { wpDevConfigSchema, type WpDevConfig } from "./schema.js";
 import { writeFileAtomic } from "../fs/atomic-write.js";
+
+/** Human-readable errors for corrupt or invalid wp-dev.config.json (include file path). */
+export function formatConfigFileError(path: string, err: unknown): Error {
+  if (err instanceof SyntaxError) {
+    return new Error(`Invalid JSON in ${path}: ${err.message}`);
+  }
+  if (err instanceof ZodError) {
+    const lines = err.issues.map((issue) => {
+      const where = issue.path.length > 0 ? issue.path.join(".") : "(root)";
+      return `  - ${where}: ${issue.message}`;
+    });
+    return new Error(`Invalid config in ${path}:\n${lines.join("\n")}`);
+  }
+  if (err instanceof Error) {
+    return new Error(`${path}: ${err.message}`);
+  }
+  return new Error(`${path}: ${String(err)}`);
+}
 
 const CONFIG_NAMES = ["wp-dev.config.json"];
 const EXAMPLE_NAME = "wp-dev.config.example.json";
@@ -37,9 +56,18 @@ export function loadConfig(cwd = process.cwd()): LoadedConfig {
     );
   }
   const path = join(configDir, "wp-dev.config.json");
-  const raw = JSON.parse(readFileSync(path, "utf8"));
-  const config = wpDevConfigSchema.parse(raw);
-  return { config, configDir };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    throw formatConfigFileError(path, e);
+  }
+  try {
+    const config = wpDevConfigSchema.parse(raw);
+    return { config, configDir };
+  } catch (e) {
+    throw formatConfigFileError(path, e);
+  }
 }
 
 /** Walk upward from `cwd` for a directory containing `wp-dev.config.example.json`. */

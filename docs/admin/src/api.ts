@@ -212,7 +212,19 @@ export function formatTerminalRunnerSecretsError(
 let terminalRunnerPort = 7682;
 let syncRunnerPort = 7683;
 
+export type LoadWpDevConfigResult =
+  | { status: "ok"; config: Record<string, unknown> }
+  | { status: "missing" }
+  | { status: "invalid"; detail: string }
+  | { status: "error"; detail: string };
+
+/** @deprecated Prefer loadWpDevConfigDetailed — kept for call sites that only need the object. */
 export async function loadWpDevConfig(): Promise<Record<string, unknown> | null> {
+  const r = await loadWpDevConfigDetailed();
+  return r.status === "ok" ? r.config : null;
+}
+
+export async function loadWpDevConfigDetailed(): Promise<LoadWpDevConfigResult> {
   const url = apiPhpUrl("load");
   const t0 = performance.now();
   logAdmin("info", "loadWpDevConfig: request started", url);
@@ -225,33 +237,51 @@ export async function loadWpDevConfig(): Promise<Record<string, unknown> | null>
     const ms = Math.round(performance.now() - t0);
     if (res.status === 404) {
       logAdmin("info", "loadWpDevConfig: no file yet (404)", `${ms}ms`);
-      return null;
+      return { status: "missing" };
     }
     let data: unknown;
     try {
       data = await res.json();
-    } catch (e) {
+    } catch {
       logAdmin("error", "loadWpDevConfig: response is not JSON", `${res.status} ${ms}ms`);
-      return null;
+      return {
+        status: "invalid",
+        detail: "wp-dev.config.json could not be parsed as JSON.",
+      };
     }
     if (!data || typeof data !== "object") {
       logAdmin("warn", "loadWpDevConfig: empty or non-object body", `${res.status} ${ms}ms`);
-      return null;
+      return { status: "invalid", detail: "wp-dev.config.json is empty or not an object." };
     }
     const o = data as Record<string, unknown>;
     if (o.ok === false) {
-      logAdmin("info", "loadWpDevConfig: API returned ok=false", String(o.error ?? ""));
-      return null;
+      const detail =
+        typeof o.detail === "string"
+          ? o.detail
+          : String(o.error ?? "invalid config");
+      logAdmin("info", "loadWpDevConfig: API returned ok=false", detail);
+      if (res.status === 422 || o.error === "invalid_json") {
+        return { status: "invalid", detail };
+      }
+      return { status: "error", detail };
     }
     if (typeof o.project === "string") {
-      logAdmin("info", "loadWpDevConfig: loaded config from server", `project=${o.project} ${ms}ms HTTP ${res.status}`);
-      return o;
+      logAdmin(
+        "info",
+        "loadWpDevConfig: loaded config from server",
+        `project=${o.project} ${ms}ms HTTP ${res.status}`,
+      );
+      return { status: "ok", config: o };
     }
     logAdmin("warn", "loadWpDevConfig: JSON missing project field", `${ms}ms`);
-    return null;
+    return {
+      status: "invalid",
+      detail: "wp-dev.config.json is missing a string project field.",
+    };
   } catch (e) {
-    logAdmin("error", "loadWpDevConfig: network or fetch failed", e instanceof Error ? e.message : String(e));
-    return null;
+    const detail = e instanceof Error ? e.message : String(e);
+    logAdmin("error", "loadWpDevConfig: network or fetch failed", detail);
+    return { status: "error", detail };
   }
 }
 

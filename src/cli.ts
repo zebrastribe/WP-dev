@@ -74,7 +74,7 @@ async function runWithConfig(
     const detail = e instanceof Error ? e.stack || e.message : String(e);
     // Expected refusals: message only (no stack in UI/runner panel). Unexpected: keep stack in the log.
     const expectedRefuse =
-      /^(Restore refused|Backup file not found|Path safety FAIL|Refusing to |SSH host )/i.test(
+      /^(Restore refused|Backup file not found|Path safety FAIL|Refusing to |SSH host |Invalid JSON in |Invalid config in )/i.test(
         short,
       ) || /user aborted/i.test(short);
     // logError mirrors to stderr once — enough for CLI + runner panel (no extra console.error).

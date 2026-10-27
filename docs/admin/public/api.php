@@ -746,6 +746,20 @@ if ($method === 'GET' && $action === 'load') {
         wpdev_admin_api_log('GET load 500 read_failed');
         exit;
     }
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        http_response_code(422);
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => 'invalid_json',
+                'detail' => 'wp-dev.config.json exists but is not valid JSON. Fix or replace the file before saving from Setup.',
+            ],
+            JSON_UNESCAPED_SLASHES,
+        );
+        wpdev_admin_api_log('GET load 422 invalid_json');
+        exit;
+    }
     $len = strlen($raw);
     wpdev_admin_api_log("GET load 200 bytes={$len}");
     echo $raw;

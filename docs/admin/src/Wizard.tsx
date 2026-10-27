@@ -7,7 +7,7 @@ import {
   loadStagingDbSecrets,
   loadSimplyStatus,
   loadLocalStatus,
-  loadWpDevConfig,
+  loadWpDevConfigDetailed,
   runTerminalAction,
   saveDockerEnvSecrets,
   saveWpDevConfig,
@@ -373,7 +373,10 @@ export function Wizard() {
       setLoading(true);
       logAdmin("info", "Wizard: loading configuration from API or draft");
       try {
-        const [loaded, status] = await Promise.all([loadWpDevConfig(), loadLocalStatus()]);
+        const [loadedResult, status] = await Promise.all([
+          loadWpDevConfigDetailed(),
+          loadLocalStatus(),
+        ]);
         if (cancelled) return;
         if (status.ok) {
           setLocalStatus(status);
@@ -381,7 +384,15 @@ export function Wizard() {
             setSetupWorkflow(status.hasSyncedContent ? "local-only" : "pull");
           }
         }
-        if (loaded && typeof loaded.project === "string") {
+        if (loadedResult.status === "invalid") {
+          setAlert({
+            tone: "error",
+            text:
+              `Corrupt wp-dev.config.json: ${loadedResult.detail} ` +
+              "Fix the file on disk (or restore a backup) before saving from Setup — Save would overwrite it.",
+          });
+        } else if (loadedResult.status === "ok" && typeof loadedResult.config.project === "string") {
+          const loaded = loadedResult.config;
           setExistingConfig(loaded as Record<string, unknown>);
           const loadedLocalUrl = String((loaded.local as WizardData["local"])?.url ?? defaults().local.url);
           const aligned = alignLocalUrlToCurrentBrowser(loadedLocalUrl);
@@ -466,11 +477,16 @@ export function Wizard() {
             } catch (e) {
               logAdmin("warn", "Wizard: draft in localStorage is invalid JSON", e instanceof Error ? e.message : "");
             }
-          } else {
+          } else if (loadedResult.status === "missing") {
             logAdmin("info", "Wizard: no server config and no draft — using defaults");
             setAlert({
               tone: "info",
               text: "No wp-dev.config.json on the server yet (or not readable). Defaults are shown — complete the steps and save.",
+            });
+          } else if (loadedResult.status === "error") {
+            setAlert({
+              tone: "error",
+              text: `Could not load wp-dev.config.json: ${loadedResult.detail}`,
             });
           }
         }
