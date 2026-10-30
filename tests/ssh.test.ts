@@ -209,7 +209,7 @@ describe("formatSshAuthError", () => {
     expect(msg).toContain("deploy@example.com:2222");
   });
 
-  it("maps ssh2 encrypted key error to passphrase hint", () => {
+  it("maps ssh2 encrypted key error to passphrase hint (with agent)", () => {
     const prevSock = process.env.SSH_AUTH_SOCK;
     process.env.SSH_AUTH_SOCK = "/tmp/ssh-agent.sock";
     try {
@@ -220,14 +220,15 @@ describe("formatSshAuthError", () => {
         [{ label: "key", message: "Encrypted private OpenSSH key detected, but no passphrase given" }],
       );
       expect(msg).toContain("passphrase-protected");
-      expect(msg).toContain("ssh-add");
+      expect(msg).toContain("Load it with: ssh-add");
+      expect(msg).not.toContain("Start an ssh-agent");
     } finally {
       if (prevSock === undefined) delete process.env.SSH_AUTH_SOCK;
       else process.env.SSH_AUTH_SOCK = prevSock;
     }
   });
 
-  it("maps ssh2 Cannot parse encrypted key error to passphrase hint", () => {
+  it("maps ssh2 Cannot parse encrypted key error to passphrase hint (no agent)", () => {
     const prevSock = process.env.SSH_AUTH_SOCK;
     delete process.env.SSH_AUTH_SOCK;
     try {
@@ -238,7 +239,8 @@ describe("formatSshAuthError", () => {
         [{ label: "key", message: "Cannot parse privateKey: Encrypted OpenSSH key" }],
       );
       expect(msg).toContain("passphrase-protected");
-      expect(msg).toContain("ssh-agent");
+      expect(msg).toContain("Start an ssh-agent");
+      expect(msg).not.toContain("Load it with: ssh-add");
     } finally {
       if (prevSock === undefined) delete process.env.SSH_AUTH_SOCK;
       else process.env.SSH_AUTH_SOCK = prevSock;

@@ -62,6 +62,9 @@ describe("fs atomic-write", () => {
     expect(thrownError).not.toBeNull();
     expect(thrownError!.message).toMatch(/EACCES|EPERM/);
     expect(thrownError!.message).toContain(target);
+    const nodeErr = thrownError as NodeJS.ErrnoException;
+    expect(nodeErr.syscall).toBe("open");
+    expect(thrownError!.message).not.toContain("copyfile");
 
     expect(readFileSync(target, "utf8")).toBe('{"v":1}\n');
 
