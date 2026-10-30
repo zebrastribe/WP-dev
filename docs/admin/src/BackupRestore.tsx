@@ -1,18 +1,99 @@
-import { useState } from "react";
-import { getTerminalJobStatus, runTerminalAction } from "./api";
+import { useState, useEffect, useRef } from "react";
+import { getTerminalJobStatus, runTerminalAction, loadWpDevConfig } from "./api";
 import { useRunnerSecrets } from "./useRunnerSecrets";
 
 type EnvName = "local" | "staging" | "production";
 type BackupKind = "db" | "full" | "complete";
+type RestorePathStatus = "idle" | "validating" | "valid" | "invalid";
 
 export function BackupRestore() {
   const { runnerReady, runnerMessage, canRun } = useRunnerSecrets();
   const [env, setEnv] = useState<EnvName>("local");
   const [backupKind, setBackupKind] = useState<BackupKind>("full");
   const [restoreFile, setRestoreFile] = useState("");
+  const [restorePathStatus, setRestorePathStatus] = useState<RestorePathStatus>("idle");
+  const [restorePathMessage, setRestorePathMessage] = useState("");
   const [productionConfirm, setProductionConfirm] = useState("");
+  const [stagingHost, setStagingHost] = useState("");
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
+  const validateTimeoutRef = useRef<number | null>(null);
+  const validateRequestIdRef = useRef(0);
+  const validatedForRef = useRef<{ path: string; env: EnvName } | null>(null);
+
+  useEffect(() => {
+    void loadWpDevConfig().then((cfg) => {
+      if (!cfg) return;
+      const host = (cfg.staging as { host?: string })?.host ?? "";
+      if (host && !host.includes("example.invalid")) {
+        setStagingHost(host);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (validateTimeoutRef.current) {
+      window.clearTimeout(validateTimeoutRef.current);
+    }
+    const pathTrimmed = restoreFile.trim();
+    if (!pathTrimmed || !canRun) {
+      setRestorePathStatus("idle");
+      setRestorePathMessage("");
+      validatedForRef.current = null;
+      return;
+    }
+    if (
+      validatedForRef.current &&
+      validatedForRef.current.path === pathTrimmed &&
+      validatedForRef.current.env === env
+    ) {
+      return;
+    }
+    setRestorePathStatus("validating");
+    setRestorePathMessage("Checking path...");
+    validatedForRef.current = null;
+
+    const requestId = ++validateRequestIdRef.current;
+    const currentEnv = env;
+    validateTimeoutRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const started = await runTerminalAction("validate_restore_path", { env: currentEnv, file: pathTrimmed });
+          if (validateRequestIdRef.current !== requestId) return;
+          if (!started.ok) {
+            setRestorePathStatus("invalid");
+            setRestorePathMessage(started.error || "Validation failed (transient - retry allowed)");
+            return;
+          }
+          for (let i = 0; i < 30; i += 1) {
+            if (validateRequestIdRef.current !== requestId) return;
+            const st = await getTerminalJobStatus(started.jobId);
+            if (validateRequestIdRef.current !== requestId) return;
+            if (!st.ok) {
+              setRestorePathStatus("invalid");
+              setRestorePathMessage(st.error || "Status check failed (transient - retry allowed)");
+              return;
+            }
+            if (st.status === "done") {
+              const isValid = st.exitCode === 0 && st.output.includes("VALID:");
+              setRestorePathStatus(isValid ? "valid" : "invalid");
+              setRestorePathMessage(st.output.trim());
+              validatedForRef.current = { path: pathTrimmed, env: currentEnv };
+              return;
+            }
+            await new Promise((r) => window.setTimeout(r, 200));
+          }
+          if (validateRequestIdRef.current !== requestId) return;
+          setRestorePathStatus("invalid");
+          setRestorePathMessage("Validation timed out (transient - retry allowed)");
+        } catch (e) {
+          if (validateRequestIdRef.current !== requestId) return;
+          setRestorePathStatus("invalid");
+          setRestorePathMessage(e instanceof Error ? e.message : "Validation failed (transient - retry allowed)");
+        }
+      })();
+    }, 500);
+  }, [restoreFile, env, canRun]);
 
   const runAction = async (action: "backup_create" | "backup_list" | "restore_env", args: Record<string, string>) => {
     if (!canRun) {
@@ -149,12 +230,44 @@ export function BackupRestore() {
         <label className="mt-2 block">
           <span className="text-xs text-slate-600 dark:text-slate-400">Backup file path</span>
           <input
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+            className={`w-full rounded-lg border px-3 py-2 text-sm dark:bg-slate-900 ${
+              restorePathStatus === "valid"
+                ? "border-emerald-400 bg-emerald-50 dark:border-emerald-700"
+                : restorePathStatus === "invalid"
+                  ? "border-red-400 bg-red-50 dark:border-red-700"
+                  : "border-slate-200 bg-white dark:border-slate-700"
+            }`}
             value={restoreFile}
             onChange={(e) => setRestoreFile(e.target.value)}
             placeholder="e.g. /root/.wp-dev/backups/my-site/local/2026-05-05_13-00-00.sql"
           />
+          {restorePathStatus !== "idle" && (
+            <span
+              className={`mt-1 block text-xs ${
+                restorePathStatus === "validating"
+                  ? "text-slate-500"
+                  : restorePathStatus === "valid"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
+              }`}
+            >
+              {restorePathMessage}
+            </span>
+          )}
         </label>
+        {env === "staging" && (
+          <label className="mt-2 block">
+            <span className="text-xs text-amber-700 dark:text-amber-300">
+              Staging host (must match config):
+            </span>
+            <input
+              className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm dark:border-amber-700 dark:bg-slate-900"
+              value={stagingHost}
+              onChange={(e) => setStagingHost(e.target.value)}
+              placeholder="staging.example.com"
+            />
+          </label>
+        )}
         {env === "production" && (
           <label className="mt-2 block">
             <span className="text-xs text-amber-700 dark:text-amber-300">
@@ -172,14 +285,20 @@ export function BackupRestore() {
           disabled={
             busy ||
             !canRun ||
-            !restoreFile.trim() ||
+            restorePathStatus !== "valid" ||
+            (env === "staging" && !stagingHost.trim()) ||
             (env === "production" && productionConfirm !== "RESTORE_PRODUCTION")
           }
           onClick={() =>
             void runAction("restore_env", {
               env,
               file: restoreFile.trim(),
-              confirm: env === "production" ? productionConfirm.trim() : "",
+              confirm:
+                env === "production"
+                  ? productionConfirm.trim()
+                  : env === "staging"
+                    ? stagingHost.trim()
+                    : "",
             })
           }
           className="mt-2 rounded-lg bg-red-600 px-3 py-1.5 text-xs text-white disabled:opacity-50"

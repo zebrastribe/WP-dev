@@ -128,4 +128,53 @@ describe("wpDevConfigSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects shell metacharacters in staging.host", () => {
+    const badHosts = ["evil;id", "$(id)", "a b", "-oX", "host/path", "https://x.com"];
+    for (const badHost of badHosts) {
+      expect(() =>
+        wpDevConfigSchema.parse({
+          project: "x",
+          local: { url: "http://localhost:8888", path: "./docker", wpRoot: "./wordpress" },
+          staging: { host: badHost, user: "u", path: "/p", url: "https://s" },
+          production: { host: "p.test", user: "u", path: "/p", url: "https://p" },
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("rejects shell metacharacters in production.host", () => {
+    const badHosts = ["evil;id", "$(id)", "a b", "-oX", "host/path", "https://x.com"];
+    for (const badHost of badHosts) {
+      expect(() =>
+        wpDevConfigSchema.parse({
+          project: "x",
+          local: { url: "http://localhost:8888", path: "./docker", wpRoot: "./wordpress" },
+          staging: { host: "s.test", user: "u", path: "/p", url: "https://s" },
+          production: { host: badHost, user: "u", path: "/p", url: "https://p" },
+        }),
+      ).toThrow();
+    }
+  });
+});
+
+describe("generated JSON schema host pattern", () => {
+  it("schema pattern rejects injection canaries", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const schema = JSON.parse(
+      readFileSync(join(process.cwd(), "docs/admin/public/wp-dev.config.schema.json"), "utf8"),
+    );
+    const hostPattern = schema.definitions?.WpDevConfig?.properties?.staging?.properties?.host?.pattern;
+    expect(hostPattern).toBeDefined();
+    const re = new RegExp(hostPattern);
+    expect(re.test("evil;id")).toBe(false);
+    expect(re.test("$(id)")).toBe(false);
+    expect(re.test("a b")).toBe(false);
+    expect(re.test("-oX")).toBe(false);
+    expect(re.test("host/path")).toBe(false);
+    expect(re.test("valid-host.example.com")).toBe(true);
+    expect(re.test("192.168.1.1")).toBe(true);
+    expect(re.test("server01")).toBe(true);
+  });
 });

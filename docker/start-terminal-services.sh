@@ -9,6 +9,15 @@ if [ -z "$AUTH" ] || [ "$AUTH" = "wpdev:wpdev" ] || [ "$AUTH" = "change-me-user:
   exit 1
 fi
 
+# Security notes on WPDEV_TERMINAL_AUTH:
+# - Credential is visible in `ps` output; this is acceptable for a local dev tool bound to 127.0.0.1
+# - ttyd only accepts credentials via -c flag (no file/stdin option)
+# - ttyd -d 3 suppresses the base64 banner that would reveal the credential at startup
+# - WPDEV_TERMINAL_AUTH is stripped from ttyd's environment via `env -u` so shells don't inherit it
+# - The service is bound to 127.0.0.1 (via docker-compose ports) so only localhost can connect
+# - The UI masks the input field (type="password")
+# - The admin API never logs credential values
+
 # Sync/terminal runners keep root so they can use the mounted docker.sock for pull/push.
 node /workspace/docker/terminal-runner.mjs >>/tmp/terminal-runner.log 2>&1 &
 node /workspace/docker/host-runner.mjs >>/tmp/sync-runner.log 2>&1 &
@@ -31,4 +40,5 @@ chmod 700 /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
 
 # -d 3: quieter than default (7); suppresses ttyd's startup banner that prints Basic-auth as base64.
 # -O: check Origin header matches the terminal URL (defense-in-depth against CSRF).
-exec runuser -u "$TTY_USER" -- ttyd -d 3 -W -O -p 7681 -c "$AUTH" -w "$WD" bash -lc "cd \"$WD\" && exec bash"
+# Use env -u to strip WPDEV_TERMINAL_AUTH from ttyd's environment so shells don't inherit it.
+exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -O -p 7681 -c "$AUTH" -w "$WD" bash -lc "cd \"$WD\" && exec bash"

@@ -118,6 +118,7 @@ services:
       context: .
       dockerfile: terminal.Dockerfile
     restart: unless-stopped
+    init: true
     networks:
       - wpdev
     ports:

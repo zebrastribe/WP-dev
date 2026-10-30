@@ -138,6 +138,7 @@ export function apiPhpUrl(
     | "runner-run"
     | "runner-status"
     | "runner-cancel"
+    | "runner-active-job"
     | "services"
     | "filesystem-health",
 ): string {
@@ -215,6 +216,7 @@ let syncRunnerPort = 7683;
 export type LoadWpDevConfigResult =
   | { status: "ok"; config: Record<string, unknown> }
   | { status: "missing" }
+  | { status: "unreadable"; detail: string }
   | { status: "invalid"; detail: string }
   | { status: "error"; detail: string };
 
@@ -260,6 +262,9 @@ export async function loadWpDevConfigDetailed(): Promise<LoadWpDevConfigResult> 
           ? o.detail
           : String(o.error ?? "invalid config");
       logAdmin("info", "loadWpDevConfig: API returned ok=false", detail);
+      if (res.status === 403 || o.error === "unreadable") {
+        return { status: "unreadable", detail };
+      }
       if (res.status === 422 || o.error === "invalid_json") {
         return { status: "invalid", detail };
       }
@@ -785,6 +790,7 @@ export type TerminalAction =
   | "wpdev_staging_http_auth_disable"
   | "backup_create"
   | "backup_list"
+  | "validate_restore_path"
   | "restore_env"
   | "git_status"
   | "git_log"
@@ -907,6 +913,44 @@ export async function cancelTerminalJob(
       return { ok: false, error: detail ? `${err}: ${detail}` : err };
     }
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export type ActiveJob = {
+  id: string;
+  status: "running" | "done";
+  command: string;
+  output: string;
+  exitCode: number | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ActiveJobResponse =
+  | { ok: true; activeJob: ActiveJob | null }
+  | { ok: false; error: string };
+
+export async function getRunnerActiveJob(
+  runnerKind: "terminal" | "sync" = "terminal",
+): Promise<ActiveJobResponse> {
+  try {
+    const res = await fetch(
+      `${apiPhpUrl("runner-active-job")}&kind=${encodeURIComponent(runnerKind)}`,
+      {
+        method: "GET",
+        credentials: "same-origin",
+        headers: buildAdminApiHeaders(),
+      },
+    );
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || data.ok !== true) {
+      const err = String(data.error ?? `HTTP ${res.status}`);
+      return { ok: false, error: err };
+    }
+    const activeJob = data.activeJob as ActiveJob | null;
+    return { ok: true, activeJob: activeJob ?? null };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }

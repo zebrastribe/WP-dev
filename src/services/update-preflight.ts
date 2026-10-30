@@ -22,6 +22,8 @@ export type UpdatePreflight = {
   commitsBehind: number | null;
   forkWorkflowRecommended: boolean;
   warnings: string[];
+  /** Informational notes that are not warnings (e.g. stale fetch notice). */
+  info: string[];
   filesystemWarnings: string[];
   filesystemOk: boolean;
   updateLockHeld: boolean;
@@ -43,6 +45,7 @@ export async function collectUpdatePreflight(
   loaded?: LoadedConfig,
 ): Promise<UpdatePreflight> {
   const warnings: string[] = [];
+  const info: string[] = [];
   const filesystemWarnings = detectFilesystemWarnings(configDir);
   let filesystemOk = true;
   if (loaded) {
@@ -63,6 +66,7 @@ export async function collectUpdatePreflight(
       commitsBehind: null,
       forkWorkflowRecommended: false,
       warnings: ["Not a git repository — git pull will fail unless you use --skip-pull."],
+      info: [],
       filesystemWarnings,
       filesystemOk,
       updateLockHeld,
@@ -93,6 +97,15 @@ export async function collectUpdatePreflight(
   } else {
     warnings.push(
       "No upstream tracking branch — run: git fetch origin && git branch -u origin/main",
+    );
+  }
+
+  // Note: preflight does not fetch from remote. The behind/ahead counts are
+  // based on the last fetch and may be stale. Run `git fetch` before preflight
+  // for accurate counts, or let the actual update fetch when it runs.
+  if (upstream && (commitsAhead != null || commitsBehind != null)) {
+    info.push(
+      "Behind/ahead counts are based on last fetch (preflight does not fetch). Run `git fetch origin` for accurate counts.",
     );
   }
 
@@ -127,6 +140,7 @@ export async function collectUpdatePreflight(
     commitsBehind,
     forkWorkflowRecommended,
     warnings,
+    info,
     filesystemWarnings,
     filesystemOk,
     updateLockHeld,
@@ -171,6 +185,12 @@ export function formatUpdatePreflight(preflight: UpdatePreflight): string {
     lines.push("");
     for (const w of preflight.warnings) {
       lines.push(`  ⚠ ${w}`);
+    }
+  }
+  if (preflight.info && preflight.info.length > 0) {
+    lines.push("");
+    for (const i of preflight.info) {
+      lines.push(`  ℹ ${i}`);
     }
   }
   lines.push("");

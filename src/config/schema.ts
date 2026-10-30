@@ -8,15 +8,33 @@ const remoteDbSchema = z.object({
   prefix: z.string().min(1).optional(),
 });
 
-/** Hostname / IP — reject spaces and shell metacharacters (dogfood injection canaries). */
+/**
+ * Hostname / IP — the regex exports to JSON Schema so PHP/ajv validate too.
+ * Allows hostnames, IPv4, and IPv6 localhost (::1).
+ * Friendly messages live in superRefine (not exported to schema).
+ */
 const sshHostSchema = z
   .string()
   .trim()
   .min(1)
   .regex(
-    /^[a-zA-Z0-9._:-]+$/,
-    "must be a hostname or IP (letters, digits, . _ : - only)",
-  );
+    /^(::1|[a-zA-Z0-9]([a-zA-Z0-9._:-]*[a-zA-Z0-9])?)$/,
+    "must be a valid hostname (letters, digits, . _ : - only; start/end with alphanumeric) or ::1",
+  )
+  .superRefine((s, ctx) => {
+    if (/\s/.test(s)) {
+      ctx.addIssue({ code: "custom", message: "must not contain whitespace" });
+    }
+    if (/^https?:\/\//i.test(s)) {
+      ctx.addIssue({ code: "custom", message: "must be a hostname, not a URL (remove http:// or https://)" });
+    }
+    if (/[;|&`$(){}[\]<>\\'"!#%^*~?\n\r]/.test(s)) {
+      ctx.addIssue({ code: "custom", message: "must not contain shell metacharacters" });
+    }
+    if (s !== "::1" && s.includes("/")) {
+      ctx.addIssue({ code: "custom", message: "must be a hostname only (no path component)" });
+    }
+  });
 
 const remoteEnvSchema = z.object({
   host: sshHostSchema,
@@ -114,6 +132,24 @@ export type RemoteEnvName = "staging" | "production";
 export type RemoteEnvConfig = z.infer<typeof remoteEnvSchema>;
 export type StagingEnvConfig = z.infer<typeof stagingEnvSchema>;
 export type StagingHttpAuth = z.infer<typeof stagingHttpAuthSchema>;
+
+const syncInnerShape = syncSchema?.unwrap?.()?.shape;
+if (!syncInnerShape || typeof syncInnerShape !== "object") {
+  throw new Error("schema.ts: cannot derive syncInner shape from syncSchema — zod structure changed");
+}
+
+export const schemaShapes = {
+  root: wpDevConfigSchema.shape,
+  local: localSchema.shape,
+  staging: stagingEnvSchema.shape,
+  production: remoteEnvSchema.shape,
+  simply: simplySchema.shape,
+  syncInner: syncInnerShape,
+  importWorkspace: importWorkspaceSchema.shape,
+  stagingDb: remoteDbSchema.shape,
+  productionDb: remoteDbSchema.shape,
+  stagingHttpAuth: stagingHttpAuthSchema.shape,
+};
 
 export function getRemoteEnv(
   config: WpDevConfig,

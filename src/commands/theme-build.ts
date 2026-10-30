@@ -14,13 +14,18 @@ export type ThemeBuildOptions = {
   quiet?: boolean;
 };
 
-/** Re-own bind-mounted theme build trees created as root inside the terminal. */
+/**
+ * Re-own bind-mounted theme build trees created as root inside the terminal.
+ * Includes "theme" for nested layouts where deployDir is themeSourcePath/theme.
+ */
 async function chownThemeBuildArtifacts(
   themeSourcePath: string,
   configDir: string,
 ): Promise<void> {
   const { uid, gid } = resolveHostIdentity(configDir);
-  const targets = ["node_modules", "vendor"].map((n) => join(themeSourcePath, n));
+  const targets = ["node_modules", "vendor", "dist", "build", "public", "theme"].map((n) =>
+    join(themeSourcePath, n),
+  );
   for (const target of targets) {
     if (!existsSync(target)) continue;
     try {
@@ -57,17 +62,25 @@ export async function cmdThemeBuild(
 
   if (!options.skipInstall) {
     logInfo("theme build: npm ci");
-    await execa("npm", ["ci"], { cwd: themeSourcePath, stdio: "inherit" });
+    try {
+      await execa("npm", ["ci"], { cwd: themeSourcePath, stdio: "inherit" });
+    } finally {
+      // Chown after npm ci even if it fails, so host user can delete/retry.
+      // Inside terminal container, npm ci runs as root, leaving root-owned files.
+      await chownThemeBuildArtifacts(themeSourcePath, loaded.configDir);
+    }
   }
 
   logInfo("theme build: npm run production");
-  await execa("npm", ["run", "production"], {
-    cwd: themeSourcePath,
-    stdio: "inherit",
-  });
-
-  // Terminal/container builds run as root; re-own node_modules to WPDEV_HOST_UID.
-  await chownThemeBuildArtifacts(themeSourcePath, loaded.configDir);
+  try {
+    await execa("npm", ["run", "production"], {
+      cwd: themeSourcePath,
+      stdio: "inherit",
+    });
+  } finally {
+    // Chown after production build too (may create/modify files).
+    await chownThemeBuildArtifacts(themeSourcePath, loaded.configDir);
+  }
 
   const check = checkThemeBuildArtifacts(deployDir);
   if (!options.quiet) {

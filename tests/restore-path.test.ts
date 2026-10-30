@@ -7,7 +7,7 @@ import {
   symlinkSync,
 } from "node:fs";
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { assertRestoreBackupPath } from "../src/utils/restore-path.js";
 
 describe("assertRestoreBackupPath", () => {

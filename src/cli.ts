@@ -61,15 +61,11 @@ async function runWithConfig(
   hydrateStagingDbFromComposeEnv(loaded.configDir, loaded.config);
   initLogger(loaded.configDir);
   logInfo(`command ${label}`);
+  let threw = false;
   try {
     await run(loaded);
-    // Commands that abort cleanly (e.g. refused confirm) set exitCode without throwing.
-    if (process.exitCode && process.exitCode !== 0) {
-      logInfo(`command ${label} finished exit=${process.exitCode}`);
-    } else {
-      logInfo(`command ${label} finished ok`);
-    }
   } catch (e) {
+    threw = true;
     const short = e instanceof Error ? e.message : String(e);
     const detail = e instanceof Error ? e.stack || e.message : String(e);
     // Expected refusals: message only (no stack in UI/runner panel). Unexpected: keep stack in the log.
@@ -81,8 +77,15 @@ async function runWithConfig(
     logError(expectedRefuse ? short : detail);
     const code = process.exitCode && process.exitCode !== 0 ? process.exitCode : 1;
     process.exitCode = code;
-    logInfo(`command ${label} finished exit=${code}`);
     // Do not rethrow: avoids duplicate fatal: line and Node stack dump in the admin job panel.
+  }
+  // Log outcome after try/catch so we always log the final exit status.
+  // Commands that abort cleanly (e.g. refused confirm) set exitCode without throwing.
+  const exitCode = process.exitCode ?? 0;
+  if (threw || exitCode !== 0) {
+    logInfo(`command ${label} finished exit=${exitCode}`);
+  } else {
+    logInfo(`command ${label} finished ok`);
   }
 }
 

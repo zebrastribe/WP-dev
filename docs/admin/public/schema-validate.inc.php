@@ -82,7 +82,8 @@ function wpdev_validate_node(mixed $data, array $schema, array $doc, string $pat
         }
         if (isset($schema['pattern']) && is_string($schema['pattern'])) {
             $p = $schema['pattern'];
-            if (@preg_match('#' . str_replace('#', '\#', $p) . '#u', $data) !== 1) {
+            // Use D modifier so $ won't match before a trailing newline
+            if (@preg_match('#' . str_replace('#', '\#', $p) . '#uD', $data) !== 1) {
                 return 'pattern:' . $path;
             }
         }

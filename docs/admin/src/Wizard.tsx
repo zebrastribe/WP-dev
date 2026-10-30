@@ -329,6 +329,7 @@ export function Wizard() {
   const [localStatus, setLocalStatus] = useState<LocalStatus | null>(null);
   const [setupWorkflow, setSetupWorkflow] = useState<SetupWorkflow | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveBlocked, setSaveBlocked] = useState<string | null>(null);
   const [terminalPrep, setTerminalPrep] = useState<TerminalPrepState>(null);
   const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
   /** Cleared when host/user/path change; set when SSH test or doctor succeeds. */
@@ -385,6 +386,7 @@ export function Wizard() {
           }
         }
         if (loadedResult.status === "invalid") {
+          setSaveBlocked("Config file is corrupt or invalid JSON. Fix the file on disk or restore from backup first.");
           setAlert({
             tone: "error",
             text:
@@ -392,6 +394,7 @@ export function Wizard() {
               "Fix the file on disk (or restore a backup) before saving from Setup — Save would overwrite it.",
           });
         } else if (loadedResult.status === "ok" && typeof loadedResult.config.project === "string") {
+          setSaveBlocked(null);
           const loaded = loadedResult.config;
           setExistingConfig(loaded as Record<string, unknown>);
           const loadedLocalUrl = String((loaded.local as WizardData["local"])?.url ?? defaults().local.url);
@@ -461,7 +464,21 @@ export function Wizard() {
           } else {
             setAlert(null);
           }
+        } else if (loadedResult.status === "unreadable") {
+          logAdmin("warn", "Wizard: config file exists but is unreadable");
+          setSaveBlocked("Config file exists but is not readable. Fix file permissions first.");
+          setAlert({
+            tone: "error",
+            text: `wp-dev.config.json exists but is not readable: ${loadedResult.detail}`,
+          });
+        } else if (loadedResult.status === "error") {
+          setAlert({
+            tone: "error",
+            text: `Could not load wp-dev.config.json: ${loadedResult.detail}`,
+          });
         } else {
+          // status is "missing" - try localStorage draft or show defaults
+          setSaveBlocked(null);
           const raw = localStorage.getItem(DRAFT_KEY);
           if (raw) {
             try {
@@ -477,16 +494,11 @@ export function Wizard() {
             } catch (e) {
               logAdmin("warn", "Wizard: draft in localStorage is invalid JSON", e instanceof Error ? e.message : "");
             }
-          } else if (loadedResult.status === "missing") {
+          } else {
             logAdmin("info", "Wizard: no server config and no draft — using defaults");
             setAlert({
               tone: "info",
-              text: "No wp-dev.config.json on the server yet (or not readable). Defaults are shown — complete the steps and save.",
-            });
-          } else if (loadedResult.status === "error") {
-            setAlert({
-              tone: "error",
-              text: `Could not load wp-dev.config.json: ${loadedResult.detail}`,
+              text: "No wp-dev.config.json on the server yet. Defaults are shown — complete the steps and save.",
             });
           }
         }
@@ -2321,10 +2333,11 @@ export function Wizard() {
             <button
               type="button"
               onClick={onSave}
-              disabled={saving}
+              disabled={saving || !!saveBlocked}
+              title={saveBlocked || undefined}
               className="rounded-lg border border-slate-200 px-4 py-2 text-sm dark:border-slate-600 disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save environment"}
+              {saving ? "Saving…" : saveBlocked ? "Save blocked" : "Save environment"}
             </button>
           </div>
         </div>

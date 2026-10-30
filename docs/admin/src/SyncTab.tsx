@@ -868,6 +868,10 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
             title="Sync"
             onBeforeRun={saveBeforeDeploy}
             hint="Files: incremental (new/changed only; drops auto-retry). Database: full dump from source → replaces destination. First sync to empty staging may upload files only — run again after WordPress is installed on the server."
+            sharedJob={job}
+            sharedRun={run}
+            sharedCancel={cancel}
+            sharedOutputRef={outputRef}
           />
         </div>
         ) : null}

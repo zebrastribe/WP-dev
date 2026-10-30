@@ -5,7 +5,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ZodError } from "zod";
-import { wpDevConfigSchema, type WpDevConfig } from "./schema.js";
+import { wpDevConfigSchema, schemaShapes, type WpDevConfig } from "./schema.js";
 import { writeFileAtomic } from "../fs/atomic-write.js";
 
 /** Human-readable errors for corrupt or invalid wp-dev.config.json (include file path). */
@@ -24,6 +24,46 @@ export function formatConfigFileError(path: string, err: unknown): Error {
     return new Error(`${path}: ${err.message}`);
   }
   return new Error(`${path}: ${String(err)}`);
+}
+
+function keysFromShape(shape: object | undefined): Set<string> {
+  if (!shape || typeof shape !== "object") return new Set();
+  return new Set(Object.keys(shape));
+}
+
+/** Known keys at each level of the config schema (derived from zod shapes). */
+const KNOWN_KEYS: Record<string, Set<string>> = {
+  "": new Set(["$schema", ...keysFromShape(schemaShapes.root)]),
+  local: keysFromShape(schemaShapes.local),
+  staging: keysFromShape(schemaShapes.staging),
+  production: keysFromShape(schemaShapes.production),
+  simply: keysFromShape(schemaShapes.simply),
+  sync: keysFromShape(schemaShapes.syncInner),
+  importWorkspace: keysFromShape(schemaShapes.importWorkspace),
+  "staging.db": keysFromShape(schemaShapes.stagingDb),
+  "production.db": keysFromShape(schemaShapes.productionDb),
+  "staging.httpAuth": keysFromShape(schemaShapes.stagingHttpAuth),
+};
+
+/** Detect unknown keys at all levels (potential typos). Returns array of "path.key" strings. */
+export function detectUnknownConfigKeys(raw: unknown, path = ""): string[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return [];
+  }
+  const unknown: string[] = [];
+  const knownAtLevel = KNOWN_KEYS[path] ?? new Set<string>();
+  for (const key of Object.keys(raw)) {
+    const fullPath = path ? `${path}.${key}` : key;
+    if (!knownAtLevel.has(key)) {
+      unknown.push(fullPath);
+    }
+    // Recurse into nested objects (but not into record types like sync.plugins or sync.themes)
+    const val = (raw as Record<string, unknown>)[key];
+    if (val && typeof val === "object" && !Array.isArray(val) && KNOWN_KEYS[fullPath]) {
+      unknown.push(...detectUnknownConfigKeys(val, fullPath));
+    }
+  }
+  return unknown;
 }
 
 const CONFIG_NAMES = ["wp-dev.config.json"];
@@ -61,6 +101,13 @@ export function loadConfig(cwd = process.cwd()): LoadedConfig {
     raw = JSON.parse(readFileSync(path, "utf8"));
   } catch (e) {
     throw formatConfigFileError(path, e);
+  }
+  // Warn about unknown keys (typos) before validation
+  const unknownKeys = detectUnknownConfigKeys(raw);
+  if (unknownKeys.length > 0) {
+    console.error(
+      `[wp-dev] Warning: unknown keys in ${path}: ${unknownKeys.join(", ")} (possible typo)`,
+    );
   }
   try {
     const config = wpDevConfigSchema.parse(raw);

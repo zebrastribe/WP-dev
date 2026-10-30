@@ -34,4 +34,5 @@ RUN apt-get update \
 
 WORKDIR /workspace
 
+# docker-compose.yml uses `init: true` to reap zombie processes
 CMD ["/workspace/docker/start-terminal-services.sh"]

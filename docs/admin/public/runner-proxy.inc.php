@@ -137,3 +137,17 @@ function wpdev_runner_health(string $dockerEnvPath): array
         'sync' => $sync['ok'] === true && ($sync['data']['ok'] ?? false) === true,
     ];
 }
+
+/**
+ * @return array{ok: true, activeJob: array<string, mixed>|null}|array{ok: false, error: string}
+ */
+function wpdev_runner_active_job(string $kind, string $dockerEnvPath): array
+{
+    $res = wpdev_runner_proxy_json($kind, $dockerEnvPath, 'GET', '/active-job', null);
+    if ($res['ok'] !== true) {
+        return ['ok' => false, 'error' => $res['error'] ?? 'runner_error'];
+    }
+    $data = $res['data'] ?? [];
+    $activeJob = $data['activeJob'] ?? null;
+    return ['ok' => true, 'activeJob' => is_array($activeJob) ? $activeJob : null];
+}
