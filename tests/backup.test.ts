@@ -88,6 +88,7 @@ describe("backup service", () => {
 
   it("listRecentBackups orders by mtime, not lexical name", () => {
     vi.useRealTimers();
+    // HOME is set by tests/setup.ts (global isolation)
     const project = `mtime-sort-${Date.now()}`;
     const dir = backupDirFor(project, "local");
     mkdirSync(dir, { recursive: true });
@@ -102,7 +103,6 @@ describe("backup service", () => {
     const recent = listRecentBackups(project, "local", 2);
     expect(recent[0]).toBe(newer);
     expect(recent[1]).toBe(older);
-    rmSync(dir, { recursive: true, force: true });
   });
 
   it("cmdBackup acquires the project sync lock before work", () => {

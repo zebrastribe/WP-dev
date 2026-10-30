@@ -57,4 +57,32 @@ describe("validateWpDevConfigJson", () => {
     expect(result.ok).toBe(true);
     expect((normalized.local as Record<string, unknown>).composeProjectName).toBeUndefined();
   });
+
+  it("rejects shell metacharacters in staging.host", () => {
+    const badHosts = ["evil;id", "$(id)", "a b", "-oX", "host/path"];
+    for (const badHost of badHosts) {
+      const result = validateWpDevConfigJson({
+        ...EXAMPLE_WP_DEV_CONFIG,
+        staging: { ...EXAMPLE_WP_DEV_CONFIG.staging, host: badHost },
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors).toMatch(/host/i);
+      }
+    }
+  });
+
+  it("rejects shell metacharacters in production.host", () => {
+    const badHosts = ["evil;id", "$(id)", "a b", "-oX", "host/path"];
+    for (const badHost of badHosts) {
+      const result = validateWpDevConfigJson({
+        ...EXAMPLE_WP_DEV_CONFIG,
+        production: { ...EXAMPLE_WP_DEV_CONFIG.production, host: badHost },
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors).toMatch(/host/i);
+      }
+    }
+  });
 });

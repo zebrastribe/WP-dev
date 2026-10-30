@@ -1,7 +1,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, appendFileSync, mkdirSync, existsSync, chownSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   safeArg,
@@ -9,6 +9,7 @@ import {
   wpdevPushThemeCommand,
   restoreEnvConfirmOk,
 } from "./runner-sync-gates.mjs";
+import { stripControlChars, sanitizeArgsForLog } from "./runner-log-utils.mjs";
 import { readRemoteEnv, sshOptsShell } from "./runner-remote-env.mjs";
 
 const PORT = Number(process.env.WPDEV_TERMINAL_RUNNER_PORT || 7682);
@@ -31,6 +32,63 @@ if (!RUNNER_TOKEN) {
 if (!ALLOWED_ORIGIN) {
   console.error("Refusing to start terminal runner: WPDEV_TERMINAL_RUNNER_ORIGIN is required.");
   process.exit(1);
+}
+
+const LOG_PATH = join(WORKDIR, "logs", "wp-dev.log");
+
+function resolveHostOwnership() {
+  const envUid = process.env.WPDEV_HOST_UID ? Number(process.env.WPDEV_HOST_UID) : null;
+  const envGid = process.env.WPDEV_HOST_GID ? Number(process.env.WPDEV_HOST_GID) : null;
+  if (envUid && envGid && envUid > 0 && envGid > 0) {
+    return { uid: envUid, gid: envGid };
+  }
+  try {
+    const st = statSync(WORKDIR);
+    if (st.uid > 0) return { uid: st.uid, gid: st.gid > 0 ? st.gid : st.uid };
+  } catch { /* ignore */ }
+  return null;
+}
+
+function ensureLogDirWithOwnership() {
+  const logDir = join(WORKDIR, "logs");
+  const created = !existsSync(logDir);
+  if (created) mkdirSync(logDir, { recursive: true });
+  const hostOwner = resolveHostOwnership();
+  if (hostOwner) {
+    const { uid, gid } = hostOwner;
+    try {
+      if (created) {
+        chownSync(logDir, uid, gid);
+      } else {
+        const dirStat = statSync(logDir);
+        if (dirStat.uid === 0) chownSync(logDir, uid, gid);
+      }
+      if (!existsSync(LOG_PATH)) {
+        appendFileSync(LOG_PATH, "");
+        chownSync(LOG_PATH, uid, gid);
+      } else {
+        const fileStat = statSync(LOG_PATH);
+        if (fileStat.uid === 0) chownSync(LOG_PATH, uid, gid);
+      }
+    } catch (err) {
+      console.error(`[terminal-runner] chown failed: ${err.message}`);
+    }
+  }
+}
+
+function logRefusal(action, args, reason) {
+  const timestamp = new Date().toISOString();
+  const sanitizedAction = stripControlChars(safeArg(action) || `[invalid:${typeof action === "string" ? action.length : 0}chars]`);
+  const sanitizedArgs = sanitizeArgsForLog(args);
+  const sanitizedReason = stripControlChars(reason);
+  const line = `${timestamp} [terminal-runner] action refused: ${sanitizedAction} args=${sanitizedArgs} reason=${sanitizedReason}\n`;
+  console.error(line.trim());
+  try {
+    ensureLogDirWithOwnership();
+    appendFileSync(LOG_PATH, line);
+  } catch {
+    // ignore log write failures
+  }
 }
 
 const jobs = new Map();
@@ -259,6 +317,18 @@ function commandForAction(action, args) {
     }
     return `mkdir -p ${base}; OUT="$(ls -1t ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No database backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
   }
+  if (action === "validate_restore_path") {
+    const env = safeArg(args?.env);
+    const file = safeArg(args?.file);
+    const project = readProjectId();
+    if (!["local", "staging", "production"].includes(env) || !file || !project) return null;
+    if (file.includes("..")) return null;
+    return [
+      `FILE_REAL="$(realpath -e ${file} 2>/dev/null || true)"`,
+      'if [ -z "$FILE_REAL" ]; then echo "INVALID: file not found"; exit 1; fi',
+      `case "$FILE_REAL" in "$HOME"/.wp-dev/backups/${project}/${env}/*) echo "VALID: $FILE_REAL";; *) echo "INVALID: must be under ~/.wp-dev/backups/${project}/${env}/"; exit 1;; esac`,
+    ].join("; ");
+  }
   if (action === "restore_env") {
     const env = safeArg(args?.env);
     const file = safeArg(args?.file);
@@ -304,6 +374,47 @@ function commandForAction(action, args) {
     return `git -c safe.directory=/workspace reset --hard ${commit} && git -c safe.directory=/workspace status --short`;
   }
   return null;
+}
+
+function describeRefusal(action, args) {
+  const safeAction = safeArg(action);
+  const env = safeArg(args?.env);
+  const confirm = safeArg(args?.confirm);
+
+  if (safeAction === "wpdev_pull" || safeAction === "wpdev_push") {
+    const kind = safeAction === "wpdev_pull" ? "pull" : "push";
+    if (!wpdevPullPushCommand(kind, env, confirm)) {
+      if (!["staging", "production"].includes(env)) return `invalid env (got ${env ? env.length : 0} safe chars)`;
+      if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production sync requires SYNC_PRODUCTION confirm token";
+      if (env === "staging" && !confirm) return "staging sync requires --confirm-host";
+    }
+    return "invalid args";
+  }
+  if (safeAction === "wpdev_push_theme") {
+    if (!wpdevPushThemeCommand(env, confirm, safeArg(args?.build))) {
+      if (!["staging", "production"].includes(env)) return `invalid env (got ${env ? env.length : 0} safe chars)`;
+      if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production theme push requires SYNC_PRODUCTION confirm token";
+      if (env === "staging" && !confirm) return "staging theme push requires --confirm-host";
+    }
+    return "invalid args";
+  }
+  if (safeAction === "restore_env") {
+    const file = safeArg(args?.file);
+    if (!restoreEnvConfirmOk(env, confirm)) {
+      if (!["local", "staging", "production"].includes(env)) return `invalid env (got ${env ? env.length : 0} safe chars)`;
+      if (env === "production" && confirm !== "RESTORE_PRODUCTION") return "production restore requires RESTORE_PRODUCTION confirm token";
+      if (env === "staging" && !confirm) return "staging restore requires confirm host token";
+    }
+    if (!file) return "missing backup file";
+    if (file.includes("..")) return "backup path contains ..";
+    return "invalid args";
+  }
+  if (safeAction === "backup_list" || safeAction === "backup_create" || safeAction === "validate_restore_path") {
+    if (!["local", "staging", "production"].includes(env)) return `invalid env for ${safeAction} (got ${env ? env.length : 0} safe chars)`;
+    return "invalid args";
+  }
+  if (!safeAction) return `invalid action (got ${typeof action === "string" ? action.length : 0} chars, none safe)`;
+  return `unknown action ${safeAction}`;
 }
 
 function startJob(command) {
@@ -453,6 +564,16 @@ const server = http.createServer(async (req, res) => {
     json(req, res, 200, { ok: true, runner: "terminal" });
     return;
   }
+
+  if (req.method === "GET" && url.pathname === "/active-job") {
+    const running = Array.from(jobs.values()).find((j) => j.status === "running");
+    if (!running) {
+      json(req, res, 200, { ok: true, activeJob: null });
+      return;
+    }
+    json(req, res, 200, { ok: true, activeJob: jobPublic(running) });
+    return;
+  }
   if (req.method === "POST" && url.pathname === "/run") {
     let body = "";
     req.on("data", (d) => {
@@ -470,7 +591,9 @@ const server = http.createServer(async (req, res) => {
       const action = typeof data.action === "string" ? data.action : "";
       const command = commandForAction(action, data.args || {});
       if (!command) {
-        json(req, res, 400, { ok: false, error: "invalid_action_or_args" });
+        const reason = describeRefusal(action, data.args || {});
+        logRefusal(action, data.args || {}, reason);
+        json(req, res, 400, { ok: false, error: "invalid_action_or_args", reason });
         return;
       }
       const jobId = startJob(command);

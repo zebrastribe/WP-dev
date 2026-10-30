@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { LoadedConfig } from "../config/load.js";
+import { detectUnknownConfigKeys } from "../config/load.js";
 import { getRemoteEnv, type RemoteEnvName } from "../config/schema.js";
 import { connectSsh } from "../services/ssh.js";
 import { assertRemoteWpInstalled } from "../services/wpcli.js";
@@ -7,7 +10,7 @@ import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
 import { getLocalUrlPortMismatch } from "../utils/published-local-urls.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
 import { isMacOs } from "../utils/platform-hints.js";
-import { logInfo } from "../utils/logger.js";
+import { logInfo, logWarn } from "../utils/logger.js";
 
 export type ValidateOptions = {
   /** When set, also verify SSH + wp core is-installed for one remote env. */
@@ -18,8 +21,23 @@ export async function cmdValidate(
   loaded: LoadedConfig,
   options: ValidateOptions = {},
 ): Promise<void> {
-  const { config } = loaded;
+  const { config, configDir } = loaded;
   const issues: string[] = [];
+  const warnings: string[] = [];
+
+  // Check for unknown config keys (possible typos)
+  try {
+    const configPath = join(configDir, "wp-dev.config.json");
+    const raw = JSON.parse(readFileSync(configPath, "utf8"));
+    const unknownKeys = detectUnknownConfigKeys(raw);
+    if (unknownKeys.length > 0) {
+      warnings.push(
+        `Unknown config keys (possible typos): ${unknownKeys.join(", ")}`,
+      );
+    }
+  } catch {
+    // Config was already validated by loadConfig, so this shouldn't happen
+  }
 
   try {
     assertDockerReady();
@@ -72,6 +90,15 @@ export async function cmdValidate(
       } finally {
         ssh.dispose();
       }
+    }
+  }
+
+  // Print warnings (non-fatal)
+  if (warnings.length > 0) {
+    console.error("Warnings:");
+    for (const w of warnings) {
+      console.error(`  ⚠ ${w}`);
+      logWarn(`validate: ${w}`);
     }
   }
 

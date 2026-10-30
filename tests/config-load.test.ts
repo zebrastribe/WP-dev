@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { formatConfigFileError, loadConfig } from "../src/config/load.js";
+import { detectUnknownConfigKeys, formatConfigFileError, loadConfig } from "../src/config/load.js";
 import { wpDevConfigSchema } from "../src/config/schema.js";
 import { ZodError } from "zod";
 
@@ -51,7 +51,7 @@ describe("loadConfig errors", () => {
         ...minimalValid,
         staging: { ...minimalValid.staging, host: "bad host;rm" },
       }),
-    ).toThrow(/hostname or IP/i);
+    ).toThrow(/hostname.*alphanumeric|whitespace|metacharacters/i);
     expect(() =>
       wpDevConfigSchema.parse({
         ...minimalValid,
@@ -77,5 +77,59 @@ describe("loadConfig errors", () => {
     const err = formatConfigFileError("/x/wp-dev.config.json", zodErr!);
     expect(err.message).toContain("Invalid config in /x/wp-dev.config.json");
     expect(err.message).toMatch(/project:/);
+  });
+});
+
+describe("detectUnknownConfigKeys", () => {
+  it("detects unknown top-level keys", () => {
+    const unknown = detectUnknownConfigKeys({ project: "x", unknownKey: "y" });
+    expect(unknown).toContain("unknownKey");
+  });
+
+  it("allows $schema at top level", () => {
+    const unknown = detectUnknownConfigKeys({ "$schema": "./schema.json", project: "x" });
+    expect(unknown).not.toContain("$schema");
+  });
+
+  it("detects unknown nested keys in staging", () => {
+    const unknown = detectUnknownConfigKeys({
+      project: "x",
+      staging: { host: "s", identityfile: "~/.ssh/id" }, // lowercase typo
+    });
+    expect(unknown).toContain("staging.identityfile");
+  });
+
+  it("detects unknown nested keys in production.db", () => {
+    const unknown = detectUnknownConfigKeys({
+      project: "x",
+      production: {
+        host: "p",
+        db: { host: "localhost", nme: "wp" }, // typo: nme instead of name
+      },
+    });
+    expect(unknown).toContain("production.db.nme");
+  });
+
+  it("warns about unknown keys when loading config", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wp-dev-cfg-unknown-"));
+    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      writeFileSync(
+        join(dir, "wp-dev.config.json"),
+        JSON.stringify({
+          ...minimalValid,
+          typoKey: "value",
+          staging: { ...minimalValid.staging, identityfile: "~/.ssh/id" },
+        }),
+      );
+      loadConfig(dir);
+      const output = stderrSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(output).toContain("typoKey");
+      expect(output).toContain("staging.identityfile");
+      expect(output).toContain("possible typo");
+    } finally {
+      stderrSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
