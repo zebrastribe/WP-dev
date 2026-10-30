@@ -46,19 +46,53 @@ Full-site excludes (plugins, `node_modules`, etc.) are under Sync → “Full-si
 
 ## Security (localhost)
 
-Set in `docker/.env` (auto-generated on first `up`):
+**The admin must never be exposed beyond localhost (Gate 0).** It provides access to staging DB secrets, the terminal, backup/restore runners, and config/.env writes.
+
+### Gate 0: Network-level protection
+
+The admin API enforces two-layer localhost verification:
+
+1. **Host header check** — Must be `localhost`, `127.0.0.1`, or `[::1]`. Blocks DNS rebinding attacks where an attacker's domain resolves to 127.0.0.1.
+
+2. **REMOTE_ADDR check** — The client's actual network address must be:
+   - Loopback (`127.0.0.1`, `::1`), or
+   - The trusted Docker network gateway (`172.28.0.1` from the fixed compose network)
+
+   This blocks attackers who spoof `Host: localhost` headers from a different network position.
+
+3. **Defense-in-depth for auto-unlock** — Additionally requires `WPDEV_WP_BIND_LOCAL=1`, confirming the WordPress port is published on `127.0.0.1` only. Catches edge cases where Docker relays LAN traffic through the gateway (rootless Docker, Docker Desktop, hairpin NAT).
+
+The same checks are enforced at the Apache level (`.htaccess` with `mod_authz_host`).
+
+### Security environment variables
+
+Set in `docker/.env` (auto-generated on first `wp-dev up`):
 
 | Variable | Purpose |
 |----------|---------|
 | `WPDEV_ADMIN_SAVE_TOKEN` | Unlock admin / save config (session cookie after unlock) |
 | `WPDEV_TERMINAL_AUTH` | Interactive terminal login (`user:password`) — open terminal prompts in the browser; password is not put in the page URL |
 | `WPDEV_TERMINAL_RUNNER_TOKEN` | Server-side runners only (PHP proxy; **not** sent to the browser) |
+| `WPDEV_ADMIN_TRUSTED_GATEWAY` | Trusted Docker gateway IP for REMOTE_ADDR checks (fixed to `172.28.0.1`) |
+| `WPDEV_WP_BIND_LOCAL` | `1` if WP port is bound to 127.0.0.1 only (required for auto-unlock) |
 
-Other localhost hardening (dogfood):
+### Other localhost hardening
 
 - Auto-unlock requires a same-origin browser request (not in-container curl alone).
+- Auto-unlock requires a prior challenge cookie from GET auth-status (blocks one-shot header spoofs).
 - Interactive terminal runs without Docker CLI access; sync runners keep `docker.sock` for pull/push.
+- Terminal uses origin checking (`-O` flag) for CSRF protection.
 - `docker/.env` is kept owner+www-data readable (`660`), not world-readable.
+
+### If you must expose locally (not recommended)
+
+If you need to access the admin from another machine on your LAN (e.g., testing from a phone), you would need to:
+
+1. Change the port binding from `127.0.0.1:${WP_PORT}:80` to `0.0.0.0:${WP_PORT}:80`
+2. Set `WPDEV_WP_BIND_LOCAL=0` (auto-unlock will be disabled)
+3. Manually unlock using the token from `docker/.env`
+
+**Do not do this on untrusted networks.** The admin has no additional authentication beyond the initial token unlock.
 
 ## Rebuild after UI changes
 

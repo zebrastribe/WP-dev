@@ -140,8 +140,40 @@ function wpdev_admin_auth_ok(string $serverToken, bool $requireNonce = false): b
     return wpdev_session_auth_valid($requireNonce);
 }
 
-/** wp-dev admin is intended for loopback — auto-bootstrap session without pasting docker/.env token. */
-function wpdev_is_local_admin_request(): bool
+/**
+ * Gate 0: network address check — REMOTE_ADDR must be loopback or the trusted Docker gateway.
+ * Blocks requests that spoof Host/Origin headers from non-local network positions.
+ * @return array{ok: bool, reason?: string}
+ */
+function wpdev_check_remote_addr(): array
+{
+    $remoteAddr = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+    if ($remoteAddr === '') {
+        return ['ok' => false, 'reason' => 'REMOTE_ADDR empty'];
+    }
+
+    if (in_array($remoteAddr, ['127.0.0.1', '::1'], true)) {
+        return ['ok' => true];
+    }
+
+    $trustedGateway = trim((string) getenv('WPDEV_ADMIN_TRUSTED_GATEWAY'));
+    if ($trustedGateway === '') {
+        return ['ok' => false, 'reason' => 'REMOTE_ADDR=' . $remoteAddr . ' not loopback and WPDEV_ADMIN_TRUSTED_GATEWAY not set'];
+    }
+
+    $gateways = array_filter(array_map('trim', explode(',', $trustedGateway)));
+    if (in_array($remoteAddr, $gateways, true)) {
+        return ['ok' => true];
+    }
+
+    return ['ok' => false, 'reason' => 'REMOTE_ADDR=' . $remoteAddr . ' not in allowed list (127.0.0.1, ::1, ' . $trustedGateway . ')'];
+}
+
+/**
+ * Gate 0: Host header check — blocks DNS rebinding attacks.
+ * Must be localhost, 127.0.0.1, or [::1] (with optional port).
+ */
+function wpdev_check_host_header(): bool
 {
     $host = strtolower(trim((string) ($_SERVER['HTTP_HOST'] ?? '')));
     if ($host === '') {
@@ -152,6 +184,57 @@ function wpdev_is_local_admin_request(): bool
         $hostOnly = $host;
     }
     return in_array($hostOnly, ['localhost', '127.0.0.1', '[::1]'], true);
+}
+
+/**
+ * Gate 0: defense-in-depth — refuse auto-unlock unless WordPress port is published on 127.0.0.1.
+ * Even with REMOTE_ADDR checks, Docker can relay LAN traffic through the gateway in some configurations.
+ * @return array{ok: bool, reason?: string}
+ */
+function wpdev_check_bind_local(): array
+{
+    $bindLocal = trim((string) getenv('WPDEV_WP_BIND_LOCAL'));
+    if ($bindLocal === '1') {
+        return ['ok' => true];
+    }
+    if ($bindLocal === '0') {
+        return ['ok' => false, 'reason' => 'WPDEV_WP_BIND_LOCAL=0 (port exposed beyond localhost)'];
+    }
+    return ['ok' => false, 'reason' => 'WPDEV_WP_BIND_LOCAL not set (run wp-dev up to set it)'];
+}
+
+/**
+ * wp-dev admin is intended for loopback — auto-bootstrap session without pasting docker/.env token.
+ * Combined gate: Host header + REMOTE_ADDR + bind-local check.
+ * @param bool $requireBindLocal If true, also require WPDEV_WP_BIND_LOCAL=1 (for auto-unlock).
+ * @return array{ok: bool, reason?: string}
+ */
+function wpdev_is_local_admin_request_full(bool $requireBindLocal = false): array
+{
+    if (!wpdev_check_host_header()) {
+        return ['ok' => false, 'reason' => 'Host header not localhost'];
+    }
+
+    $addrCheck = wpdev_check_remote_addr();
+    if (!$addrCheck['ok']) {
+        return $addrCheck;
+    }
+
+    if ($requireBindLocal) {
+        $bindCheck = wpdev_check_bind_local();
+        if (!$bindCheck['ok']) {
+            return $bindCheck;
+        }
+    }
+
+    return ['ok' => true];
+}
+
+/** wp-dev admin is intended for loopback — auto-bootstrap session without pasting docker/.env token. */
+function wpdev_is_local_admin_request(): bool
+{
+    $result = wpdev_is_local_admin_request_full(false);
+    return $result['ok'] === true;
 }
 
 /**
@@ -233,16 +316,21 @@ function wpdev_consume_bootstrap_challenge(): bool
 /** Refuse wp-dev admin API on public hosts (staging/production). */
 function wpdev_enforce_local_admin_only(): void
 {
-    if (wpdev_is_local_admin_request()) {
+    $result = wpdev_is_local_admin_request_full(false);
+    if ($result['ok'] === true) {
         return;
     }
     http_response_code(403);
     header('Content-Type: application/json; charset=utf-8');
+    $detail = 'wp-dev admin is only available on localhost.';
+    if (isset($result['reason']) && $result['reason'] !== '') {
+        $detail .= ' (' . $result['reason'] . ')';
+    }
     echo json_encode(
         [
             'ok' => false,
             'error' => 'forbidden',
-            'detail' => 'wp-dev admin is only available on localhost.',
+            'detail' => $detail,
         ],
         JSON_UNESCAPED_SLASHES
     );

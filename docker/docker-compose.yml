@@ -10,6 +10,8 @@ services:
       - mysqld
       - --default-authentication-plugin=mysql_native_password
     restart: unless-stopped
+    networks:
+      - wpdev
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
       MYSQL_USER: ${MYSQL_USER:-wordpress}
@@ -31,6 +33,8 @@ services:
   wordpress:
     image: wordpress:php${WPDEV_PHP_VERSION:-8.2}-apache
     restart: unless-stopped
+    networks:
+      - wpdev
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -44,6 +48,10 @@ services:
       # Do NOT pass WPDEV_ADMIN_SAVE_TOKEN here — a compromised plugin could read the env.
       # api.php loads the token from the bind-mounted docker/.env file instead.
       WPDEV_IMPORT_TOKEN: ${WPDEV_IMPORT_TOKEN:-}
+      # Gate 0 security: trusted gateway for Docker network (set by wp-dev up).
+      WPDEV_ADMIN_TRUSTED_GATEWAY: ${WPDEV_ADMIN_TRUSTED_GATEWAY:-172.28.0.1}
+      # Gate 0 defense-in-depth: 1 if WP port is bound to 127.0.0.1 only.
+      WPDEV_WP_BIND_LOCAL: ${WPDEV_WP_BIND_LOCAL:-1}
     volumes:
       # Absolute host paths (WPDEV_HOST_PROJECT_ROOT) so compose from the terminal
       # container (docker.sock) does not resolve ../wordpress → /workspace/wordpress on the host.
@@ -62,6 +70,8 @@ services:
   local_ssl_proxy:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    networks:
+      - wpdev
     profiles: ["ssl"]
     depends_on:
       - wordpress
@@ -75,6 +85,8 @@ services:
   wpcli:
     image: wordpress:cli-php${WPDEV_PHP_VERSION:-8.2}
     user: "33:33"
+    networks:
+      - wpdev
     volumes:
       - ${WPDEV_HOST_PROJECT_ROOT}/wordpress:/var/www/html
     environment:
@@ -92,6 +104,8 @@ services:
       context: .
       dockerfile: terminal.Dockerfile
     restart: unless-stopped
+    networks:
+      - wpdev
     ports:
       - "127.0.0.1:${WPDEV_TERMINAL_PORT:-7681}:7681"
       - "127.0.0.1:${WPDEV_TERMINAL_RUNNER_PORT:-7682}:7682"
@@ -117,6 +131,14 @@ services:
       - ${WPDEV_HOST_HOME}/.wp-dev:/root/.wp-dev
       # Sync runner (pull/push) needs the host Docker daemon for wp-cli compose exec.
       - /var/run/docker.sock:/var/run/docker.sock
+
+networks:
+  wpdev:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
 
 volumes:
   db_data:

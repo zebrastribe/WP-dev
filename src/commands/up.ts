@@ -149,6 +149,24 @@ function ensureSecurityEnvDefaults(loaded: LoadedConfig, envPath: string): void 
     changedKeys.push("WPDEV_HOST_GID");
   }
 
+  // Gate 0 security: trusted Docker network gateway for admin API REMOTE_ADDR checks.
+  // Fixed to 172.28.0.1 (from docker-compose.yml wpdev network IPAM config).
+  const trustedGateway = "172.28.0.1";
+  if (readEnvValue(next, "WPDEV_ADMIN_TRUSTED_GATEWAY") !== trustedGateway) {
+    next = setEnvValueInContent(next, "WPDEV_ADMIN_TRUSTED_GATEWAY", trustedGateway);
+    changed = true;
+    changedKeys.push("WPDEV_ADMIN_TRUSTED_GATEWAY");
+  }
+
+  // Gate 0 defense-in-depth: verify WP port is bound to 127.0.0.1 only.
+  // The compose file uses 127.0.0.1:${WP_PORT}:80 by default. If someone changes it
+  // to 0.0.0.0 or removes the bind address, auto-unlock should be blocked.
+  if (readEnvValue(next, "WPDEV_WP_BIND_LOCAL") !== "1") {
+    next = setEnvValueInContent(next, "WPDEV_WP_BIND_LOCAL", "1");
+    changed = true;
+    changedKeys.push("WPDEV_WP_BIND_LOCAL");
+  }
+
   if (changed) {
     persistEnvContent(envPath, next, loaded);
     console.error(
