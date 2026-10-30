@@ -1,6 +1,6 @@
 import type { LoadedConfig } from "../config/load.js";
 import { resolveFromConfigDir } from "../config/load.js";
-import { compose } from "../services/docker-compose.js";
+import { compose, dockerComposeProjectId } from "../services/docker-compose.js";
 import { assertDockerReady } from "../utils/docker-prereq.js";
 import { logInfo } from "../utils/logger.js";
 import {
@@ -16,7 +16,17 @@ import {
   resolveHostIdentity,
   resolveHostProjectRoot,
 } from "../utils/host-paths.js";
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  DEFAULT_SUBNET_PREFIX,
+  deriveBindLocal,
+  deriveNetworkIps,
+  findAvailableSubnet,
+  generateRemoteIpConf,
+  getDockerNetworkGateway,
+  getDockerNetworkSubnet,
+  dockerNetworkExists,
+} from "../utils/network-config.js";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -70,6 +80,156 @@ function ensureComposeEnvExists(loaded: LoadedConfig): string {
 
 function makeToken(bytes = 24): string {
   return randomBytes(bytes).toString("base64url");
+}
+
+/**
+ * Configure Docker network for this stack with a unique subnet.
+ * Returns network info derived from the actual network state.
+ */
+function ensureNetworkConfig(
+  loaded: LoadedConfig,
+  envPath: string,
+  current: string,
+): { next: string; changed: boolean; changedKeys: string[]; networkInfo: ReturnType<typeof deriveNetworkIps> } {
+  let next = current;
+  let changed = false;
+  const changedKeys: string[] = [];
+
+  // Get the compose project ID for this stack's network name
+  const projectId = dockerComposeProjectId(loaded.config);
+  const networkName = `${projectId}_wpdev`;
+
+  // Check if user explicitly set subnet/gateway (don't overwrite)
+  const existingSubnet = readEnvValue(current, "WPDEV_NETWORK_SUBNET");
+  const existingGateway = readEnvValue(current, "WPDEV_NETWORK_GATEWAY");
+
+  let subnet: string;
+  let gateway: string;
+  let sslProxyIp: string;
+
+  if (existingSubnet && existingGateway) {
+    // User has explicit values - use them
+    subnet = existingSubnet;
+    gateway = existingGateway;
+    const derived = deriveNetworkIps(subnet);
+    sslProxyIp = readEnvValue(current, "WPDEV_SSL_PROXY_IP") || derived?.sslProxyIp || "";
+  } else if (dockerNetworkExists(networkName)) {
+    // Network exists - read actual values from Docker
+    const actualSubnet = getDockerNetworkSubnet(networkName);
+    const actualGateway = getDockerNetworkGateway(networkName);
+    if (actualSubnet && actualGateway) {
+      subnet = actualSubnet;
+      gateway = actualGateway;
+      const derived = deriveNetworkIps(subnet);
+      sslProxyIp = derived?.sslProxyIp || "";
+      logInfo(`up: using existing network ${networkName} (${subnet}, gateway ${gateway})`);
+    } else {
+      throw new Error(
+        `Network ${networkName} exists but could not read its configuration. ` +
+          `Remove it with: docker network rm ${networkName}`,
+      );
+    }
+  } else {
+    // Find an available subnet that doesn't conflict with other Docker networks
+    const available = findAvailableSubnet(DEFAULT_SUBNET_PREFIX);
+    if (!available) {
+      throw new Error(
+        `Could not find available subnet in ${DEFAULT_SUBNET_PREFIX}.0.0/16 range. ` +
+          `Set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY manually in docker/.env.`,
+      );
+    }
+    const derived = deriveNetworkIps(available);
+    if (!derived) {
+      throw new Error(`Invalid subnet ${available}`);
+    }
+    subnet = derived.subnet;
+    gateway = derived.gateway;
+    sslProxyIp = derived.sslProxyIp;
+    logInfo(`up: allocated new subnet ${subnet} (gateway ${gateway})`);
+  }
+
+  // Update env if values changed
+  if (readEnvValue(next, "WPDEV_NETWORK_SUBNET") !== subnet) {
+    next = setEnvValueInContent(next, "WPDEV_NETWORK_SUBNET", subnet);
+    changed = true;
+    changedKeys.push("WPDEV_NETWORK_SUBNET");
+  }
+  if (readEnvValue(next, "WPDEV_NETWORK_GATEWAY") !== gateway) {
+    next = setEnvValueInContent(next, "WPDEV_NETWORK_GATEWAY", gateway);
+    changed = true;
+    changedKeys.push("WPDEV_NETWORK_GATEWAY");
+  }
+  if (readEnvValue(next, "WPDEV_SSL_PROXY_IP") !== sslProxyIp) {
+    next = setEnvValueInContent(next, "WPDEV_SSL_PROXY_IP", sslProxyIp);
+    changed = true;
+    changedKeys.push("WPDEV_SSL_PROXY_IP");
+  }
+
+  // Trusted gateway for admin API - always sync with network gateway
+  if (readEnvValue(next, "WPDEV_ADMIN_TRUSTED_GATEWAY") !== gateway) {
+    next = setEnvValueInContent(next, "WPDEV_ADMIN_TRUSTED_GATEWAY", gateway);
+    changed = true;
+    changedKeys.push("WPDEV_ADMIN_TRUSTED_GATEWAY");
+  }
+
+  return {
+    next,
+    changed,
+    changedKeys,
+    networkInfo: { subnet, gateway, sslProxyIp },
+  };
+}
+
+/**
+ * Derive bind-local flag from WP_BIND value.
+ * Only set if not explicitly configured by user.
+ */
+function ensureBindLocalConfig(
+  current: string,
+): { next: string; changed: boolean; changedKeys: string[] } {
+  let next = current;
+  let changed = false;
+  const changedKeys: string[] = [];
+
+  const wpBind = readEnvValue(current, "WP_BIND");
+  const existingBindLocal = readEnvValue(current, "WPDEV_WP_BIND_LOCAL");
+
+  // If user explicitly set WPDEV_WP_BIND_LOCAL, respect it
+  if (existingBindLocal === "0" || existingBindLocal === "1") {
+    return { next, changed, changedKeys };
+  }
+
+  // Derive from WP_BIND
+  const isLocal = deriveBindLocal(wpBind);
+  const bindLocalValue = isLocal ? "1" : "0";
+
+  // Set WP_BIND to 127.0.0.1 if not set (secure default)
+  if (!wpBind) {
+    next = setEnvValueInContent(next, "WP_BIND", "127.0.0.1");
+    changed = true;
+    changedKeys.push("WP_BIND");
+  }
+
+  if (readEnvValue(next, "WPDEV_WP_BIND_LOCAL") !== bindLocalValue) {
+    next = setEnvValueInContent(next, "WPDEV_WP_BIND_LOCAL", bindLocalValue);
+    changed = true;
+    changedKeys.push("WPDEV_WP_BIND_LOCAL");
+  }
+
+  return { next, changed, changedKeys };
+}
+
+/**
+ * Generate remoteip.conf to restrict X-Forwarded-For trust.
+ */
+function ensureRemoteIpConf(loaded: LoadedConfig, sslProxyIp: string | null): void {
+  const confPath = join(loaded.configDir, "docker/remoteip.conf");
+  const content = generateRemoteIpConf(sslProxyIp);
+  const existing = existsSync(confPath) ? readFileSync(confPath, "utf8") : "";
+  if (existing !== content) {
+    writeFileSync(confPath, content, "utf8");
+    logInfo("up: generated docker/remoteip.conf");
+  }
 }
 
 function ensureSecurityEnvDefaults(loaded: LoadedConfig, envPath: string): void {
@@ -149,23 +309,24 @@ function ensureSecurityEnvDefaults(loaded: LoadedConfig, envPath: string): void 
     changedKeys.push("WPDEV_HOST_GID");
   }
 
-  // Gate 0 security: trusted Docker network gateway for admin API REMOTE_ADDR checks.
-  // Fixed to 172.28.0.1 (from docker-compose.yml wpdev network IPAM config).
-  const trustedGateway = "172.28.0.1";
-  if (readEnvValue(next, "WPDEV_ADMIN_TRUSTED_GATEWAY") !== trustedGateway) {
-    next = setEnvValueInContent(next, "WPDEV_ADMIN_TRUSTED_GATEWAY", trustedGateway);
+  // Network configuration (subnet, gateway, proxy IP)
+  const networkResult = ensureNetworkConfig(loaded, envPath, next);
+  next = networkResult.next;
+  if (networkResult.changed) {
     changed = true;
-    changedKeys.push("WPDEV_ADMIN_TRUSTED_GATEWAY");
+    changedKeys.push(...networkResult.changedKeys);
   }
 
-  // Gate 0 defense-in-depth: verify WP port is bound to 127.0.0.1 only.
-  // The compose file uses 127.0.0.1:${WP_PORT}:80 by default. If someone changes it
-  // to 0.0.0.0 or removes the bind address, auto-unlock should be blocked.
-  if (readEnvValue(next, "WPDEV_WP_BIND_LOCAL") !== "1") {
-    next = setEnvValueInContent(next, "WPDEV_WP_BIND_LOCAL", "1");
+  // Bind-local configuration (derived from WP_BIND)
+  const bindResult = ensureBindLocalConfig(next);
+  next = bindResult.next;
+  if (bindResult.changed) {
     changed = true;
-    changedKeys.push("WPDEV_WP_BIND_LOCAL");
+    changedKeys.push(...bindResult.changedKeys);
   }
+
+  // Generate remoteip.conf with the SSL proxy IP
+  ensureRemoteIpConf(loaded, networkResult.networkInfo?.sslProxyIp || null);
 
   if (changed) {
     persistEnvContent(envPath, next, loaded);

@@ -322,15 +322,11 @@ function wpdev_enforce_local_admin_only(): void
     }
     http_response_code(403);
     header('Content-Type: application/json; charset=utf-8');
-    $detail = 'wp-dev admin is only available on localhost.';
-    if (isset($result['reason']) && $result['reason'] !== '') {
-        $detail .= ' (' . $result['reason'] . ')';
-    }
     echo json_encode(
         [
             'ok' => false,
             'error' => 'forbidden',
-            'detail' => $detail,
+            'detail' => 'wp-dev admin is only available on localhost.',
         ],
         JSON_UNESCAPED_SLASHES
     );

@@ -673,11 +673,7 @@ if ($method === 'POST' && $action === 'auth-bootstrap') {
     // Docker configurations that relay LAN traffic through the gateway).
     $localCheck = wpdev_is_local_admin_request_full(true);
     if ($localCheck['ok'] !== true) {
-        $detail = 'Auto unlock is only available on localhost.';
-        if (isset($localCheck['reason']) && $localCheck['reason'] !== '') {
-            $detail .= ' (' . $localCheck['reason'] . ')';
-        }
-        wpdev_json_error(403, 'forbidden', $detail);
+        wpdev_json_error(403, 'forbidden', 'Auto unlock is only available on localhost.');
         wpdev_admin_api_log('POST auth-bootstrap 403 not_local: ' . ($localCheck['reason'] ?? 'unknown'));
         exit;
     }

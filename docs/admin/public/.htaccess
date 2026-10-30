@@ -1,36 +1,18 @@
 # wp-dev admin Gate 0: local development only. Block on public hosts.
 #
-# Two-layer check:
-# 1. Host header must be localhost/127.0.0.1 (blocks DNS rebinding attacks)
-# 2. Network address must be loopback or Docker network gateway (blocks header spoofing)
+# Two-layer defense:
+# 1. Apache: Host header check (blocks DNS rebinding attacks)
+# 2. PHP: REMOTE_ADDR check against WPDEV_ADMIN_TRUSTED_GATEWAY (authoritative)
 #
-# The fixed gateway 172.28.0.1 comes from docker-compose.yml's wpdev network.
-# Normal localhost:8894 traffic arrives via docker-proxy from the gateway IP.
+# Apache only checks the Host header since it cannot dynamically read the trusted
+# gateway from environment variables. PHP does the authoritative REMOTE_ADDR check.
+# With remoteip.conf restricting XFF trust, spoofing REMOTE_ADDR requires being the
+# trusted proxy.
 
-# Layer 1: Host header check (DNS rebinding protection)
+# Host header check (DNS rebinding protection)
 <IfModule mod_rewrite.c>
 RewriteEngine On
 RewriteCond %{HTTP_HOST} !^localhost(:\d+)?$ [NC]
 RewriteCond %{HTTP_HOST} !^127\.0\.0\.1(:\d+)?$ [NC]
 RewriteRule ^ - [F,L]
-</IfModule>
-
-# Layer 2: Network address check (header spoof protection)
-# Allow loopback (127.0.0.1, ::1) and Docker network gateway (172.28.0.1)
-<IfModule mod_authz_host.c>
-<RequireAny>
-    Require ip 127.0.0.1 ::1
-    Require ip 172.28.0.1
-</RequireAny>
-</IfModule>
-
-# Fallback for Apache < 2.4 (mod_access)
-<IfModule !mod_authz_host.c>
-<IfModule mod_access.c>
-Order Deny,Allow
-Deny from all
-Allow from 127.0.0.1
-Allow from ::1
-Allow from 172.28.0.1
-</IfModule>
 </IfModule>
