@@ -1,9 +1,7 @@
-import { execa } from "execa";
+import type { LoadedConfig } from "../config/load.js";
 import type { WpDevConfig } from "../config/schema.js";
-import {
-  getComposeProjectDir,
-  getDockerComposeLeadArgs,
-} from "../services/docker-compose.js";
+import { composeRead } from "../services/docker-compose.js";
+import { resolveNetworkEnvForCompose } from "./compose-prerequisites.js";
 
 /** Host ports published by `docker compose ps` (this project only). */
 export function parseHostPortsFromComposePsJson(stdout: string): Set<number> {
@@ -41,22 +39,32 @@ export function parseHostPortsFromComposePsJson(stdout: string): Set<number> {
   return ports;
 }
 
+/**
+ * Get published host ports for a compose project.
+ * Uses resolveNetworkEnvForCompose() to work with old .env files.
+ */
 export async function getComposePublishedHostPorts(
-  configDir: string,
-  config: WpDevConfig,
+  loaded: LoadedConfig,
 ): Promise<Set<number>> {
-  const projectDir = getComposeProjectDir(configDir, config);
   try {
-    const r = await execa(
-      "docker",
-      [...getDockerComposeLeadArgs(config), "ps", "--format", "json"],
-      { cwd: projectDir, reject: false, stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const networkEnv = resolveNetworkEnvForCompose(loaded);
+    const r = await composeRead(loaded, ["ps", "--format", "json"], networkEnv);
     if (r.exitCode !== 0) return new Set();
-    return parseHostPortsFromComposePsJson(String(r.stdout ?? ""));
+    return parseHostPortsFromComposePsJson(r.stdout);
   } catch {
     return new Set();
   }
+}
+
+/**
+ * @deprecated Use getComposePublishedHostPorts(loaded) instead
+ */
+export async function getComposePublishedHostPortsLegacy(
+  configDir: string,
+  config: WpDevConfig,
+): Promise<Set<number>> {
+  const loaded = { configDir, config } as LoadedConfig;
+  return getComposePublishedHostPorts(loaded);
 }
 
 /** True when `port` is published by this compose project (already bound by our containers). */

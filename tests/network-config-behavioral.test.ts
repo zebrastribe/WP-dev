@@ -112,17 +112,17 @@ describe("G14: existing network ip_range behavioral tests", () => {
 });
 
 describe("G16: migration notes (code-backed)", () => {
-  it("docker-compose.yml has fallback defaults for migration", () => {
+  it("docker-compose.yml requires network vars from wp-dev up (no silent subnet fallback)", () => {
     const composeContent = require("fs").readFileSync(
       require("path").join(process.cwd(), "docker/docker-compose.yml"),
       "utf8",
     );
-    
-    // Fallback subnet
-    expect(composeContent).toContain("WPDEV_NETWORK_SUBNET:-172.28.0.0/24");
-    // Fallback gateway
-    expect(composeContent).toContain("WPDEV_NETWORK_GATEWAY:-172.28.0.1");
-    // ip_range has no fallback (empty default)
+
+    // Required syntax — compose fails closed if wp-dev up has not written .env
+    expect(composeContent).toContain("WPDEV_NETWORK_SUBNET:?");
+    expect(composeContent).toContain("WPDEV_NETWORK_GATEWAY:?");
+    expect(composeContent).not.toContain("WPDEV_NETWORK_SUBNET:-172.28.0.0/24");
+    // ip_range may be empty on small/legacy networks
     expect(composeContent).toContain("WPDEV_NETWORK_IP_RANGE:-}");
   });
 

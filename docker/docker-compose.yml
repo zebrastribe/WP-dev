@@ -163,8 +163,9 @@ networks:
   # Network name: <compose-project>_wpdev (e.g., mysite_wpdev)
   wpdev:
     driver: bridge
-    # Subnet/gateway set by wp-dev up. Fallback allows `docker compose down` with old .env.
-    # The fallback 172.28.0.0/24 is used ONLY for migration; wp-dev up allocates properly.
+    # Subnet/gateway MUST be set by wp-dev up before any compose call.
+    # Using required variable syntax - compose fails if unset, preventing silent fallback.
+    # Migration: existing .env files from pre-PR#8 have these values set.
     # Override: WPDEV_NETWORK_SUBNET, WPDEV_NETWORK_GATEWAY in docker/.env
     #
     # ip_range reserves addresses for fixed IPs (gateway .1, SSL proxy .10).
@@ -174,8 +175,8 @@ networks:
     # Empty ip_range (for small subnets) means no restriction.
     ipam:
       config:
-        - subnet: ${WPDEV_NETWORK_SUBNET:-172.28.0.0/24}
-          gateway: ${WPDEV_NETWORK_GATEWAY:-172.28.0.1}
+        - subnet: ${WPDEV_NETWORK_SUBNET:?Run wp-dev up to configure network}
+          gateway: ${WPDEV_NETWORK_GATEWAY:?Run wp-dev up to configure network}
           ip_range: ${WPDEV_NETWORK_IP_RANGE:-}
 
 volumes:

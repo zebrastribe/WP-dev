@@ -14,15 +14,17 @@ import { execa } from "execa";
 import type { RemoteEnvConfig, WpDevConfig } from "../config/schema.js";
 import type { SshSession } from "./ssh.js";
 import {
+  buildComposeEnv,
   dockerComposeProjectId,
   getComposeProjectDir,
   getDockerComposeLeadArgs,
 } from "./docker-compose.js";
 import { resolveFromConfigDir } from "../config/load.js";
-import { persistEnvContent, setEnvValueInContent, writeEnvFile } from "../utils/compose-env.js";
+import { DEFAULT_DOCKER_ENV_PORTS, persistEnvContent, setEnvValueInContent, writeEnvFile } from "../utils/compose-env.js";
 import { resolveHostIdentity } from "../utils/host-paths.js";
 import { posixShellArg, posixShellQuote } from "../utils/shell-quote.js";
 import { sanitizeCliError } from "../utils/sanitize-cli-error.js";
+import { resolveNetworkEnvForCompose, getComposeEnvPath } from "../utils/compose-prerequisites.js";
 
 const CONTAINER_WP_PATH = "/var/www/html";
 
@@ -31,6 +33,27 @@ export type WpLocalRawOptions = {
   /** Run the wpcli container as root so it can edit wp-config.php after host-owned chown (fix-permissions). */
   runUserRoot?: boolean;
 };
+
+/**
+ * Get network env for wpcli compose operations.
+ * Creates a minimal LoadedConfig to call resolveNetworkEnvForCompose.
+ */
+function getWpcliNetworkEnv(
+  configDir: string,
+  config: WpDevConfig,
+): Record<string, string> {
+  try {
+    const loaded = {
+      configDir,
+      configPath: join(configDir, "wp-dev.config.json"),
+      config,
+    };
+    return resolveNetworkEnvForCompose(loaded as any);
+  } catch {
+    // Fallback: return empty if network env resolution fails
+    return {};
+  }
+}
 
 export async function wpLocalRaw(
   configDir: string,
@@ -60,9 +83,15 @@ export async function wpLocalRaw(
     ...(execOptions.runUserRoot ? (["--allow-root"] as const) : []),
     `--path=${CONTAINER_WP_PATH}`,
   ];
+
+  // Get network env for compose operations (works with old .env files)
+  const networkEnv = getWpcliNetworkEnv(configDir, config);
+  const env = buildComposeEnv(projectDir, { env: networkEnv });
+
   let r = await execa("docker", [...composeLead, ...runArgs], {
     cwd: projectDir,
     reject: false,
+    env,
     ...(execOptions.input !== undefined ? { input: execOptions.input } : {}),
   });
   const composePluginBroken =
@@ -81,6 +110,7 @@ export async function wpLocalRaw(
     r = await execa("docker-compose", [...fallbackLead, ...runArgs], {
       cwd: projectDir,
       reject: false,
+      env,
       ...(execOptions.input !== undefined ? { input: execOptions.input } : {}),
     });
   }
@@ -99,6 +129,10 @@ async function tryLocalMysqlPing(
   config: WpDevConfig,
 ): Promise<boolean> {
   const projectDir = getComposeProjectDir(configDir, config);
+  // Get network env for compose operations (works with old .env files)
+  const networkEnv = getWpcliNetworkEnv(configDir, config);
+  const env = buildComposeEnv(projectDir, { env: networkEnv });
+
   const r = await execa(
     "docker",
     [
@@ -110,7 +144,7 @@ async function tryLocalMysqlPing(
       "-c",
       'mysqladmin ping -h localhost -uroot -p"$MYSQL_ROOT_PASSWORD"',
     ],
-    { cwd: projectDir, reject: false },
+    { cwd: projectDir, reject: false, env },
   );
   return r.exitCode === 0;
 }
@@ -401,7 +435,7 @@ function ensureComposeDotenv(configDir: string, config: WpDevConfig): string {
     copyFileSync(example, envPath);
     return envPath;
   }
-  writeEnvFile(envPath, "WP_PORT=8888\n");
+  writeEnvFile(envPath, `WP_PORT=${DEFAULT_DOCKER_ENV_PORTS.WP_PORT}\n`);
   return envPath;
 }
 

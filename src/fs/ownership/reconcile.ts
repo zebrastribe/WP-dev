@@ -12,6 +12,8 @@ import { writeJsonAtomic } from "../atomic-write.js";
 import { ownershipManifestPath, projectConfigPath, projectDockerDir, projectDockerEnvPath } from "../path-resolver.js";
 import { detectPlatform } from "../platform/detect.js";
 import { buildOwnershipManifest } from "./profiles.js";
+import { resolveNetworkEnvForCompose } from "../../utils/compose-prerequisites.js";
+import { ensureGeneratedBindMountFiles } from "../../utils/generated-bind-mounts.js";
 
 /**
  * Ensure shared config paths stay writable by host CLI + www-data admin API,
@@ -44,6 +46,18 @@ export function buildSharedConfigReconcileShell(
 
 export async function reconcileSharedConfig(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
+
+  // Ensure generated bind-mount files exist BEFORE any compose call.
+  // This prevents Docker from creating them as directories during compose run.
+  // This doesn't touch .env (which may be unwritable - we're here to repair it).
+  ensureGeneratedBindMountFiles(loaded);
+
+  // Use read-only network env resolution (no writes) so this function can be called
+  // to repair an unwritable .env file. The caller (up.ts) calls ensureComposePrerequisites
+  // after the repair if needed.
+  // Pass via compose env option - NO mutation of process.env.
+  const networkEnv = resolveNetworkEnvForCompose(loaded);
+
   // Prefer host bind ownership — process may be root inside the terminal container.
   const { uid, gid } = resolveHostIdentity(loaded.configDir);
   if (uid < 0 || gid < 0) return;
@@ -62,7 +76,7 @@ export async function reconcileSharedConfig(loaded: LoadedConfig): Promise<void>
       "-lc",
       buildSharedConfigReconcileShell(uid, gid),
     ],
-    { stdio: "pipe" },
+    { stdio: "pipe", env: networkEnv },
   ).catch(async () => {
     await compose(
       loaded.configDir,
@@ -78,7 +92,7 @@ export async function reconcileSharedConfig(loaded: LoadedConfig): Promise<void>
         "-lc",
         buildSharedConfigReconcileShell(uid, gid),
       ],
-      { stdio: "pipe" },
+      { stdio: "pipe", env: networkEnv },
     );
   });
 
