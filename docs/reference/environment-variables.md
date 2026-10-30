@@ -55,13 +55,18 @@ Auto-configured by `wp-dev up`. Override only if needed for advanced setups.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WP_BIND` | `127.0.0.1` | Bind address for WP port (`127.0.0.1` = localhost only, `0.0.0.0` = all interfaces) |
+| `WP_BIND` | `127.0.0.1` | Bind address for WP port (`127.0.0.1` = localhost only, `0.0.0.0` = all interfaces). `localhost` is normalized to `127.0.0.1`. |
 | `WPDEV_NETWORK_SUBNET` | (auto) | Docker network subnet (e.g. `172.28.1.0/24`) |
 | `WPDEV_NETWORK_GATEWAY` | (auto) | Docker network gateway (e.g. `172.28.1.1`) |
 | `WPDEV_SSL_PROXY_IP` | (auto) | Fixed IP for SSL proxy container |
-| `WPDEV_SUBNET_POOL` | `172.28` | Subnet prefix pool for allocation (override to avoid conflicts) |
 
-Two stacks on one host get unique subnets automatically. `wp-dev up` scans existing Docker networks to avoid conflicts.
+**Subnet pool override:** Set `WPDEV_SUBNET_POOL=172.29` in your **shell environment** (not docker/.env) before running `wp-dev up` to use a different prefix. This is shell-only because subnet allocation happens before reading docker/.env.
+
+**Two stacks on one host** get unique subnets automatically:
+- `wp-dev up` scans existing Docker networks to find an available /24 subnet
+- If a saved subnet collides with another stack (e.g., stack A saves .1, goes down, stack C takes .1), the next `wp-dev up` detects the collision and reallocates
+
+**Compose fallbacks:** The docker-compose.yml has fallback defaults (`172.28.0.0/24`, `172.28.0.1`) for `docker compose down` to work without `wp-dev up`. These are migration-only; normal usage always runs `wp-dev up` first.
 
 ## Security (Gate 0)
 

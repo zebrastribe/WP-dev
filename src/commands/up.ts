@@ -25,8 +25,8 @@ import {
   getDockerNetworkSubnet,
   getSubnetPoolPrefix,
   dockerNetworkExists,
-  listDockerNetworkSubnets,
-  subnetsOverlap,
+  normalizeWpBind,
+  savedSubnetOverlapsExisting,
 } from "../utils/network-config.js";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -101,22 +101,16 @@ function ensureNetworkConfig(
   const projectId = dockerComposeProjectId(loaded.config);
   const networkName = `${projectId}_wpdev`;
 
-  // Check if user explicitly set subnet/gateway (don't overwrite)
-  const existingSubnet = readEnvValue(current, "WPDEV_NETWORK_SUBNET");
-  const existingGateway = readEnvValue(current, "WPDEV_NETWORK_GATEWAY");
+  // Check if user explicitly set subnet/gateway in .env
+  const savedSubnet = readEnvValue(current, "WPDEV_NETWORK_SUBNET");
+  const savedGateway = readEnvValue(current, "WPDEV_NETWORK_GATEWAY");
 
   let subnet: string;
   let gateway: string;
   let sslProxyIp: string;
 
-  if (existingSubnet && existingGateway) {
-    // User has explicit values - use them
-    subnet = existingSubnet;
-    gateway = existingGateway;
-    const derived = deriveNetworkIps(subnet);
-    sslProxyIp = readEnvValue(current, "WPDEV_SSL_PROXY_IP") || derived?.sslProxyIp || "";
-  } else if (dockerNetworkExists(networkName)) {
-    // Network exists - read actual values from Docker
+  if (dockerNetworkExists(networkName)) {
+    // Network exists - read actual values from Docker (authoritative)
     const actualSubnet = getDockerNetworkSubnet(networkName);
     const actualGateway = getDockerNetworkGateway(networkName);
     if (actualSubnet && actualGateway) {
@@ -131,9 +125,38 @@ function ensureNetworkConfig(
           `Remove it with: docker network rm ${networkName}`,
       );
     }
+  } else if (savedSubnet && savedGateway) {
+    // Network doesn't exist but we have saved values from a previous run.
+    // Check if the saved subnet collides with another stack that took it while we were down.
+    if (savedSubnetOverlapsExisting(savedSubnet, networkName)) {
+      // Collision detected - another stack took our subnet. Reallocate.
+      logInfo(`up: saved subnet ${savedSubnet} collides with another network, reallocating`);
+      const available = findAvailableSubnet();
+      if (!available) {
+        const poolPrefix = getSubnetPoolPrefix();
+        throw new Error(
+          `Could not find available subnet in ${poolPrefix}.0.0/16 range. ` +
+            `Override with WPDEV_SUBNET_POOL or set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY manually in docker/.env.`,
+        );
+      }
+      const derived = deriveNetworkIps(available);
+      if (!derived) {
+        throw new Error(`Invalid subnet ${available}`);
+      }
+      subnet = derived.subnet;
+      gateway = derived.gateway;
+      sslProxyIp = derived.sslProxyIp;
+      logInfo(`up: reallocated subnet ${subnet} (gateway ${gateway})`);
+    } else {
+      // Saved subnet is still available - reuse it
+      subnet = savedSubnet;
+      gateway = savedGateway;
+      const derived = deriveNetworkIps(subnet);
+      sslProxyIp = readEnvValue(current, "WPDEV_SSL_PROXY_IP") || derived?.sslProxyIp || "";
+      logInfo(`up: reusing saved subnet ${subnet} (gateway ${gateway})`);
+    }
   } else {
-    // Find an available subnet that doesn't conflict with other Docker networks
-    // Uses WPDEV_SUBNET_POOL env var if set, otherwise default prefix from network-config
+    // No network, no saved config - allocate fresh
     const available = findAvailableSubnet();
     if (!available) {
       const poolPrefix = getSubnetPoolPrefix();
@@ -187,6 +210,7 @@ function ensureNetworkConfig(
 /**
  * Ensure WP_BIND and WPDEV_WP_BIND_LOCAL are correctly set.
  * - WP_BIND defaults to 127.0.0.1 (secure)
+ * - WP_BIND=localhost is normalized to 127.0.0.1 (compose rejects "localhost")
  * - WPDEV_WP_BIND_LOCAL is ALWAYS derived from actual WP_BIND value
  * - User can force BIND_LOCAL=0 but never force 1 with non-loopback bind
  */
@@ -197,15 +221,18 @@ function ensureBindLocalConfig(
   let changed = false;
   const changedKeys: string[] = [];
 
-  let wpBind = readEnvValue(current, "WP_BIND");
+  const rawBind = readEnvValue(current, "WP_BIND");
   const existingBindLocal = readEnvValue(current, "WPDEV_WP_BIND_LOCAL");
 
-  // Always set WP_BIND to 127.0.0.1 if not set (secure default)
-  if (!wpBind || wpBind.trim() === "") {
-    wpBind = "127.0.0.1";
+  // Normalize WP_BIND: default to 127.0.0.1, convert "localhost" to IP, validate
+  const wpBind = normalizeWpBind(rawBind);
+  if (readEnvValue(next, "WP_BIND") !== wpBind) {
     next = setEnvValueInContent(next, "WP_BIND", wpBind);
     changed = true;
     changedKeys.push("WP_BIND");
+    if (rawBind === "localhost") {
+      logInfo("up: normalized WP_BIND=localhost to 127.0.0.1 (compose requires IP)");
+    }
   }
 
   // ALWAYS derive bind-local from actual WP_BIND (recompute on every up)

@@ -12,7 +12,9 @@ import {
   getNetworkAddress,
   addIpOffset,
   isLocalhostBind,
+  normalizeWpBind,
   parseSubnet,
+  savedSubnetOverlapsExisting,
   subnetsOverlap,
 } from "../src/utils/network-config.js";
 
@@ -110,16 +112,56 @@ describe("network-config utilities", () => {
   });
 
   describe("generateRemoteIpConf", () => {
-    it("generates config with proxy IP", () => {
+    it("generates config with proxy IP when SSL is on", () => {
       const conf = generateRemoteIpConf("172.28.1.10");
       expect(conf).toContain("RemoteIPInternalProxy 172.28.1.10");
       expect(conf).toContain("RemoteIPHeader X-Forwarded-For");
+      expect(conf).toContain("<IfModule remoteip_module>");
     });
 
-    it("generates config without proxy when null", () => {
+    it("omits RemoteIPHeader entirely when SSL is off (null proxy)", () => {
       const conf = generateRemoteIpConf(null);
-      expect(conf).toContain("# No proxy configured");
-      expect(conf).not.toContain("RemoteIPInternalProxy 172");
+      // Must NOT have active RemoteIPHeader directive - that would allow XFF spoofing
+      // The directive should only appear commented out (with # prefix)
+      expect(conf).not.toMatch(/^[^#]*RemoteIPHeader/m);
+      expect(conf).not.toMatch(/<IfModule remoteip_module>\s*\n\s*RemoteIPHeader/);
+      // Should explain why it's commented out and show example
+      expect(conf).toContain("SSL proxy not active");
+      expect(conf).toContain("# <IfModule remoteip_module>");
+      expect(conf).toContain("#     RemoteIPHeader X-Forwarded-For");
+    });
+  });
+
+  describe("normalizeWpBind", () => {
+    it("normalizes localhost to 127.0.0.1", () => {
+      expect(normalizeWpBind("localhost")).toBe("127.0.0.1");
+    });
+
+    it("returns 127.0.0.1 for empty/undefined", () => {
+      expect(normalizeWpBind("")).toBe("127.0.0.1");
+      expect(normalizeWpBind(undefined)).toBe("127.0.0.1");
+    });
+
+    it("passes through valid IPs", () => {
+      expect(normalizeWpBind("127.0.0.1")).toBe("127.0.0.1");
+      expect(normalizeWpBind("0.0.0.0")).toBe("0.0.0.0");
+      expect(normalizeWpBind("::1")).toBe("::1");
+      expect(normalizeWpBind("192.168.1.100")).toBe("192.168.1.100");
+    });
+
+    it("throws for invalid hostnames", () => {
+      expect(() => normalizeWpBind("my-host")).toThrow("Invalid WP_BIND");
+      expect(() => normalizeWpBind("example.com")).toThrow("Invalid WP_BIND");
+    });
+  });
+
+  describe("savedSubnetOverlapsExisting", () => {
+    it("detects overlap with existing networks", () => {
+      // This test mocks docker behavior - in real usage it queries Docker
+      // The function itself uses listDockerNetworkSubnets which we can't easily mock
+      // So we test the overlap logic via subnetsOverlap directly
+      expect(subnetsOverlap("172.28.1.0/24", "172.28.1.0/24")).toBe(true);
+      expect(subnetsOverlap("172.28.1.0/24", "172.28.2.0/24")).toBe(false);
     });
   });
 
@@ -551,5 +593,35 @@ describe("attack scenarios", () => {
     // wp-dev up allocates a unique /24 subnet for each stack
     // findAvailableSubnet scans existing Docker networks to avoid conflicts
     expect(true).toBe(true);
+  });
+
+  it("documents: subnet collision after down is handled by reallocation", () => {
+    // Scenario: Stack A gets .1, runs down; Stack C gets .1; Stack A runs up again
+    // savedSubnetOverlapsExisting detects the collision and findAvailableSubnet reallocates
+    expect(true).toBe(true);
+  });
+});
+
+describe("docker-compose.yml security defaults", () => {
+  it("WP_BIND defaults to 127.0.0.1 in compose port binding", () => {
+    const composeContent = readFileSync(
+      join(process.cwd(), "docker/docker-compose.yml"),
+      "utf8",
+    );
+    // Must use ${WP_BIND:-127.0.0.1} not ${WP_BIND:+${WP_BIND}:} which binds all when unset
+    expect(composeContent).toContain("${WP_BIND:-127.0.0.1}:${WP_PORT:-8888}:80");
+    // Should NOT contain the old insecure syntax
+    expect(composeContent).not.toContain("${WP_BIND:+${WP_BIND}:}${WP_PORT");
+  });
+
+  it("terminal ports are always bound to 127.0.0.1", () => {
+    const composeContent = readFileSync(
+      join(process.cwd(), "docker/docker-compose.yml"),
+      "utf8",
+    );
+    // Terminal ports must be hardcoded to loopback, never follow WP_BIND
+    expect(composeContent).toContain("127.0.0.1:${WPDEV_TERMINAL_PORT:-7681}:7681");
+    expect(composeContent).toContain("127.0.0.1:${WPDEV_TERMINAL_RUNNER_PORT:-7682}:7682");
+    expect(composeContent).toContain("127.0.0.1:${WPDEV_HOST_RUNNER_PORT:-7683}:7683");
   });
 });

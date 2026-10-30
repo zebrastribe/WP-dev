@@ -43,8 +43,8 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       # WP_BIND controls the bind address (127.0.0.1 = localhost only, 0.0.0.0 = all interfaces).
-      # Default empty means Docker's default (all interfaces), but wp-dev up sets 127.0.0.1.
-      - "${WP_BIND:+${WP_BIND}:}${WP_PORT:-8888}:80"
+      # Defaults to 127.0.0.1 (secure). wp-dev up normalizes and validates the value.
+      - "${WP_BIND:-127.0.0.1}:${WP_PORT:-8888}:80"
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_USER: ${MYSQL_USER:-wordpress}
