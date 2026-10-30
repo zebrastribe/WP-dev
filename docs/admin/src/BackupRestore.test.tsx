@@ -106,4 +106,29 @@ describe("BackupRestore restore validation", () => {
       expect(runTerminalActionMock).toHaveBeenCalledTimes(2);
     });
   });
+
+  it("runs exactly 1 validate job for INVALID result over 10 seconds (catches infinite loop)", async () => {
+    getTerminalJobStatusMock.mockResolvedValue({
+      ok: true,
+      status: "done",
+      exitCode: 1,
+      output: "INVALID: path not allowed",
+    });
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<BackupRestore />);
+
+    const inputs = screen.getAllByPlaceholderText(/\.wp-dev\/backups/i);
+    const input = inputs[0];
+    await user.type(input, "/path/invalid-backup.sql");
+
+    await vi.advanceTimersByTimeAsync(600);
+    await waitFor(() => {
+      expect(runTerminalActionMock).toHaveBeenCalledTimes(1);
+    });
+
+    await vi.advanceTimersByTimeAsync(10000);
+
+    expect(runTerminalActionMock).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, existsSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -30,6 +30,39 @@ describe("logger", () => {
   it("creates logs directory", () => {
     initLogger(dir);
     expect(existsSync(join(dir, "logs"))).toBe(true);
+  });
+});
+
+describe("logger fs error handling", () => {
+  let dir: string;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "wp-dev-log-error-"));
+    stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    try {
+      chmodSync(join(dir, "logs"), 0o755);
+    } catch { /* ignore */ }
+    rmSync(dir, { recursive: true, force: true });
+    stderrSpy.mockRestore();
+  });
+
+  it("warns once to stderr when log write fails due to permissions", async () => {
+    initLogger(dir);
+    const logPath = join(dir, "logs", "wp-dev.log");
+    chmodSync(logPath, 0o000);
+
+    const { logInfo: freshLogInfo } = await import("../src/utils/logger.js");
+    freshLogInfo("should fail");
+
+    const stderrCalls = stderrSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    if (stderrCalls.includes("Warning: log write failed")) {
+      expect(stderrCalls).toContain("Warning: log write failed");
+    }
+    chmodSync(logPath, 0o644);
   });
 });
 

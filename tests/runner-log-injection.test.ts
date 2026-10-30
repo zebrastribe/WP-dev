@@ -1,15 +1,13 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  stripControlChars,
+  sanitizeArgsForLog,
+  describeRefusal,
+} from "../docker/runner-log-utils.mjs";
+import { safeArg } from "../docker/runner-sync-gates.mjs";
 
-describe("runner log injection prevention", () => {
+describe("runner log injection prevention (real functions)", () => {
   describe("stripControlChars", () => {
-    const stripControlChars = (s: string): string => {
-      if (typeof s !== "string") return String(s);
-      return s.replace(/[\x00-\x1f\x7f]/g, "");
-    };
-
     it("strips newlines from action", () => {
       expect(stripControlChars("wpdev_pull\nmalicious")).toBe("wpdev_pullmalicious");
     });
@@ -29,34 +27,14 @@ describe("runner log injection prevention", () => {
     it("handles empty string", () => {
       expect(stripControlChars("")).toBe("");
     });
+
+    it("handles non-string input", () => {
+      expect(stripControlChars(123 as unknown as string)).toBe("123");
+      expect(stripControlChars(null as unknown as string)).toBe("null");
+    });
   });
 
-  describe("sanitizeArgsForLog with control chars", () => {
-    const safeArg = (v: string | undefined): string => {
-      if (typeof v !== "string") return "";
-      if (/[;|&`$(){}[\]<>\\'"!#%^*~?\s\n\r]/.test(v)) return "";
-      return v;
-    };
-
-    const stripControlChars = (s: string): string => {
-      if (typeof s !== "string") return String(s);
-      return s.replace(/[\x00-\x1f\x7f]/g, "");
-    };
-
-    const sanitizeArgsForLog = (args: Record<string, unknown> | undefined): string => {
-      if (!args || typeof args !== "object") return "{}";
-      const safe: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(args)) {
-        const safeKey = stripControlChars(k);
-        if (typeof v === "string") {
-          safe[safeKey] = safeArg(v) || `[unsafe:${v.length}chars]`;
-        } else {
-          safe[safeKey] = v;
-        }
-      }
-      return JSON.stringify(safe);
-    };
-
+  describe("sanitizeArgsForLog", () => {
     it("strips control chars from arg keys", () => {
       const result = sanitizeArgsForLog({ "env\n": "staging" });
       expect(result).toContain('"env"');
@@ -77,29 +55,20 @@ describe("runner log injection prevention", () => {
       const result = sanitizeArgsForLog({ env: "staging" });
       expect(result).toBe('{"env":"staging"}');
     });
+
+    it("handles empty/null args", () => {
+      expect(sanitizeArgsForLog(null as never)).toBe("{}");
+      expect(sanitizeArgsForLog(undefined as never)).toBe("{}");
+      expect(sanitizeArgsForLog({})).toBe("{}");
+    });
+
+    it("handles non-string values", () => {
+      const result = sanitizeArgsForLog({ count: 42 as unknown as string });
+      expect(result).toContain('"count":42');
+    });
   });
 
-  describe("describeRefusal messages", () => {
-    const safeArg = (v: string | undefined): string => {
-      if (typeof v !== "string") return "";
-      if (/[;|&`$(){}[\]<>\\'"!#%^*~?\s\n\r]/.test(v)) return "";
-      return v;
-    };
-
-    const describeRefusal = (action: string, args: { env?: string; confirm?: string }) => {
-      const safeAction = safeArg(action);
-      const env = safeArg(args?.env);
-
-      if (safeAction === "backup_list" || safeAction === "backup_create") {
-        if (!["local", "staging", "production"].includes(env)) {
-          return `invalid env for ${safeAction} (got ${env ? env.length : 0} safe chars)`;
-        }
-        return "invalid args";
-      }
-      if (!safeAction) return `invalid action (got ${typeof action === "string" ? action.length : 0} chars, none safe)`;
-      return `unknown action ${safeAction}`;
-    };
-
+  describe("describeRefusal", () => {
     it("reports correct error for backup_list with invalid env", () => {
       const result = describeRefusal("backup_list", { env: "invalid" });
       expect(result).toContain("invalid env for backup_list");
@@ -123,6 +92,40 @@ describe("runner log injection prevention", () => {
     it("reports invalid action for actions with control chars", () => {
       const result = describeRefusal("backup_list\n", { env: "local" });
       expect(result).toContain("invalid action");
+    });
+
+    it("accepts valid env for backup actions", () => {
+      expect(describeRefusal("backup_list", { env: "local" })).toBe("invalid args");
+      expect(describeRefusal("backup_list", { env: "staging" })).toBe("invalid args");
+      expect(describeRefusal("backup_list", { env: "production" })).toBe("invalid args");
+    });
+  });
+
+  describe("safeArg edge cases with injection payloads", () => {
+    it("rejects newlines", () => {
+      expect(safeArg("value\ninjection")).toBe("");
+    });
+
+    it("rejects carriage returns", () => {
+      expect(safeArg("value\rinjection")).toBe("");
+    });
+
+    it("rejects spaces", () => {
+      expect(safeArg("value injection")).toBe("");
+    });
+
+    it("rejects shell metacharacters", () => {
+      expect(safeArg("value;injection")).toBe("");
+      expect(safeArg("value|injection")).toBe("");
+      expect(safeArg("value&injection")).toBe("");
+      expect(safeArg("value`injection")).toBe("");
+      expect(safeArg("value$injection")).toBe("");
+    });
+
+    it("accepts safe hostnames and paths", () => {
+      expect(safeArg("staging.example.com")).toBe("staging.example.com");
+      expect(safeArg("/home/user/.wp-dev/backups")).toBe("/home/user/.wp-dev/backups");
+      expect(safeArg("user@host:path")).toBe("user@host:path");
     });
   });
 });

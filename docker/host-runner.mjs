@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, appendFileSync, mkdirSync, existsSync, chownSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { safeArg, wpdevPullPushCommand, wpdevPushThemeCommand } from "./runner-sync-gates.mjs";
+import { stripControlChars, sanitizeArgsForLog } from "./runner-log-utils.mjs";
 
 const PORT = Number(process.env.WPDEV_HOST_RUNNER_PORT || 7683);
 const HOST = process.env.WPDEV_HOST_RUNNER_HOST || "0.0.0.0";
@@ -31,46 +32,39 @@ if (!ALLOWED_ORIGIN) {
 
 const LOG_PATH = join(WORKDIR, "logs", "wp-dev.log");
 
-function stripControlChars(s) {
-  if (typeof s !== "string") return String(s);
-  return s.replace(/[\x00-\x1f\x7f]/g, "");
-}
-
-function sanitizeArgsForLog(args) {
-  if (!args || typeof args !== "object") return "{}";
-  const safe = {};
-  for (const [k, v] of Object.entries(args)) {
-    const safeKey = stripControlChars(k);
-    if (typeof v === "string") {
-      safe[safeKey] = safeArg(v) || `[unsafe:${v.length}chars]`;
-    } else {
-      safe[safeKey] = v;
-    }
+function resolveHostOwnership() {
+  const envUid = process.env.WPDEV_HOST_UID ? Number(process.env.WPDEV_HOST_UID) : null;
+  const envGid = process.env.WPDEV_HOST_GID ? Number(process.env.WPDEV_HOST_GID) : null;
+  if (envUid && envGid && envUid > 0 && envGid > 0) {
+    return { uid: envUid, gid: envGid };
   }
-  return JSON.stringify(safe);
+  try {
+    const st = statSync(WORKDIR);
+    if (st.uid > 0) return { uid: st.uid, gid: st.gid > 0 ? st.gid : st.uid };
+  } catch { /* ignore */ }
+  return null;
 }
-
-const HOST_UID = process.env.WPDEV_HOST_UID ? Number(process.env.WPDEV_HOST_UID) : null;
-const HOST_GID = process.env.WPDEV_HOST_GID ? Number(process.env.WPDEV_HOST_GID) : null;
 
 function ensureLogDirWithOwnership() {
   const logDir = join(WORKDIR, "logs");
   const created = !existsSync(logDir);
   if (created) mkdirSync(logDir, { recursive: true });
-  if (HOST_UID && HOST_GID && HOST_UID > 0 && HOST_GID > 0) {
+  const hostOwner = resolveHostOwnership();
+  if (hostOwner) {
+    const { uid, gid } = hostOwner;
     try {
       if (created) {
-        chownSync(logDir, HOST_UID, HOST_GID);
+        chownSync(logDir, uid, gid);
       } else {
         const dirStat = statSync(logDir);
-        if (dirStat.uid === 0) chownSync(logDir, HOST_UID, HOST_GID);
+        if (dirStat.uid === 0) chownSync(logDir, uid, gid);
       }
       if (!existsSync(LOG_PATH)) {
         appendFileSync(LOG_PATH, "");
-        chownSync(LOG_PATH, HOST_UID, HOST_GID);
+        chownSync(LOG_PATH, uid, gid);
       } else {
         const fileStat = statSync(LOG_PATH);
-        if (fileStat.uid === 0) chownSync(LOG_PATH, HOST_UID, HOST_GID);
+        if (fileStat.uid === 0) chownSync(LOG_PATH, uid, gid);
       }
     } catch (err) {
       console.error(`[host-runner] chown failed: ${err.message}`);

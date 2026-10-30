@@ -62,8 +62,7 @@ export function BackupRestore() {
           if (validateRequestIdRef.current !== requestId) return;
           if (!started.ok) {
             setRestorePathStatus("invalid");
-            setRestorePathMessage(started.error || "Validation failed");
-            validatedForRef.current = { path: pathTrimmed, env: currentEnv };
+            setRestorePathMessage(started.error || "Validation failed (transient - retry allowed)");
             return;
           }
           for (let i = 0; i < 30; i += 1) {
@@ -72,8 +71,7 @@ export function BackupRestore() {
             if (validateRequestIdRef.current !== requestId) return;
             if (!st.ok) {
               setRestorePathStatus("invalid");
-              setRestorePathMessage(st.error || "Validation failed");
-              validatedForRef.current = { path: pathTrimmed, env: currentEnv };
+              setRestorePathMessage(st.error || "Status check failed (transient - retry allowed)");
               return;
             }
             if (st.status === "done") {
@@ -87,13 +85,11 @@ export function BackupRestore() {
           }
           if (validateRequestIdRef.current !== requestId) return;
           setRestorePathStatus("invalid");
-          setRestorePathMessage("Validation timed out");
-          validatedForRef.current = { path: pathTrimmed, env: currentEnv };
+          setRestorePathMessage("Validation timed out (transient - retry allowed)");
         } catch (e) {
           if (validateRequestIdRef.current !== requestId) return;
           setRestorePathStatus("invalid");
-          setRestorePathMessage(e instanceof Error ? e.message : "Validation failed");
-          validatedForRef.current = { path: pathTrimmed, env: currentEnv };
+          setRestorePathMessage(e instanceof Error ? e.message : "Validation failed (transient - retry allowed)");
         }
       })();
     }, 500);
