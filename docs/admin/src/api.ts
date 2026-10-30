@@ -944,7 +944,7 @@ export async function getRunnerActiveJob(
       const err = String(data.error ?? `HTTP ${res.status}`);
       return { ok: false, error: err };
     }
-    const activeJob = data.activeJob as TerminalJobStatus & { ok: true } | null;
+    const activeJob = data.activeJob as ActiveJob | null;
     return { ok: true, activeJob: activeJob ?? null };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "network_error" };
