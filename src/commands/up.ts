@@ -28,11 +28,17 @@ import {
   getSubnetPoolPrefix,
   dockerNetworkExists,
   normalizeWpBind,
+  parseSubnet,
   savedSubnetOverlapsExisting,
 } from "../utils/network-config.js";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
+import {
+  DEFAULT_PHP_VERSION,
+  getWordPressImageWithDigest,
+  getWpCliImageWithDigest,
+} from "../utils/image-digests.js";
 import {
   autoReconcileOnStartup,
   probeWritable,
@@ -156,7 +162,12 @@ function ensureNetworkConfig(
       }
       const derived = deriveNetworkIps(available);
       if (!derived) {
-        throw new Error(`Invalid subnet ${available}`);
+        const parsed = parseSubnet(available);
+        throw new Error(
+          `Subnet ${available} is too small (/${parsed?.prefix ?? "?"} has only ${1 << (32 - (parsed?.prefix ?? 32))} addresses). ` +
+            `wp-dev requires at least a /28 subnet (16 addresses) for gateway and SSL proxy IPs. ` +
+            `Use a larger subnet or set WPDEV_NETWORK_SUBNET manually with at least /28.`,
+        );
       }
       subnet = derived.subnet;
       gateway = derived.gateway;
@@ -186,7 +197,12 @@ function ensureNetworkConfig(
     }
     const derived = deriveNetworkIps(available);
     if (!derived) {
-      throw new Error(`Invalid subnet ${available}`);
+      const parsed = parseSubnet(available);
+      throw new Error(
+        `Subnet ${available} is too small (/${parsed?.prefix ?? "?"} has only ${1 << (32 - (parsed?.prefix ?? 32))} addresses). ` +
+          `wp-dev requires at least a /28 subnet (16 addresses) for gateway and SSL proxy IPs. ` +
+          `Use a larger subnet or set WPDEV_NETWORK_SUBNET manually with at least /28.`,
+      );
     }
     subnet = derived.subnet;
     gateway = derived.gateway;
@@ -385,6 +401,22 @@ function ensureSecurityEnvDefaults(loaded: LoadedConfig, envPath: string): void 
     next = setEnvValueInContent(next, "WPDEV_HOST_GID", String(hostId.gid));
     changed = true;
     changedKeys.push("WPDEV_HOST_GID");
+  }
+
+  // PHP version-based image references with digests for reproducible builds
+  const phpVersion = readEnvValue(next, "WPDEV_PHP_VERSION") || DEFAULT_PHP_VERSION;
+  const wordpressImage = getWordPressImageWithDigest(loaded.configDir, phpVersion);
+  const wpcliImage = getWpCliImageWithDigest(loaded.configDir, phpVersion);
+
+  if (readEnvValue(next, "WPDEV_WORDPRESS_IMAGE") !== wordpressImage) {
+    next = setEnvValueInContent(next, "WPDEV_WORDPRESS_IMAGE", wordpressImage);
+    changed = true;
+    changedKeys.push("WPDEV_WORDPRESS_IMAGE");
+  }
+  if (readEnvValue(next, "WPDEV_WPCLI_IMAGE") !== wpcliImage) {
+    next = setEnvValueInContent(next, "WPDEV_WPCLI_IMAGE", wpcliImage);
+    changed = true;
+    changedKeys.push("WPDEV_WPCLI_IMAGE");
   }
 
   // Network configuration (subnet, gateway, proxy IP)

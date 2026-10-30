@@ -467,6 +467,25 @@ describe("network-config utilities", () => {
       expect(armMatch).not.toBeNull();
       expect(x86Match?.[1]).not.toBe(armMatch?.[1]);
     });
+
+    it("MUTATION CHECK: empty checksum FAILS the build (fail-closed)", () => {
+      const dockerfileContent = readFileSync(
+        join(process.cwd(), "docker/terminal.Dockerfile"),
+        "utf8",
+      );
+      
+      // Must have explicit check for empty checksums that exits with error
+      // For ttyd:
+      expect(dockerfileContent).toMatch(/if\s*\[\s*-z\s*"\$\{?TTYD_SHA\}?"\s*\]/);
+      expect(dockerfileContent).toContain("exit 1");
+      expect(dockerfileContent).toContain("Checksums are required");
+      
+      // For Docker CLI:
+      expect(dockerfileContent).toMatch(/if\s*\[\s*-z\s*"\$\{?DOCKER_CLI_SHA\}?"\s*\]/);
+      
+      // For Docker Compose:
+      expect(dockerfileContent).toMatch(/if\s*\[\s*-z\s*"\$\{?DOCKER_COMPOSE_SHA\}?"\s*\]/);
+    });
   });
 
   describe("G11 mutation tests - log path consolidation", () => {
@@ -500,13 +519,19 @@ describe("network-config utilities", () => {
       expect(runnerContent).toContain('from "./runner-log-constants.mjs"');
       expect(runnerContent).toContain("logPathForWorkdir");
       
-      // The constants file must have the correct values
-      const constantsContent = readFileSync(
+      // The constants.json file is the single source of truth
+      const constantsJson = JSON.parse(
+        readFileSync(join(process.cwd(), "docker/constants.json"), "utf8"),
+      );
+      expect(constantsJson.log.dirName).toBe("logs");
+      expect(constantsJson.log.fileName).toBe("wp-dev.log");
+
+      // The runner-log-constants.mjs must read from constants.json
+      const logConstantsContent = readFileSync(
         join(process.cwd(), "docker/runner-log-constants.mjs"),
         "utf8",
       );
-      expect(constantsContent).toContain('LOG_DIR_NAME = "logs"');
-      expect(constantsContent).toContain('LOG_FILE_NAME = "wp-dev.log"');
+      expect(logConstantsContent).toContain("constants.json");
     });
   });
 

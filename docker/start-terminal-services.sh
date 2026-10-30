@@ -32,11 +32,20 @@ node /workspace/docker/host-runner.mjs >>/tmp/sync-runner.log 2>&1 &
 
 # Start the auth proxy (handles Basic auth, Origin check, forwards to ttyd)
 # The proxy reads WPDEV_TERMINAL_AUTH from the environment.
+# Run in background and check if it exits - if it does, exit the container so
+# the restart policy can re-create it (the proxy is essential).
 node /workspace/docker/ttyd-auth-proxy.mjs >>/tmp/ttyd-auth-proxy.log 2>&1 &
 PROXY_PID=$!
 
 # Wait a moment for the proxy to start
 sleep 0.5
+
+# Check if proxy started successfully
+if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+  echo "ERROR: Auth proxy failed to start. Check /tmp/ttyd-auth-proxy.log" >&2
+  cat /tmp/ttyd-auth-proxy.log >&2 || true
+  exit 1
+fi
 
 # Interactive ttyd: host developer uid (workspace writes) but NOT root; docker CLI is root-only.
 HOST_UID="${WPDEV_HOST_UID:-}"

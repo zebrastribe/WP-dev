@@ -39,9 +39,9 @@ services:
       start_period: 15s
 
   wordpress:
-    # PHP version is configurable; digest pinning requires matching the version.
-    # Default digest is for php8.2-apache. Override WPDEV_WORDPRESS_IMAGE for other versions.
-    image: ${WPDEV_WORDPRESS_IMAGE:-wordpress:php8.2-apache@sha256:8ca746c43b29cc29258c2c9e420745daa88417fe5f9232220b69b8b1bbed15a7}
+    # PHP version is configurable via WPDEV_PHP_VERSION. wp-dev up sets WPDEV_WORDPRESS_IMAGE
+    # with the correct digest from docker/image-digests.json. Fallback allows standalone compose.
+    image: ${WPDEV_WORDPRESS_IMAGE:-wordpress:php${WPDEV_PHP_VERSION:-8.2}-apache}
     restart: unless-stopped
     networks:
       - wpdev
@@ -103,7 +103,8 @@ services:
 
   # Official `wordpress` image has no `wp` binary; wp-dev uses this service for WP-CLI.
   wpcli:
-    image: ${WPDEV_WPCLI_IMAGE:-wordpress:cli-php8.2@sha256:a8eb972af44dd9600db6e6511b66a0c8d5300eb42bf8d3a2f7d2bbb0a95133fb}
+    # PHP version matches wordpress service. wp-dev up sets WPDEV_WPCLI_IMAGE with digest.
+    image: ${WPDEV_WPCLI_IMAGE:-wordpress:cli-php${WPDEV_PHP_VERSION:-8.2}}
     user: "33:33"
     networks:
       - wpdev

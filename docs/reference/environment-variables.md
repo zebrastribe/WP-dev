@@ -69,8 +69,10 @@ Auto-configured by `wp-dev up`. Override only if needed for advanced setups.
 **Two stacks on one host** get unique subnets automatically:
 - `wp-dev up` scans existing Docker networks to find an available /24 subnet
 - If a saved subnet collides with another stack (e.g., stack A saves .1, goes down, stack C takes .1), the next `wp-dev up` detects the collision and reallocates
+- Minimum subnet size is /28 (16 addresses) to accommodate gateway (.1) and SSL proxy (.10) IPs
+- Subnets /29 and smaller are refused with a clear error message
 
-**IP range reservation:** The `WPDEV_NETWORK_IP_RANGE` reserves addresses .1-.15 for fixed IPs (gateway, SSL proxy) so dynamic containers (e.g. `compose run --rm wpcli`) cannot take the SSL proxy's address.
+**IP range reservation:** The `WPDEV_NETWORK_IP_RANGE` reserves addresses .0-.15 for fixed IPs (network, gateway, SSL proxy) so dynamic containers (e.g. `compose run --rm wpcli`) start from .16 and cannot take the SSL proxy's address.
 
 **Legacy network cleanup:** After upgrading from an older version, `wp-dev up` automatically removes the unused `<project>_default` network if no containers are attached.
 

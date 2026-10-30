@@ -14,10 +14,25 @@
 
 import http from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-// Configuration from environment (single source of truth)
-const LISTEN_PORT = Number(process.env.WPDEV_TERMINAL_PORT || 7681);
-const TTYD_INTERNAL_PORT = Number(process.env.WPDEV_TTYD_INTERNAL_PORT || 17681);
+// Load defaults from constants.json (single source of truth)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+let defaultTerminalPort = 7681;
+let defaultInternalPort = 17681;
+try {
+  const constants = JSON.parse(readFileSync(join(__dirname, "constants.json"), "utf8"));
+  defaultTerminalPort = constants.terminal.defaultPort;
+  defaultInternalPort = constants.terminal.defaultInternalPort;
+} catch {
+  // Use hardcoded fallbacks if constants.json unavailable
+}
+
+// Configuration from environment (overridable)
+const LISTEN_PORT = Number(process.env.WPDEV_TERMINAL_PORT || defaultTerminalPort);
+const TTYD_INTERNAL_PORT = Number(process.env.WPDEV_TTYD_INTERNAL_PORT || defaultInternalPort);
 const AUTH = process.env.WPDEV_TERMINAL_AUTH || "";
 const ALLOWED_ORIGINS = (process.env.WPDEV_TERMINAL_RUNNER_ORIGIN || "")
   .split(",")
@@ -33,10 +48,16 @@ if (!AUTH || AUTH === "wpdev:wpdev" || AUTH.includes("change-me")) {
   process.exit(1);
 }
 
-// Parse expected credential
-const [expectedUser, expectedPass] = AUTH.split(":", 2);
-if (!expectedUser || !expectedPass) {
+// Parse expected credential - split on FIRST colon only (password may contain colons)
+const firstColonIdx = AUTH.indexOf(":");
+if (firstColonIdx === -1) {
   console.error("[ttyd-auth-proxy] WPDEV_TERMINAL_AUTH must be in user:password format");
+  process.exit(1);
+}
+const expectedUser = AUTH.slice(0, firstColonIdx);
+const expectedPass = AUTH.slice(firstColonIdx + 1);
+if (!expectedUser || !expectedPass) {
+  console.error("[ttyd-auth-proxy] WPDEV_TERMINAL_AUTH must be in user:password format (both parts required)");
   process.exit(1);
 }
 
@@ -76,7 +97,8 @@ function validateBasicAuth(authHeader) {
 
 /**
  * Check Origin header for CSRF protection.
- * Allows localhost origins and configured allowed origins.
+ * Only allows the exact configured origins (scheme+host+port must match).
+ * Does NOT allow arbitrary localhost ports - the admin UI is on a specific port.
  */
 function validateOrigin(origin) {
   if (!origin) {
@@ -84,19 +106,14 @@ function validateOrigin(origin) {
     return true;
   }
 
+  // Must match one of the configured allowed origins exactly (scheme+host+port)
   try {
     const url = new URL(origin);
-    const host = url.hostname.toLowerCase();
 
-    // Always allow localhost
-    if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1") {
-      return true;
-    }
-
-    // Check against allowed origins
     for (const allowed of ALLOWED_ORIGINS) {
       try {
         const allowedUrl = new URL(allowed);
+        // Compare full origin (scheme://host:port)
         if (url.origin === allowedUrl.origin) {
           return true;
         }

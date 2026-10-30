@@ -1,15 +1,33 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * Log directory name relative to config dir. Single source of truth.
+ * Load constants from docker/constants.json (single source of truth).
+ * Falls back to hardcoded values if file not found (for tests).
  */
-export const LOG_DIR_NAME = "logs";
+function loadConstants(): { log: { dirName: string; fileName: string } } {
+  try {
+    const constantsPath = join(__dirname, "../../docker/constants.json");
+    return JSON.parse(readFileSync(constantsPath, "utf8"));
+  } catch {
+    // Fallback for test environments where file may not exist
+    return { log: { dirName: "logs", fileName: "wp-dev.log" } };
+  }
+}
+
+const constants = loadConstants();
 
 /**
- * Log filename. Single source of truth.
+ * Log directory name relative to config dir.
+ * Loaded from docker/constants.json (single source of truth).
  */
-export const LOG_FILE_NAME = "wp-dev.log";
+export const LOG_DIR_NAME = constants.log.dirName;
+
+/**
+ * Log filename.
+ * Loaded from docker/constants.json (single source of truth).
+ */
+export const LOG_FILE_NAME = constants.log.fileName;
 
 let logFilePath: string | null = null;
 let logWriteFailedWarned = false;

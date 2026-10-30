@@ -99,6 +99,7 @@ export const MIN_SUBNET_SIZE_FOR_PROXY = 28;
  * - Subnets smaller than /28: no ip_range (proxy IP would be outside subnet)
  *
  * Returns null for subnets smaller than /28 (proxy IP at .10 requires at least 16 addresses).
+ * Callers should check for null and provide a clear error message to users.
  */
 export function deriveNetworkIps(subnet: string): NetworkInfo | null {
   const network = getNetworkAddress(subnet);
@@ -113,6 +114,7 @@ export function deriveNetworkIps(subnet: string): NetworkInfo | null {
   // Gateway at offset 1 and SSL proxy at offset 10 require at least 16 addresses (/28)
   if (parsed.prefix > MIN_SUBNET_SIZE_FOR_PROXY) {
     // /29 (8 addresses) and /30 (4 addresses) can't fit proxy at .10
+    // Return null so callers can provide a clear refusal message
     return null;
   }
 
@@ -322,13 +324,11 @@ export function getSubnetPoolPrefix(dockerEnvPath?: string): string {
 export function findAvailableSubnet(prefix?: string, dockerEnvPath?: string): string | null {
   const poolPrefix = prefix ?? getSubnetPoolPrefix(dockerEnvPath);
 
-  // Get Docker network subnets - throw at allocation point where Docker is required
+  // Get Docker network subnets - return null if Docker is unavailable
+  // Callers that require allocation should handle the null case appropriately.
   const existing = listDockerNetworkSubnets();
   if (existing === null) {
-    throw new Error(
-      `Cannot list Docker networks. ` +
-        `Ensure Docker is running and accessible. Subnet allocation requires Docker.`,
-    );
+    return null;
   }
 
   // Flatten all Docker network subnets
