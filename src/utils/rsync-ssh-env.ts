@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { RemoteEnvConfig } from "../config/schema.js";
 import { resolveIdentityFile, preferTildePath } from "./remote-config-helpers.js";
+import { buildSshPinCommand } from "./ssh-host-key.js";
 
 /** Allowlist aligned with docker/runner-remote-env.mjs SAFE. */
 const SAFE_SSH_FIELD = /^[a-zA-Z0-9._:@~/-]+$/;
@@ -84,6 +85,7 @@ export function classifyRsyncSshError(
 export function formatRsyncSshErrorHint(
   errorType: ReturnType<typeof classifyRsyncSshError>,
   identityFile?: string,
+  remote?: RemoteEnvConfig,
 ): string {
   const keyPath = identityFile
     ? preferTildePath(resolveIdentityFile(identityFile) ?? identityFile)
@@ -102,12 +104,14 @@ export function formatRsyncSshErrorHint(
         `  cat ${keyPath}.pub\n` +
         "Add this to the hosting panel's SSH keys, or to ~/.ssh/authorized_keys on the server."
       );
-    case "host_not_pinned":
+    case "host_not_pinned": {
+      const pinCmd = remote ? buildSshPinCommand(remote) : "ssh <user>@<host>";
       return (
         "\n\nSSH host key is not pinned. Connect once with OpenSSH to verify and pin:\n" +
-        "  ssh <user>@<host>   (with -i and -p if needed)\n" +
+        `  ${pinCmd}\n` +
         "Accept the fingerprint when prompted."
       );
+    }
     case "local_permission":
       return (
         "\n\nLocal permission error (Docker ownership). Run:\n" +
@@ -146,9 +150,9 @@ export function canRetryPushWithRelativePath(remotePath: string, stderr: string)
   return rootMkdir.test(stderr);
 }
 
-export function pullRsyncFailureHint(stderr: string, identityFile?: string): string {
+export function pullRsyncFailureHint(stderr: string, identityFile?: string, remote?: RemoteEnvConfig): string {
   const errorType = classifyRsyncSshError(stderr, "pull", identityFile);
-  const hint = formatRsyncSshErrorHint(errorType, identityFile);
+  const hint = formatRsyncSshErrorHint(errorType, identityFile, remote);
   if (hint) return hint;
 
   if (/Permission denied|mkstemp|Operation not permitted/i.test(stderr)) {
@@ -163,9 +167,9 @@ export function pullRsyncFailureHint(stderr: string, identityFile?: string): str
   return "";
 }
 
-export function pushRsyncFailureHint(stderr: string, remotePath: string, identityFile?: string): string {
+export function pushRsyncFailureHint(stderr: string, remotePath: string, identityFile?: string, remote?: RemoteEnvConfig): string {
   const errorType = classifyRsyncSshError(stderr, "push", identityFile);
-  const hint = formatRsyncSshErrorHint(errorType, identityFile);
+  const hint = formatRsyncSshErrorHint(errorType, identityFile, remote);
   if (hint) return hint;
 
   if (/mkdir .* failed: Permission denied|recv_generator: mkdir .* failed: Permission denied/i.test(stderr)) {
@@ -183,8 +187,8 @@ export function pushRsyncFailureHint(stderr: string, remotePath: string, identit
   return "";
 }
 
-export function pushRsyncFailureHintAbsolutePath(stderr: string, remotePath: string, identityFile?: string): string {
-  const hint = pushRsyncFailureHint(stderr, remotePath, identityFile);
+export function pushRsyncFailureHintAbsolutePath(stderr: string, remotePath: string, identityFile?: string, remote?: RemoteEnvConfig): string {
+  const hint = pushRsyncFailureHint(stderr, remotePath, identityFile, remote);
   if (hint) return hint;
 
   if (/mkdir .* failed: Permission denied|recv_generator: mkdir .* failed: Permission denied/i.test(stderr)) {

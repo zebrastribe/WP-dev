@@ -110,10 +110,10 @@ export async function rsyncPull(
       return;
     }
     const err = retry.stderr ?? "";
-    throw new Error(`rsync pull failed with exit code ${retry.exitCode}${pullRsyncFailureHint(err, remote.identityFile)}`);
+    throw new Error(`rsync pull failed with exit code ${retry.exitCode}${pullRsyncFailureHint(err, remote.identityFile, remote)}`);
   }
 
-  throw new Error(`rsync pull failed with exit code ${first.exitCode}${pullRsyncFailureHint(firstErr, remote.identityFile)}`);
+  throw new Error(`rsync pull failed with exit code ${first.exitCode}${pullRsyncFailureHint(firstErr, remote.identityFile, remote)}`);
 }
 
 export async function rsyncPushToPath(
@@ -196,12 +196,12 @@ export async function rsyncPush(
     }
     const err = retry.stderr ?? "";
     throw new Error(
-      `rsync push failed with exit code ${retry.exitCode}${pushRsyncFailureHint(err, relPath, remote.identityFile)}`,
+      `rsync push failed with exit code ${retry.exitCode}${pushRsyncFailureHint(err, relPath, remote.identityFile, remote)}`,
     );
   }
 
   throw new Error(
-    `rsync push failed with exit code ${first.exitCode}${pushRsyncFailureHintAbsolutePath(firstErr, destPath, remote.identityFile)}`,
+    `rsync push failed with exit code ${first.exitCode}${pushRsyncFailureHintAbsolutePath(firstErr, destPath, remote.identityFile, remote)}`,
   );
 }
 
@@ -250,6 +250,6 @@ export async function rsyncPullFromPath(
     throw new Error(`rsync pull failed with exit code ${retry.exitCode}`);
   }
 
-  const hint = pullRsyncFailureHint(firstErr, remote.identityFile);
+  const hint = pullRsyncFailureHint(firstErr, remote.identityFile, remote);
   throw new Error(`rsync pull failed with exit code ${first.exitCode}${hint}`);
 }
