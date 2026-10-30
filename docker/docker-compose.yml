@@ -156,10 +156,15 @@ networks:
     # Subnet/gateway set by wp-dev up. Fallback allows `docker compose down` with old .env.
     # The fallback 172.28.0.0/24 is used ONLY for migration; wp-dev up allocates properly.
     # Override: WPDEV_NETWORK_SUBNET, WPDEV_NETWORK_GATEWAY in docker/.env
+    #
+    # ip_range reserves addresses for fixed IPs (gateway .1, SSL proxy .10).
+    # Dynamic containers get addresses from .16 onwards, preventing them from
+    # taking the SSL proxy's IP before it starts. Derived from WPDEV_SSL_PROXY_IP.
     ipam:
       config:
         - subnet: ${WPDEV_NETWORK_SUBNET:-172.28.0.0/24}
           gateway: ${WPDEV_NETWORK_GATEWAY:-172.28.0.1}
+          ip_range: ${WPDEV_NETWORK_IP_RANGE:-172.28.0.16/28}
 
 volumes:
   db_data:

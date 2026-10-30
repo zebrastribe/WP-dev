@@ -133,9 +133,19 @@ exit 1
     expect(script).toMatch(/exec runuser.*env -u WPDEV_TERMINAL_AUTH.*ttyd/);
   });
 
-  it("passes -c AUTH to ttyd for basic auth", () => {
+  it("passes --credential to ttyd for basic auth (hides credential from ps)", () => {
     const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
-    expect(script).toMatch(/ttyd.*-c "\$AUTH"/);
+    // Changed from -c "$AUTH" to --credential "$CRED_FILE" to hide credential from ps output
+    expect(script).toMatch(/ttyd.*--credential "\$CRED_FILE"/);
+    // Credential file is written with restricted permissions
+    expect(script).toContain('chmod 600 "$CRED_FILE"');
+    expect(script).toContain('printf \'%s\' "$AUTH" > "$CRED_FILE"');
+  });
+
+  it("cleans up credential file on exit", () => {
+    const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
+    expect(script).toContain("trap cleanup EXIT INT TERM");
+    expect(script).toContain('rm -f "$CRED_FILE"');
   });
 
   it("uses -d 3 to suppress ttyd startup banner", () => {

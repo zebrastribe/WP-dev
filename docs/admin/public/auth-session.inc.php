@@ -313,9 +313,34 @@ function wpdev_consume_bootstrap_challenge(): bool
     return hash_equals($expected, $provided);
 }
 
-/** Refuse wp-dev admin API on public hosts (staging/production). */
+/**
+ * Refuse wp-dev admin API on public hosts (staging/production) or when port is exposed.
+ *
+ * Gate 0 security: when WPDEV_WP_BIND_LOCAL != 1 (port is exposed beyond localhost),
+ * refuse ALL requests including gateway-trusted ones. This prevents Docker configurations
+ * that relay LAN traffic through the gateway from bypassing admin protection.
+ */
 function wpdev_enforce_local_admin_only(): void
 {
+    $bindLocal = trim((string) getenv('WPDEV_WP_BIND_LOCAL'));
+
+    if ($bindLocal !== '1') {
+        http_response_code(403);
+        header('Content-Type: application/json; charset=utf-8');
+        $detail = $bindLocal === '0'
+            ? 'wp-dev admin is disabled when WP_BIND is non-loopback (port exposed beyond localhost).'
+            : 'wp-dev admin is disabled until wp-dev up sets WPDEV_WP_BIND_LOCAL.';
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => 'forbidden',
+                'detail' => $detail,
+            ],
+            JSON_UNESCAPED_SLASHES
+        );
+        exit;
+    }
+
     $result = wpdev_is_local_admin_request_full(false);
     if ($result['ok'] === true) {
         return;

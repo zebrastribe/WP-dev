@@ -17,6 +17,7 @@ import {
   resolveHostProjectRoot,
 } from "../utils/host-paths.js";
 import {
+  cleanupLegacyDefaultNetwork,
   deriveBindLocal,
   deriveNetworkIps,
   findAvailableSubnet,
@@ -108,6 +109,7 @@ function ensureNetworkConfig(
   let subnet: string;
   let gateway: string;
   let sslProxyIp: string;
+  let ipRange: string;
 
   if (dockerNetworkExists(networkName)) {
     // Network exists - read actual values from Docker (authoritative)
@@ -118,6 +120,7 @@ function ensureNetworkConfig(
       gateway = actualGateway;
       const derived = deriveNetworkIps(subnet);
       sslProxyIp = derived?.sslProxyIp || "";
+      ipRange = derived?.ipRange || "";
       logInfo(`up: using existing network ${networkName} (${subnet}, gateway ${gateway})`);
     } else {
       throw new Error(
@@ -131,12 +134,14 @@ function ensureNetworkConfig(
     if (savedSubnetOverlapsExisting(savedSubnet, networkName)) {
       // Collision detected - another stack took our subnet. Reallocate.
       logInfo(`up: saved subnet ${savedSubnet} collides with another network, reallocating`);
-      const available = findAvailableSubnet();
+      const available = findAvailableSubnet(undefined, envPath);
       if (!available) {
-        const poolPrefix = getSubnetPoolPrefix();
+        const poolPrefix = getSubnetPoolPrefix(envPath);
         throw new Error(
           `Could not find available subnet in ${poolPrefix}.0.0/16 range. ` +
-            `Override with WPDEV_SUBNET_POOL or set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY manually in docker/.env.`,
+            `All subnets may be in use by Docker networks or host routes (VPNs, private networks). ` +
+            `Override with WPDEV_SUBNET_POOL in docker/.env or shell environment, ` +
+            `or set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY manually.`,
         );
       }
       const derived = deriveNetworkIps(available);
@@ -146,6 +151,7 @@ function ensureNetworkConfig(
       subnet = derived.subnet;
       gateway = derived.gateway;
       sslProxyIp = derived.sslProxyIp;
+      ipRange = derived.ipRange;
       logInfo(`up: reallocated subnet ${subnet} (gateway ${gateway})`);
     } else {
       // Saved subnet is still available - reuse it
@@ -153,16 +159,19 @@ function ensureNetworkConfig(
       gateway = savedGateway;
       const derived = deriveNetworkIps(subnet);
       sslProxyIp = readEnvValue(current, "WPDEV_SSL_PROXY_IP") || derived?.sslProxyIp || "";
+      ipRange = readEnvValue(current, "WPDEV_NETWORK_IP_RANGE") || derived?.ipRange || "";
       logInfo(`up: reusing saved subnet ${subnet} (gateway ${gateway})`);
     }
   } else {
     // No network, no saved config - allocate fresh
-    const available = findAvailableSubnet();
+    const available = findAvailableSubnet(undefined, envPath);
     if (!available) {
-      const poolPrefix = getSubnetPoolPrefix();
+      const poolPrefix = getSubnetPoolPrefix(envPath);
       throw new Error(
         `Could not find available subnet in ${poolPrefix}.0.0/16 range. ` +
-          `Override with WPDEV_SUBNET_POOL or set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY manually in docker/.env.`,
+          `All subnets may be in use by Docker networks or host routes (VPNs, private networks). ` +
+          `Override with WPDEV_SUBNET_POOL in docker/.env or shell environment, ` +
+          `or set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY manually.`,
       );
     }
     const derived = deriveNetworkIps(available);
@@ -172,6 +181,7 @@ function ensureNetworkConfig(
     subnet = derived.subnet;
     gateway = derived.gateway;
     sslProxyIp = derived.sslProxyIp;
+    ipRange = derived.ipRange;
     logInfo(`up: allocated new subnet ${subnet} (gateway ${gateway})`);
   }
 
@@ -192,6 +202,13 @@ function ensureNetworkConfig(
     changedKeys.push("WPDEV_SSL_PROXY_IP");
   }
 
+  // ip_range reserves fixed IPs (gateway, SSL proxy) from dynamic allocation
+  if (readEnvValue(next, "WPDEV_NETWORK_IP_RANGE") !== ipRange) {
+    next = setEnvValueInContent(next, "WPDEV_NETWORK_IP_RANGE", ipRange);
+    changed = true;
+    changedKeys.push("WPDEV_NETWORK_IP_RANGE");
+  }
+
   // Trusted gateway for admin API - always sync with network gateway
   if (readEnvValue(next, "WPDEV_ADMIN_TRUSTED_GATEWAY") !== gateway) {
     next = setEnvValueInContent(next, "WPDEV_ADMIN_TRUSTED_GATEWAY", gateway);
@@ -203,7 +220,7 @@ function ensureNetworkConfig(
     next,
     changed,
     changedKeys,
-    networkInfo: { subnet, gateway, sslProxyIp },
+    networkInfo: { subnet, gateway, sslProxyIp, ipRange },
   };
 }
 
@@ -580,6 +597,16 @@ export async function cmdUp(loaded: LoadedConfig, options: UpOptions = {}): Prom
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     logInfo(`up: supervisor watch daemon skipped (${msg})`);
+  }
+
+  // Clean up legacy _default network after successful migration to _wpdev network.
+  // Only removes if no containers are using it.
+  const projectId = dockerComposeProjectId(loaded.config);
+  const legacyCleanup = cleanupLegacyDefaultNetwork(projectId);
+  if (legacyCleanup.removed) {
+    logInfo(`up: removed legacy network ${projectId}_default (migrated to ${projectId}_wpdev)`);
+  } else if (legacyCleanup.reason && !legacyCleanup.reason.includes("does not exist")) {
+    logInfo(`up: legacy network ${projectId}_default not removed: ${legacyCleanup.reason}`);
   }
 
   printStartupSummary(loaded, wpInstalled);

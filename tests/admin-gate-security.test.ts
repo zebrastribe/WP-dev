@@ -137,6 +137,19 @@ describe("network-config utilities", () => {
       expect(normalizeWpBind("localhost")).toBe("127.0.0.1");
     });
 
+    it("handles case-insensitive localhost", () => {
+      expect(normalizeWpBind("LOCALHOST")).toBe("127.0.0.1");
+      expect(normalizeWpBind("Localhost")).toBe("127.0.0.1");
+      expect(normalizeWpBind("LocalHost")).toBe("127.0.0.1");
+    });
+
+    it("accepts quoted values (single and double quotes)", () => {
+      expect(normalizeWpBind('"127.0.0.1"')).toBe("127.0.0.1");
+      expect(normalizeWpBind("'127.0.0.1'")).toBe("127.0.0.1");
+      expect(normalizeWpBind('"localhost"')).toBe("127.0.0.1");
+      expect(normalizeWpBind("'0.0.0.0'")).toBe("0.0.0.0");
+    });
+
     it("returns 127.0.0.1 for empty/undefined", () => {
       expect(normalizeWpBind("")).toBe("127.0.0.1");
       expect(normalizeWpBind(undefined)).toBe("127.0.0.1");
@@ -149,9 +162,58 @@ describe("network-config utilities", () => {
       expect(normalizeWpBind("192.168.1.100")).toBe("192.168.1.100");
     });
 
+    it("handles IPv6 with and without brackets", () => {
+      expect(normalizeWpBind("::1")).toBe("::1");
+      expect(normalizeWpBind("[::1]")).toBe("::1");
+    });
+
     it("throws for invalid hostnames", () => {
       expect(() => normalizeWpBind("my-host")).toThrow("Invalid WP_BIND");
       expect(() => normalizeWpBind("example.com")).toThrow("Invalid WP_BIND");
+    });
+
+    it("rejects invalid IPv4 addresses with clear message", () => {
+      expect(() => normalizeWpBind("999.1.1.1")).toThrow(/invalid IPv4/i);
+      expect(() => normalizeWpBind("256.0.0.1")).toThrow(/invalid IPv4/i);
+      expect(() => normalizeWpBind("1.2.3.999")).toThrow(/invalid IPv4/i);
+    });
+
+    it("rejects malformed values like foo:bar with clear message", () => {
+      expect(() => normalizeWpBind("foo:bar")).toThrow(/not a valid IP/i);
+      expect(() => normalizeWpBind("localhost:8888")).toThrow(/not a valid IP/i);
+    });
+  });
+
+  describe("deriveBindLocal (with quotes and case-insensitive localhost)", () => {
+    it("handles quoted loopback addresses", () => {
+      expect(deriveBindLocal('"127.0.0.1"')).toBe(true);
+      expect(deriveBindLocal("'127.0.0.1'")).toBe(true);
+      expect(deriveBindLocal('"localhost"')).toBe(true);
+    });
+
+    it("handles case-insensitive localhost", () => {
+      expect(deriveBindLocal("LOCALHOST")).toBe(true);
+      expect(deriveBindLocal("Localhost")).toBe(true);
+    });
+
+    it("handles IPv6 with brackets", () => {
+      expect(deriveBindLocal("[::1]")).toBe(true);
+      expect(deriveBindLocal("::1")).toBe(true);
+    });
+  });
+
+  describe("deriveNetworkIps (with ipRange)", () => {
+    it("includes ipRange for reserving fixed IPs", () => {
+      const result = deriveNetworkIps("172.28.5.0/24");
+      expect(result).not.toBeNull();
+      expect(result?.gateway).toBe("172.28.5.1");
+      expect(result?.sslProxyIp).toBe("172.28.5.10");
+      expect(result?.ipRange).toBe("172.28.5.16/28");
+    });
+
+    it("derives ipRange correctly for different subnets", () => {
+      const result = deriveNetworkIps("10.20.30.0/24");
+      expect(result?.ipRange).toBe("10.20.30.16/28");
     });
   });
 

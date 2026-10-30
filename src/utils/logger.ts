@@ -1,22 +1,43 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+/**
+ * Log directory name relative to config dir. Single source of truth.
+ */
+export const LOG_DIR_NAME = "logs";
+
+/**
+ * Log filename. Single source of truth.
+ */
+export const LOG_FILE_NAME = "wp-dev.log";
+
 let logFilePath: string | null = null;
 let logWriteFailedWarned = false;
 
+/**
+ * Get the log directory path for a config directory.
+ */
+export function logDirForConfigDir(configDir: string): string {
+  return join(configDir, LOG_DIR_NAME);
+}
+
+/**
+ * Get the log file path for a config directory.
+ * Single source of truth for log path derivation.
+ */
+export function logPathForConfigDir(configDir: string): string {
+  return join(configDir, LOG_DIR_NAME, LOG_FILE_NAME);
+}
+
 export function initLogger(configDir: string): void {
-  const dir = join(configDir, "logs");
+  const dir = logDirForConfigDir(configDir);
   mkdirSync(dir, { recursive: true });
-  logFilePath = join(dir, "wp-dev.log");
+  logFilePath = logPathForConfigDir(configDir);
   appendRaw(`[${iso()}] [info] --- session start ---\n`);
 }
 
 export function getLogFilePath(): string | null {
   return logFilePath;
-}
-
-export function logPathForConfigDir(configDir: string): string {
-  return join(configDir, "logs", "wp-dev.log");
 }
 
 function iso(): string {

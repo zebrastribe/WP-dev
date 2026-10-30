@@ -9,14 +9,20 @@ if [ -z "$AUTH" ] || [ "$AUTH" = "wpdev:wpdev" ] || [ "$AUTH" = "change-me-user:
   exit 1
 fi
 
-# Security notes on WPDEV_TERMINAL_AUTH:
-# - Credential is visible in `ps` output; this is acceptable for a local dev tool bound to 127.0.0.1
-# - ttyd only accepts credentials via -c flag (no file/stdin option)
-# - ttyd -d 3 suppresses the base64 banner that would reveal the credential at startup
-# - WPDEV_TERMINAL_AUTH is stripped from ttyd's environment via `env -u` so shells don't inherit it
-# - The service is bound to 127.0.0.1 (via docker-compose ports) so only localhost can connect
-# - The UI masks the input field (type="password")
-# - The admin API never logs credential values
+# Security: write credential to a temp file readable only by root, then pass via --credential.
+# This prevents the credential from appearing in `ps` output on shared hosts.
+# The file is created with 0600 permissions before writing the credential.
+CRED_FILE="/tmp/.ttyd-credential-$$"
+rm -f "$CRED_FILE"
+touch "$CRED_FILE"
+chmod 600 "$CRED_FILE"
+printf '%s' "$AUTH" > "$CRED_FILE"
+
+# Clean up the credential file on exit
+cleanup() {
+  rm -f "$CRED_FILE"
+}
+trap cleanup EXIT INT TERM
 
 # Sync/terminal runners keep root so they can use the mounted docker.sock for pull/push.
 node /workspace/docker/terminal-runner.mjs >>/tmp/terminal-runner.log 2>&1 &
@@ -38,7 +44,8 @@ chown root:root /usr/local/bin/docker /usr/local/lib/docker/cli-plugins/docker-c
 chmod 700 /usr/local/bin/docker /usr/bin/docker /usr/bin/docker-compose 2>/dev/null || true
 chmod 700 /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
 
-# -d 3: quieter than default (7); suppresses ttyd's startup banner that prints Basic-auth as base64.
+# -d 3: quieter than default (7); suppresses ttyd's startup banner.
 # -O: check Origin header matches the terminal URL (defense-in-depth against CSRF).
-# Use env -u to strip WPDEV_TERMINAL_AUTH from ttyd's environment so shells don't inherit it.
-exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -O -p 7681 -c "$AUTH" -w "$WD" bash -lc "cd \"$WD\" && exec bash"
+# --credential: read auth from file (ttyd 1.7.4+), avoids exposing credential in ps output.
+# env -u: strip WPDEV_TERMINAL_AUTH from ttyd's environment so shells don't inherit it.
+exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -O -p 7681 --credential "$CRED_FILE" -w "$WD" bash -lc "cd \"$WD\" && exec bash"

@@ -30,6 +30,7 @@ if (!ALLOWED_ORIGIN) {
   process.exit(1);
 }
 
+// Log path: logs/wp-dev.log relative to workspace. Must match src/utils/logger.ts constants.
 const LOG_PATH = join(WORKDIR, "logs", "wp-dev.log");
 
 function resolveHostOwnership() {
