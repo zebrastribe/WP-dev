@@ -17,7 +17,7 @@ The detailed hosted / multi-tenant plan lives only in the **private** repository
 | Plan document (private) | **COMPLETE** — see private repo only |
 | Public integrity baseline | **Done** on public `main` |
 | SaaS / hosted build hold | **OFF** — G2 lifted 2026-10-31; Phase 1 extraction authorized |
-| Phase 1 (sync-engine / lab) | **IN PROGRESS** on this public repo |
+| Phase 1 (sync-engine / lab) | **COMPLETE** on this public repo (P1.1–P1.9; no SaaS) |
 | Product launch | **Not ready** — no hosted control plane in this repo |
 
 Gate 0 still applies: never publish today’s local admin API or runners. Hosted control-plane apps (when built) live in the private repo only. Follow the private plan for Phase 1+ details.
