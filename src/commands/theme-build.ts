@@ -14,13 +14,16 @@ export type ThemeBuildOptions = {
   quiet?: boolean;
 };
 
-/** Re-own bind-mounted theme build trees created as root inside the terminal. */
+/**
+ * Re-own bind-mounted theme build trees created as root inside the terminal.
+ * Includes "theme" for nested layouts where deployDir is themeSourcePath/theme.
+ */
 async function chownThemeBuildArtifacts(
   themeSourcePath: string,
   configDir: string,
 ): Promise<void> {
   const { uid, gid } = resolveHostIdentity(configDir);
-  const targets = ["node_modules", "vendor", "dist", "build", "public"].map((n) =>
+  const targets = ["node_modules", "vendor", "dist", "build", "public", "theme"].map((n) =>
     join(themeSourcePath, n),
   );
   for (const target of targets) {

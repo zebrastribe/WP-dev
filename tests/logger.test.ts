@@ -32,3 +32,12 @@ describe("logger", () => {
     expect(existsSync(join(dir, "logs"))).toBe(true);
   });
 });
+
+describe("logger source inspection", () => {
+  it("warns once to stderr on write failure instead of silently failing", () => {
+    const source = readFileSync(join(process.cwd(), "src/utils/logger.ts"), "utf8");
+    expect(source).toContain("logWriteFailedWarned");
+    expect(source).toContain("Warning: log write failed");
+    expect(source).not.toMatch(/catch\s*{\s*\/\/.*don't crash/);
+  });
+});

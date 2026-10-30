@@ -146,4 +146,30 @@ describe("theme-build chown", () => {
       !String(c[1]?.[2] ?? "").includes("node_modules")
     )).toBe(true);
   });
+
+  it("chowns nested theme directory for tw-style layouts", async () => {
+    mkdirSync(join(themeDir, "theme"), { recursive: true });
+    writeFileSync(join(themeDir, "package.json"), '{"scripts":{"production":"echo ok"}}');
+    writeFileSync(join(themeDir, "theme", "style.css"), "/* Theme Name: Test */");
+    writeFileSync(join(themeDir, "theme", "functions.php"), "<?php // theme functions");
+
+    const { cmdThemeBuild } = await import("../src/commands/theme-build.js");
+    const loaded = {
+      configDir: tempDir,
+      config: {
+        project: "test",
+        local: { path: tempDir, wpRoot: tempDir, themePath: themeDir, url: "http://localhost" },
+        staging: { host: "s", user: "u", path: "/p", url: "http://s" },
+        production: { host: "p", user: "u", path: "/p", url: "http://p" },
+      },
+    };
+
+    await cmdThemeBuild(loaded as never, { quiet: true });
+
+    const chownCalls = execaMock.mock.calls.filter(
+      (call: unknown[]) => call[0] === "chown",
+    );
+    const chownedPaths = chownCalls.map((c: unknown[]) => String(c[1]?.[2] ?? ""));
+    expect(chownedPaths.some((p) => p.endsWith("/theme"))).toBe(true);
+  });
 });

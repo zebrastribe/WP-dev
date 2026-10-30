@@ -249,7 +249,7 @@ export function SyncDeployPanel({
         </button>
       </div>
 
-      <JobProgressPanel job={job} outputRef={outputRef} onStop={() => void cancel()} />
+      {!sharedJob && <JobProgressPanel job={job} outputRef={outputRef} onStop={() => void cancel()} />}
     </section>
   );
 }

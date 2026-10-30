@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 let logFilePath: string | null = null;
+let logWriteFailedWarned = false;
 
 export function initLogger(configDir: string): void {
   const dir = join(configDir, "logs");
@@ -26,8 +27,12 @@ function appendRaw(line: string): void {
   if (!logFilePath) return;
   try {
     appendFileSync(logFilePath, line, "utf8");
-  } catch {
-    // Ignore EACCES or other write failures - don't crash CLI
+  } catch (err) {
+    if (!logWriteFailedWarned) {
+      logWriteFailedWarned = true;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[wp-dev] Warning: log write failed (${logFilePath}): ${msg}`);
+    }
   }
 }
 

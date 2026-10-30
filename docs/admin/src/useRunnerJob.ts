@@ -42,13 +42,18 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
 
   useEffect(() => {
     if (!canRun || reattachAttemptedRef.current) return;
-    reattachAttemptedRef.current = true;
     reattachAbortRef.current = false;
 
     void (async () => {
       const res = await getRunnerActiveJob(runnerKind);
       if (reattachAbortRef.current) return;
-      if (!res.ok || !res.activeJob) return;
+      if (!res.ok) {
+        const transient = /runner_secrets_unavailable|runner_unreachable/i.test(res.error || "");
+        if (!transient) reattachAttemptedRef.current = true;
+        return;
+      }
+      reattachAttemptedRef.current = true;
+      if (!res.activeJob) return;
       
       const activeJob = res.activeJob;
       if (activeJob.status !== "running") return;

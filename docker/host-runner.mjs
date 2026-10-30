@@ -1,7 +1,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, appendFileSync, mkdirSync, existsSync, chownSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { safeArg, wpdevPullPushCommand, wpdevPushThemeCommand } from "./runner-sync-gates.mjs";
 
@@ -59,14 +59,21 @@ function ensureLogDirWithOwnership() {
   if (created) mkdirSync(logDir, { recursive: true });
   if (HOST_UID && HOST_GID && HOST_UID > 0 && HOST_GID > 0) {
     try {
-      const { chownSync } = require("node:fs");
-      if (created) chownSync(logDir, HOST_UID, HOST_GID);
+      if (created) {
+        chownSync(logDir, HOST_UID, HOST_GID);
+      } else {
+        const dirStat = statSync(logDir);
+        if (dirStat.uid === 0) chownSync(logDir, HOST_UID, HOST_GID);
+      }
       if (!existsSync(LOG_PATH)) {
         appendFileSync(LOG_PATH, "");
         chownSync(LOG_PATH, HOST_UID, HOST_GID);
+      } else {
+        const fileStat = statSync(LOG_PATH);
+        if (fileStat.uid === 0) chownSync(LOG_PATH, HOST_UID, HOST_GID);
       }
-    } catch {
-      // ignore chown failures
+    } catch (err) {
+      console.error(`[host-runner] chown failed: ${err.message}`);
     }
   }
 }
@@ -279,7 +286,7 @@ function describeRefusal(action, args) {
   if (safeAction === "wpdev_pull" || safeAction === "wpdev_push") {
     const kind = safeAction === "wpdev_pull" ? "pull" : "push";
     if (!wpdevPullPushCommand(kind, env, confirm)) {
-      if (!["staging", "production"].includes(env)) return `invalid env (got ${env.length} safe chars)`;
+      if (!["staging", "production"].includes(env)) return `invalid env (got ${env ? env.length : 0} safe chars)`;
       if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production sync requires SYNC_PRODUCTION confirm token";
       if (env === "staging" && !confirm) return "staging sync requires --confirm-host";
     }
@@ -287,10 +294,14 @@ function describeRefusal(action, args) {
   }
   if (safeAction === "wpdev_push_theme") {
     if (!wpdevPushThemeCommand(env, confirm, safeArg(args?.build))) {
-      if (!["staging", "production"].includes(env)) return `invalid env (got ${env.length} safe chars)`;
+      if (!["staging", "production"].includes(env)) return `invalid env (got ${env ? env.length : 0} safe chars)`;
       if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production theme push requires SYNC_PRODUCTION confirm token";
       if (env === "staging" && !confirm) return "staging theme push requires --confirm-host";
     }
+    return "invalid args";
+  }
+  if (safeAction === "backup_list" || safeAction === "backup_create") {
+    if (!["local", "staging", "production"].includes(env)) return `invalid env for ${safeAction} (got ${env ? env.length : 0} safe chars)`;
     return "invalid args";
   }
   if (!safeAction) return `invalid action (got ${typeof action === "string" ? action.length : 0} chars, none safe)`;
