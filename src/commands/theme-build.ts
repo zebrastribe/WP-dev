@@ -20,7 +20,9 @@ async function chownThemeBuildArtifacts(
   configDir: string,
 ): Promise<void> {
   const { uid, gid } = resolveHostIdentity(configDir);
-  const targets = ["node_modules", "vendor"].map((n) => join(themeSourcePath, n));
+  const targets = ["node_modules", "vendor", "dist", "build", "public"].map((n) =>
+    join(themeSourcePath, n),
+  );
   for (const target of targets) {
     if (!existsSync(target)) continue;
     try {

@@ -187,6 +187,12 @@ export function formatUpdatePreflight(preflight: UpdatePreflight): string {
       lines.push(`  ⚠ ${w}`);
     }
   }
+  if (preflight.info && preflight.info.length > 0) {
+    lines.push("");
+    for (const i of preflight.info) {
+      lines.push(`  ℹ ${i}`);
+    }
+  }
   lines.push("");
   lines.push(`  Back up: ${UPDATE_BACKUP_HINTS.join("; ")}.`);
   return lines.join("\n");

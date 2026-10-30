@@ -58,7 +58,7 @@
             "host": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._:-]*[a-zA-Z0-9])?$"
+              "pattern": "^(::1|[a-zA-Z0-9]([a-zA-Z0-9._:-]*[a-zA-Z0-9])?)$"
             },
             "user": {
               "type": "string",
@@ -148,7 +148,7 @@
             "host": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^[a-zA-Z0-9]([a-zA-Z0-9._:-]*[a-zA-Z0-9])?$"
+              "pattern": "^(::1|[a-zA-Z0-9]([a-zA-Z0-9._:-]*[a-zA-Z0-9])?)$"
             },
             "user": {
               "type": "string",

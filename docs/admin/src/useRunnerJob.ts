@@ -47,7 +47,8 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
 
     void (async () => {
       const res = await getRunnerActiveJob(runnerKind);
-      if (!res.ok || !res.activeJob || reattachAbortRef.current) return;
+      if (reattachAbortRef.current) return;
+      if (!res.ok || !res.activeJob) return;
       
       const activeJob = res.activeJob;
       if (activeJob.status !== "running") return;
@@ -67,12 +68,13 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
         if (abortRef.current || reattachAbortRef.current) return;
 
         const st = await getTerminalJobStatus(activeJob.id, runnerKind);
+        if (abortRef.current || reattachAbortRef.current) return;
         if (!st.ok) {
-          // Match run()'s transient error handling
           const transient =
             /runner_secrets_unavailable|runner_unreachable/i.test(st.error || "");
           if (transient && i < 1795) {
             await new Promise((r) => window.setTimeout(r, 1000));
+            if (abortRef.current || reattachAbortRef.current) return;
             continue;
           }
           setJob((prev) => ({
@@ -88,7 +90,6 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
 
         if (st.status === "done") {
           activeJobIdRef.current = null;
-          // Exit 130 means cancelled
           if (st.exitCode === 130) {
             setJob({
               phase: "cancelled",
@@ -113,8 +114,13 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
         }
 
         await new Promise((r) => window.setTimeout(r, 1000));
+        if (abortRef.current || reattachAbortRef.current) return;
       }
     })();
+
+    return () => {
+      reattachAbortRef.current = true;
+    };
   }, [canRun, runnerKind]);
 
   const reset = useCallback(() => {

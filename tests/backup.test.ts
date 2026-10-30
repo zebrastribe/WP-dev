@@ -88,29 +88,21 @@ describe("backup service", () => {
 
   it("listRecentBackups orders by mtime, not lexical name", () => {
     vi.useRealTimers();
-    // Use temp dir to avoid writing to real $HOME/.wp-dev
-    const tempHome = mkdtempSync(join(tmpdir(), "wp-dev-backup-mtime-"));
-    const originalHome = process.env.HOME;
-    process.env.HOME = tempHome;
-    try {
-      const project = `mtime-sort-${Date.now()}`;
-      const dir = backupDirFor(project, "local");
-      mkdirSync(dir, { recursive: true });
-      const older = join(dir, "pre-restore-2099-01-01-00-00-00-000-zzz.sql");
-      const newer = join(dir, "db-2020-01-01-00-00-00-000-aaa.sql");
-      writeFileSync(older, "-- old");
-      writeFileSync(newer, "-- new");
-      const tOld = Date.now() / 1000 - 120;
-      const tNew = Date.now() / 1000 - 10;
-      utimesSync(older, tOld, tOld);
-      utimesSync(newer, tNew, tNew);
-      const recent = listRecentBackups(project, "local", 2);
-      expect(recent[0]).toBe(newer);
-      expect(recent[1]).toBe(older);
-    } finally {
-      process.env.HOME = originalHome;
-      rmSync(tempHome, { recursive: true, force: true });
-    }
+    // HOME is set by tests/setup.ts (global isolation)
+    const project = `mtime-sort-${Date.now()}`;
+    const dir = backupDirFor(project, "local");
+    mkdirSync(dir, { recursive: true });
+    const older = join(dir, "pre-restore-2099-01-01-00-00-00-000-zzz.sql");
+    const newer = join(dir, "db-2020-01-01-00-00-00-000-aaa.sql");
+    writeFileSync(older, "-- old");
+    writeFileSync(newer, "-- new");
+    const tOld = Date.now() / 1000 - 120;
+    const tNew = Date.now() / 1000 - 10;
+    utimesSync(older, tOld, tOld);
+    utimesSync(newer, tNew, tNew);
+    const recent = listRecentBackups(project, "local", 2);
+    expect(recent[0]).toBe(newer);
+    expect(recent[1]).toBe(older);
   });
 
   it("cmdBackup acquires the project sync lock before work", () => {

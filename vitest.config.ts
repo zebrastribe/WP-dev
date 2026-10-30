@@ -6,6 +6,7 @@ export default defineConfig({
     pool: "forks",
     include: ["tests/**/*.test.ts"],
     exclude: ["tests/smoke/**/*.test.ts"],
+    setupFiles: ["tests/setup.ts"],
     coverage: {
       provider: "v8",
       /** Measure testable layers; CLI/orchestration covered by smoke/integration. */

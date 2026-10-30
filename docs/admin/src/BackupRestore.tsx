@@ -18,6 +18,8 @@ export function BackupRestore() {
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
   const validateTimeoutRef = useRef<number | null>(null);
+  const validateRequestIdRef = useRef(0);
+  const validatedForRef = useRef<{ path: string; env: EnvName } | null>(null);
 
   useEffect(() => {
     void loadWpDevConfig().then((cfg) => {
@@ -33,24 +35,41 @@ export function BackupRestore() {
     if (validateTimeoutRef.current) {
       window.clearTimeout(validateTimeoutRef.current);
     }
-    if (!restoreFile.trim() || !canRun) {
+    const pathTrimmed = restoreFile.trim();
+    if (!pathTrimmed || !canRun) {
       setRestorePathStatus("idle");
       setRestorePathMessage("");
+      validatedForRef.current = null;
+      return;
+    }
+    if (
+      validatedForRef.current &&
+      validatedForRef.current.path === pathTrimmed &&
+      validatedForRef.current.env === env &&
+      restorePathStatus === "valid"
+    ) {
       return;
     }
     setRestorePathStatus("validating");
     setRestorePathMessage("Checking path...");
+    validatedForRef.current = null;
+
+    const requestId = ++validateRequestIdRef.current;
+    const currentEnv = env;
     validateTimeoutRef.current = window.setTimeout(() => {
       void (async () => {
         try {
-          const started = await runTerminalAction("validate_restore_path", { env, file: restoreFile.trim() });
+          const started = await runTerminalAction("validate_restore_path", { env: currentEnv, file: pathTrimmed });
+          if (validateRequestIdRef.current !== requestId) return;
           if (!started.ok) {
             setRestorePathStatus("invalid");
             setRestorePathMessage(started.error || "Validation failed");
             return;
           }
           for (let i = 0; i < 30; i += 1) {
+            if (validateRequestIdRef.current !== requestId) return;
             const st = await getTerminalJobStatus(started.jobId);
+            if (validateRequestIdRef.current !== requestId) return;
             if (!st.ok) {
               setRestorePathStatus("invalid");
               setRestorePathMessage(st.error || "Validation failed");
@@ -60,19 +79,24 @@ export function BackupRestore() {
               const isValid = st.exitCode === 0 && st.output.includes("VALID:");
               setRestorePathStatus(isValid ? "valid" : "invalid");
               setRestorePathMessage(st.output.trim());
+              if (isValid) {
+                validatedForRef.current = { path: pathTrimmed, env: currentEnv };
+              }
               return;
             }
             await new Promise((r) => window.setTimeout(r, 200));
           }
+          if (validateRequestIdRef.current !== requestId) return;
           setRestorePathStatus("invalid");
           setRestorePathMessage("Validation timed out");
         } catch (e) {
+          if (validateRequestIdRef.current !== requestId) return;
           setRestorePathStatus("invalid");
           setRestorePathMessage(e instanceof Error ? e.message : "Validation failed");
         }
       })();
     }, 500);
-  }, [restoreFile, env, canRun]);
+  }, [restoreFile, env, canRun, restorePathStatus]);
 
   const runAction = async (action: "backup_create" | "backup_list" | "restore_env", args: Record<string, string>) => {
     if (!canRun) {

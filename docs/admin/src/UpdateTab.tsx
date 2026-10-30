@@ -12,6 +12,7 @@ type UpdatePreflightJson = {
     commitsBehind: number | null;
     forkWorkflowRecommended: boolean;
     warnings: string[];
+    info?: string[];
   };
   wordpressSafe: boolean;
 };
@@ -187,6 +188,13 @@ export function UpdateTab() {
             <ul className="mt-2 list-inside list-disc space-y-1 text-xs">
               {preflight.warnings.map((w) => (
                 <li key={w}>{w}</li>
+              ))}
+            </ul>
+          ) : null}
+          {preflight.info && preflight.info.length > 0 ? (
+            <ul className="mt-2 list-inside list-disc space-y-1 text-xs text-slate-600 dark:text-slate-400">
+              {preflight.info.map((i) => (
+                <li key={i}>{i}</li>
               ))}
             </ul>
           ) : null}

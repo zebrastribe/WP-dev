@@ -1153,6 +1153,21 @@ if ($method === 'POST' && $action === 'save') {
         exit;
     }
 
+    // Refuse to save when the file exists but is unreadable (permissions issue).
+    if (file_exists($configPath) && !is_readable($configPath)) {
+        http_response_code(403);
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => 'existing_config_unreadable',
+                'detail' => 'Existing wp-dev.config.json exists but is not readable. Fix file permissions before saving.',
+            ],
+            JSON_UNESCAPED_SLASHES,
+        );
+        wpdev_admin_api_log('POST save 403 existing_config_unreadable');
+        exit;
+    }
+
     // Refuse to save over an unparseable existing config file (backup protection).
     // The user should fix the broken file manually or restore from backup first.
     if (is_file($configPath) && is_readable($configPath)) {

@@ -5,7 +5,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ZodError } from "zod";
-import { wpDevConfigSchema, type WpDevConfig } from "./schema.js";
+import { wpDevConfigSchema, schemaShapes, type WpDevConfig } from "./schema.js";
 import { writeFileAtomic } from "../fs/atomic-write.js";
 
 /** Human-readable errors for corrupt or invalid wp-dev.config.json (include file path). */
@@ -26,18 +26,23 @@ export function formatConfigFileError(path: string, err: unknown): Error {
   return new Error(`${path}: ${String(err)}`);
 }
 
-/** Known keys at each level of the config schema. */
+function keysFromShape(shape: object | undefined): Set<string> {
+  if (!shape || typeof shape !== "object") return new Set();
+  return new Set(Object.keys(shape));
+}
+
+/** Known keys at each level of the config schema (derived from zod shapes). */
 const KNOWN_KEYS: Record<string, Set<string>> = {
-  "": new Set(["$schema", "project", "local", "staging", "production", "simply", "sync", "importWorkspace"]),
-  local: new Set(["url", "path", "composeFile", "composeProjectName", "composeService", "wpRoot", "themePath", "themeSlug"]),
-  staging: new Set(["host", "user", "path", "url", "port", "identityFile", "db", "httpAuth"]),
-  production: new Set(["host", "user", "path", "url", "port", "identityFile", "db"]),
-  simply: new Set(["account"]),
-  sync: new Set(["plugins", "localOnlyPlugins", "themes", "disabledRecommended", "extraPushExcludes", "extraPullExcludes", "skipUploadsOnPush", "recommendationsDismissed"]),
-  importWorkspace: new Set(["enabled", "localUrl", "storagePath", "knowledgeBasePath", "deployPath", "tokenEnvVar"]),
-  "staging.db": new Set(["host", "name", "user", "password", "prefix"]),
-  "production.db": new Set(["host", "name", "user", "password", "prefix"]),
-  "staging.httpAuth": new Set(["enabled", "username", "password"]),
+  "": new Set(["$schema", ...keysFromShape(schemaShapes.root)]),
+  local: keysFromShape(schemaShapes.local),
+  staging: keysFromShape(schemaShapes.staging),
+  production: keysFromShape(schemaShapes.production),
+  simply: keysFromShape(schemaShapes.simply),
+  sync: keysFromShape(schemaShapes.syncInner),
+  importWorkspace: keysFromShape(schemaShapes.importWorkspace),
+  "staging.db": keysFromShape(schemaShapes.stagingDb),
+  "production.db": keysFromShape(schemaShapes.productionDb),
+  "staging.httpAuth": keysFromShape(schemaShapes.stagingHttpAuth),
 };
 
 /** Detect unknown keys at all levels (potential typos). Returns array of "path.key" strings. */

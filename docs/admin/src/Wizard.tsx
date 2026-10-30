@@ -329,6 +329,7 @@ export function Wizard() {
   const [localStatus, setLocalStatus] = useState<LocalStatus | null>(null);
   const [setupWorkflow, setSetupWorkflow] = useState<SetupWorkflow | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveBlocked, setSaveBlocked] = useState<string | null>(null);
   const [terminalPrep, setTerminalPrep] = useState<TerminalPrepState>(null);
   const [terminalRun, setTerminalRun] = useState<TerminalRunState>(null);
   /** Cleared when host/user/path change; set when SSH test or doctor succeeds. */
@@ -385,6 +386,7 @@ export function Wizard() {
           }
         }
         if (loadedResult.status === "invalid") {
+          setSaveBlocked("Config file is corrupt or invalid JSON. Fix the file on disk or restore from backup first.");
           setAlert({
             tone: "error",
             text:
@@ -463,6 +465,7 @@ export function Wizard() {
           }
         } else if (loadedResult.status === "unreadable") {
           logAdmin("warn", "Wizard: config file exists but is unreadable");
+          setSaveBlocked("Config file exists but is not readable. Fix file permissions first.");
           setAlert({
             tone: "error",
             text: `wp-dev.config.json exists but is not readable: ${loadedResult.detail}`,
@@ -2321,10 +2324,11 @@ export function Wizard() {
             <button
               type="button"
               onClick={onSave}
-              disabled={saving}
+              disabled={saving || !!saveBlocked}
+              title={saveBlocked || undefined}
               className="rounded-lg border border-slate-200 px-4 py-2 text-sm dark:border-slate-600 disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save environment"}
+              {saving ? "Saving…" : saveBlocked ? "Save blocked" : "Save environment"}
             </button>
           </div>
         </div>

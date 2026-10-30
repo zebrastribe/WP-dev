@@ -1,7 +1,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, appendFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { safeArg, wpdevPullPushCommand, wpdevPushThemeCommand } from "./runner-sync-gates.mjs";
 
@@ -27,6 +27,35 @@ if (!RUNNER_TOKEN) {
 if (!ALLOWED_ORIGIN) {
   console.error("Refusing to start host runner: WPDEV_TERMINAL_RUNNER_ORIGIN is required.");
   process.exit(1);
+}
+
+const LOG_PATH = join(WORKDIR, "logs", "wp-dev.log");
+
+function sanitizeArgsForLog(args) {
+  if (!args || typeof args !== "object") return "{}";
+  const safe = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v === "string") {
+      safe[k] = safeArg(v) || `[unsafe:${v.length}chars]`;
+    } else {
+      safe[k] = v;
+    }
+  }
+  return JSON.stringify(safe);
+}
+
+function logRefusal(action, args, reason) {
+  const timestamp = new Date().toISOString();
+  const sanitizedArgs = sanitizeArgsForLog(args);
+  const line = `${timestamp} [host-runner] action refused: ${safeArg(action) || action} args=${sanitizedArgs} reason=${reason}\n`;
+  console.error(line.trim());
+  try {
+    const logDir = join(WORKDIR, "logs");
+    if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
+    appendFileSync(LOG_PATH, line);
+  } catch {
+    // ignore log write failures
+  }
 }
 
 const jobs = new Map();
@@ -411,7 +440,7 @@ const server = http.createServer(async (req, res) => {
       const command = commandForAction(action, data.args || {});
       if (!command) {
         const reason = describeRefusal(action, data.args || {});
-        console.error(`[host-runner] action refused: ${action} - ${reason}`);
+        logRefusal(action, data.args || {}, reason);
         json(req, res, 400, { ok: false, error: "invalid_action_or_args", reason });
         return;
       }

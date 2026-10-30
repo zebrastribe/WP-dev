@@ -10,18 +10,13 @@ if [ -z "$AUTH" ] || [ "$AUTH" = "wpdev:wpdev" ] || [ "$AUTH" = "change-me-user:
 fi
 
 # Security notes on WPDEV_TERMINAL_AUTH:
-# - Written to a mode-600 file, never logged to stdout/stderr
-# - ttyd -d 3 suppresses the base64 banner that would reveal the credential
-# - The credential is read from file at exec time so `ps` cannot leak it
+# - Credential is visible in `ps` output; this is acceptable for a local dev tool bound to 127.0.0.1
+# - ttyd only accepts credentials via -c flag (no file/stdin option)
+# - ttyd -d 3 suppresses the base64 banner that would reveal the credential at startup
+# - WPDEV_TERMINAL_AUTH is stripped from ttyd's environment via `env -u` so shells don't inherit it
 # - The service is bound to 127.0.0.1 (via docker-compose ports) so only localhost can connect
 # - The UI masks the input field (type="password")
 # - The admin API never logs credential values
-
-# Write credential to a mode-600 file so it doesn't appear in `ps` output.
-TTYD_AUTH_FILE="/tmp/.ttyd-auth-$$"
-printf '%s' "$AUTH" > "$TTYD_AUTH_FILE"
-chmod 600 "$TTYD_AUTH_FILE"
-trap 'rm -f "$TTYD_AUTH_FILE"' EXIT
 
 # Sync/terminal runners keep root so they can use the mounted docker.sock for pull/push.
 node /workspace/docker/terminal-runner.mjs >>/tmp/terminal-runner.log 2>&1 &
@@ -44,14 +39,5 @@ chmod 700 /usr/local/bin/docker /usr/bin/docker /usr/bin/docker-compose 2>/dev/n
 chmod 700 /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
 
 # -d 3: quieter than default (7); suppresses ttyd's startup banner that prints Basic-auth as base64.
-# Use a wrapper script to read credential from file at exec time, preventing `ps` from leaking it.
-cat > /tmp/.ttyd-wrapper-$$.sh << 'WRAPPER_EOF'
-#!/bin/sh
-AUTH_FILE="$1"; shift
-WD="$1"; shift
-TTY_AUTH="$(cat "$AUTH_FILE")"
-rm -f "$AUTH_FILE"
-exec ttyd -d 3 -W -p 7681 -c "$TTY_AUTH" -w "$WD" "$@"
-WRAPPER_EOF
-chmod 700 /tmp/.ttyd-wrapper-$$.sh
-exec runuser -u "$TTY_USER" -- /tmp/.ttyd-wrapper-$$.sh "$TTYD_AUTH_FILE" "$WD" bash -lc "cd \"$WD\" && exec bash"
+# Use env -u to strip WPDEV_TERMINAL_AUTH from ttyd's environment so shells don't inherit it.
+exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -p 7681 -c "$AUTH" -w "$WD" bash -lc "cd \"$WD\" && exec bash"

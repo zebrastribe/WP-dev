@@ -10,6 +10,7 @@ const remoteDbSchema = z.object({
 
 /**
  * Hostname / IP — the regex exports to JSON Schema so PHP/ajv validate too.
+ * Allows hostnames, IPv4, and IPv6 localhost (::1).
  * Friendly messages live in superRefine (not exported to schema).
  */
 const sshHostSchema = z
@@ -17,8 +18,8 @@ const sshHostSchema = z
   .trim()
   .min(1)
   .regex(
-    /^[a-zA-Z0-9]([a-zA-Z0-9._:-]*[a-zA-Z0-9])?$/,
-    "must be a valid hostname (letters, digits, . _ : - only; start/end with alphanumeric)",
+    /^(::1|[a-zA-Z0-9]([a-zA-Z0-9._:-]*[a-zA-Z0-9])?)$/,
+    "must be a valid hostname (letters, digits, . _ : - only; start/end with alphanumeric) or ::1",
   )
   .superRefine((s, ctx) => {
     if (/\s/.test(s)) {
@@ -30,7 +31,7 @@ const sshHostSchema = z
     if (/[;|&`$(){}[\]<>\\'"!#%^*~?\n\r]/.test(s)) {
       ctx.addIssue({ code: "custom", message: "must not contain shell metacharacters" });
     }
-    if (s.includes("/")) {
+    if (s !== "::1" && s.includes("/")) {
       ctx.addIssue({ code: "custom", message: "must be a hostname only (no path component)" });
     }
   });
@@ -131,6 +132,19 @@ export type RemoteEnvName = "staging" | "production";
 export type RemoteEnvConfig = z.infer<typeof remoteEnvSchema>;
 export type StagingEnvConfig = z.infer<typeof stagingEnvSchema>;
 export type StagingHttpAuth = z.infer<typeof stagingHttpAuthSchema>;
+
+export const schemaShapes = {
+  root: wpDevConfigSchema.shape,
+  local: localSchema.shape,
+  staging: stagingEnvSchema.shape,
+  production: remoteEnvSchema.shape,
+  simply: simplySchema.shape,
+  syncInner: syncSchema?.unwrap?.()?.shape,
+  importWorkspace: importWorkspaceSchema.shape,
+  stagingDb: remoteDbSchema.shape,
+  productionDb: remoteDbSchema.shape,
+  stagingHttpAuth: stagingHttpAuthSchema.shape,
+};
 
 export function getRemoteEnv(
   config: WpDevConfig,

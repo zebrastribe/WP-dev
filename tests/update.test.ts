@@ -150,4 +150,63 @@ describe("update preflight", () => {
       rmSync(configDir, { recursive: true, force: true });
     }
   });
+
+  it("autostash with bare remote preserves stashes on conflict rebase abort", async () => {
+    const bareRemote = mkdtempSync(join(tmpdir(), "wp-dev-bare-"));
+    const localRepo = mkdtempSync(join(tmpdir(), "wp-dev-local-"));
+    try {
+      // Create a bare remote with main as default branch
+      await execa("git", ["init", "--bare", "--initial-branch=main"], { cwd: bareRemote });
+
+      // Initialize local repo and add remote
+      await execa("git", ["init", "--initial-branch=main"], { cwd: localRepo });
+      await execa("git", ["remote", "add", "origin", bareRemote], { cwd: localRepo });
+      await execa("git", ["config", "user.email", "test@example.com"], { cwd: localRepo });
+      await execa("git", ["config", "user.name", "Test"], { cwd: localRepo });
+
+      // Create initial commit and push
+      writeFileSync(join(localRepo, "file.txt"), "initial");
+      await execa("git", ["add", "."], { cwd: localRepo });
+      await execa("git", ["commit", "-m", "initial"], { cwd: localRepo });
+      await execa("git", ["push", "-u", "origin", "main"], { cwd: localRepo });
+
+      // Create a stash
+      writeFileSync(join(localRepo, "file.txt"), "stashed content");
+      await execa("git", ["stash", "push", "-m", "user stash"], { cwd: localRepo });
+
+      // Create conflicting upstream commit
+      await execa("git", ["checkout", "-b", "temp"], { cwd: localRepo });
+      writeFileSync(join(localRepo, "file.txt"), "upstream change");
+      await execa("git", ["commit", "-am", "upstream"], { cwd: localRepo });
+      await execa("git", ["push", "origin", "temp:main", "-f"], { cwd: localRepo });
+      await execa("git", ["checkout", "main"], { cwd: localRepo });
+      await execa("git", ["branch", "-D", "temp"], { cwd: localRepo });
+
+      // Make local change
+      writeFileSync(join(localRepo, "file.txt"), "local change");
+      await execa("git", ["commit", "-am", "local"], { cwd: localRepo });
+
+      // Verify stash before
+      const stashBefore = await execa("git", ["stash", "list"], { cwd: localRepo });
+      expect(stashBefore.stdout).toContain("user stash");
+
+      // Try to pull with autostash - will fail due to conflict
+      const pullResult = await execa(
+        "git",
+        ["pull", "--rebase", "--autostash", "origin", "main"],
+        { cwd: localRepo, reject: false },
+      );
+      expect(pullResult.exitCode).not.toBe(0);
+
+      // Abort the rebase
+      await execa("git", ["rebase", "--abort"], { cwd: localRepo });
+
+      // Verify stash is still there after abort
+      const stashAfter = await execa("git", ["stash", "list"], { cwd: localRepo });
+      expect(stashAfter.stdout).toContain("user stash");
+    } finally {
+      rmSync(bareRemote, { recursive: true, force: true });
+      rmSync(localRepo, { recursive: true, force: true });
+    }
+  });
 });
