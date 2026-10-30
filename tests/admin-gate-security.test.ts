@@ -623,9 +623,14 @@ switch ($test) {
         $result = wpdev_is_local_admin_request_full($requireBindLocal);
         break;
     case 'enforce_local_admin_only':
-        // This function calls exit(), so we capture output and use register_shutdown_function
+        // This function may call exit(), so we track if it returned normally
+        $normalReturn = false;
         ob_start();
-        register_shutdown_function(function() {
+        register_shutdown_function(function() use (&$normalReturn) {
+            // If the function returned normally, don't output from shutdown
+            if ($normalReturn) {
+                return;
+            }
             $output = ob_get_clean();
             // Handle case where ob_get_clean returns false (buffer already cleaned)
             if ($output === false) {
@@ -642,6 +647,7 @@ switch ($test) {
         });
         wpdev_enforce_local_admin_only();
         // If we get here, the request was allowed (no exit)
+        $normalReturn = true;
         ob_end_clean();
         $result = ['http_code' => 200, 'allowed' => true];
         break;
