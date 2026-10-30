@@ -235,6 +235,11 @@ function ensureNetworkConfig(
   };
 }
 
+/**
+ * WP_BIND / WPDEV_WP_BIND_LOCAL: ALWAYS recompute bind-local from WP_BIND on every up.
+ * Do not sticky-keep BIND_LOCAL=0 — that permanently disables admin after a temporary
+ * non-loopback bind even when the user switches back to 127.0.0.1.
+ */
 function ensureBindLocalConfig(
   current: string,
 ): { next: string; changed: boolean; changedKeys: string[] } {
@@ -243,7 +248,6 @@ function ensureBindLocalConfig(
   const changedKeys: string[] = [];
 
   const rawBind = readEnvValue(current, "WP_BIND");
-  const existingBindLocal = readEnvValue(current, "WPDEV_WP_BIND_LOCAL");
 
   const wpBind = normalizeWpBind(rawBind);
   if (readEnvValue(next, "WP_BIND") !== wpBind) {
@@ -256,20 +260,15 @@ function ensureBindLocalConfig(
   }
 
   const isLocal = deriveBindLocal(wpBind);
-  const derivedBindLocal = isLocal ? "1" : "0";
+  const bindLocal = isLocal ? "1" : "0";
 
-  let finalBindLocal = derivedBindLocal;
-  if (existingBindLocal === "0") {
-    finalBindLocal = "0";
-  } else if (existingBindLocal === "1" && !isLocal) {
-    finalBindLocal = "0";
-    logInfo("compose-prereq: WP_BIND is not localhost, forcing WPDEV_WP_BIND_LOCAL=0");
-  }
-
-  if (readEnvValue(next, "WPDEV_WP_BIND_LOCAL") !== finalBindLocal) {
-    next = setEnvValueInContent(next, "WPDEV_WP_BIND_LOCAL", finalBindLocal);
+  if (readEnvValue(next, "WPDEV_WP_BIND_LOCAL") !== bindLocal) {
+    next = setEnvValueInContent(next, "WPDEV_WP_BIND_LOCAL", bindLocal);
     changed = true;
     changedKeys.push("WPDEV_WP_BIND_LOCAL");
+    if (!isLocal) {
+      logInfo("compose-prereq: WP_BIND is not localhost, setting WPDEV_WP_BIND_LOCAL=0 (admin API gated)");
+    }
   }
 
   return { next, changed, changedKeys };

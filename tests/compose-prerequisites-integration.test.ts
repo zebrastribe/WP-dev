@@ -112,6 +112,24 @@ describe("compose prerequisites integration - mutation tests", () => {
     expect(result.networkInfo?.subnet).toMatch(new RegExp(`^${escapedPrefix}\\.[1-9]\\d*\\.0/24$`));
   });
 
+  it("bind_local_recomputed_from_wp_bind: sticky BIND_LOCAL=0 must not survive return to loopback", async () => {
+    const dockerDir = join(tmpDir, "docker");
+    mkdirSync(dockerDir, { recursive: true });
+    // Stale gated state + loopback bind (user switched back to localhost).
+    writeFileSync(
+      join(dockerDir, ".env"),
+      "WP_PORT=8888\nWP_BIND=127.0.0.1\nWPDEV_WP_BIND_LOCAL=0\n",
+    );
+
+    const { ensureComposePrerequisites } = await import("../src/utils/compose-prerequisites.js");
+    const loaded = makeLoadedConfig(tmpDir);
+    ensureComposePrerequisites(loaded);
+
+    const env = readFileSync(join(dockerDir, ".env"), "utf8");
+    expect(env).toMatch(/^WPDEV_WP_BIND_LOCAL=1$/m);
+    expect(env).toMatch(/^WP_BIND=127\.0\.0\.1$/m);
+  });
+
   // M7: trust proxy with SSL off
   it("ssl_off_no_proxy_trust: SSL off has no active RemoteIPHeader", () => {
     const content = generateRemoteIpConf(null);
