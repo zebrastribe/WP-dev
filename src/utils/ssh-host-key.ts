@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { RemoteEnvConfig } from "../config/schema.js";
+import { resolveIdentityFile } from "./remote-config-helpers.js";
 
 function knownHostsTarget(host: string, port?: number): string {
   if (port != null && port !== 22) return `[${host}]:${port}`;
@@ -21,6 +22,20 @@ export function knownHostSha256Fingerprints(host: string, port?: number): string
   return found;
 }
 
+/** Build an SSH command string suitable for pinning the host key. */
+export function buildSshPinCommand(remote: RemoteEnvConfig): string {
+  const parts = ["ssh"];
+  if (remote.port != null && remote.port !== 22) {
+    parts.push("-p", String(remote.port));
+  }
+  const key = resolveIdentityFile(remote.identityFile);
+  if (key) {
+    parts.push("-i", key);
+  }
+  parts.push(`${remote.user}@${remote.host}`);
+  return parts.join(" ");
+}
+
 /**
  * Refuse unknown hosts unless WPDEV_SSH_INSECURE=1 (lab only).
  * OpenSSH known_hosts is the pin source; node-ssh hostVerifier must match.
@@ -30,9 +45,11 @@ export function assertSshHostPinned(remote: RemoteEnvConfig): void {
   const fps = knownHostSha256Fingerprints(remote.host, remote.port);
   if (fps.length === 0) {
     const target = knownHostsTarget(remote.host, remote.port);
+    const cmd = buildSshPinCommand(remote);
     throw new Error(
-      `SSH host ${target} is not pinned in ~/.ssh/known_hosts. Connect once with OpenSSH (` +
-        `ssh ${remote.user}@${remote.host}) to pin the key, or set WPDEV_SSH_INSECURE=1 for lab only.`,
+      `SSH host ${target} is not pinned in ~/.ssh/known_hosts.\n` +
+        `Connect once with OpenSSH to verify the fingerprint and pin the key:\n  ${cmd}\n` +
+        `Or set WPDEV_SSH_INSECURE=1 for lab environments only.`,
     );
   }
 }

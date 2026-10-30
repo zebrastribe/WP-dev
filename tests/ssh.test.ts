@@ -1,9 +1,16 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import * as os from "node:os";
 import {
   buildBaseConnectOptions,
   buildSshConnectAttempts,
   expandHomePath,
+  checkSshPreflight,
+  formatSshAuthError,
+  detectPassphraseProtectedKey,
 } from "../src/utils/ssh-helpers.js";
+import { buildSshPinCommand } from "../src/utils/ssh-host-key.js";
 
 const connectMock = vi.fn();
 const disposeMock = vi.fn();
@@ -54,6 +61,148 @@ describe("ssh-helpers", () => {
   });
 });
 
+describe("buildSshPinCommand", () => {
+  beforeEach(() => {
+    process.env.WPDEV_SSH_INSECURE = "1";
+  });
+
+  it("builds basic command", () => {
+    const cmd = buildSshPinCommand({ host: "example.com", user: "deploy", path: "/var/www", url: "https://example.com" });
+    expect(cmd).toBe("ssh deploy@example.com");
+  });
+
+  it("includes port when non-default", () => {
+    const cmd = buildSshPinCommand({ host: "example.com", user: "deploy", path: "/var/www", url: "https://example.com", port: 2222 });
+    expect(cmd).toBe("ssh -p 2222 deploy@example.com");
+  });
+
+  it("includes identity file when configured", () => {
+    const sshDir = join(os.homedir(), ".ssh");
+    mkdirSync(sshDir, { recursive: true });
+    const keyPath = join(sshDir, `test-pin-${process.pid}.pem`);
+    writeFileSync(keyPath, "fake-key");
+    try {
+      const cmd = buildSshPinCommand({
+        host: "example.com",
+        user: "deploy",
+        path: "/var/www",
+        url: "https://example.com",
+        identityFile: `~/.ssh/test-pin-${process.pid}.pem`,
+      });
+      expect(cmd).toContain(`-i ${keyPath}`);
+      expect(cmd).toContain("deploy@example.com");
+    } finally {
+      rmSync(keyPath, { force: true });
+    }
+  });
+});
+
+describe("checkSshPreflight", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    process.env.WPDEV_SSH_INSECURE = "1";
+    tempDir = mkdtempSync(join(os.tmpdir(), "ssh-preflight-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns ok when no identity file configured", () => {
+    const result = checkSshPreflight({ host: "example.com", user: "deploy", path: "/var/www", url: "https://example.com" });
+    expect(result.ok).toBe(true);
+  });
+
+  it("errors when configured identity file missing", () => {
+    const result = checkSshPreflight({
+      host: "example.com",
+      user: "deploy",
+      path: "/var/www",
+      url: "https://example.com",
+      identityFile: "/nonexistent/key.pem",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toContain("not found");
+  });
+
+  it("warns on insecure key permissions", () => {
+    const keyPath = join(tempDir, "insecure-key");
+    writeFileSync(keyPath, "fake-key", { mode: 0o644 });
+    const result = checkSshPreflight({
+      host: "example.com",
+      user: "deploy",
+      path: "/var/www",
+      url: "https://example.com",
+      identityFile: keyPath,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => w.includes("permissions") || w.includes("chmod 600"))).toBe(true);
+  });
+});
+
+describe("formatSshAuthError", () => {
+  beforeEach(() => {
+    process.env.WPDEV_SSH_INSECURE = "1";
+  });
+
+  it("formats publickey denied error with guidance", () => {
+    const msg = formatSshAuthError(
+      { host: "example.com", user: "deploy", path: "/var/www", url: "https://example.com" },
+      [{ label: "key ~/.ssh/id_ed25519", message: "All configured authentication methods failed" }],
+    );
+    expect(msg).toContain("SSH authentication failed");
+    expect(msg).toContain("deploy@example.com");
+    expect(msg).toContain("authorized_keys");
+  });
+
+  it("includes missing key info when configured file missing", () => {
+    const msg = formatSshAuthError(
+      { host: "example.com", user: "deploy", path: "/var/www", url: "https://example.com", identityFile: "/nonexistent/key.pem" },
+      [{ label: "default auth", message: "timeout" }],
+    );
+    expect(msg).toContain("not found");
+    expect(msg).toContain("/nonexistent/key.pem");
+  });
+
+  it("includes port in target when non-default", () => {
+    const msg = formatSshAuthError(
+      { host: "example.com", user: "deploy", path: "/var/www", url: "https://example.com", port: 2222 },
+      [{ label: "test", message: "fail" }],
+    );
+    expect(msg).toContain("deploy@example.com:2222");
+  });
+});
+
+describe("detectPassphraseProtectedKey", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(os.tmpdir(), "passphrase-detect-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("detects ENCRYPTED marker in key", () => {
+    const keyPath = join(tempDir, "encrypted-key");
+    writeFileSync(keyPath, "-----BEGIN OPENSSH PRIVATE KEY-----\nENCRYPTED\n-----END OPENSSH PRIVATE KEY-----");
+    expect(detectPassphraseProtectedKey(keyPath)).toBe(true);
+  });
+
+  it("returns false for unencrypted key", () => {
+    const keyPath = join(tempDir, "plain-key");
+    writeFileSync(keyPath, "-----BEGIN OPENSSH PRIVATE KEY-----\nbase64data\n-----END OPENSSH PRIVATE KEY-----");
+    expect(detectPassphraseProtectedKey(keyPath)).toBe(false);
+  });
+
+  it("returns false for nonexistent file", () => {
+    expect(detectPassphraseProtectedKey("/nonexistent/key")).toBe(false);
+  });
+});
+
 describe("connectSsh", () => {
   beforeEach(() => {
     process.env.WPDEV_SSH_INSECURE = "1";
@@ -79,6 +228,6 @@ describe("connectSsh", () => {
     const { connectSsh } = await import("../src/services/ssh.js");
     await expect(
       connectSsh({ host: "h", user: "u", path: "/p", url: "https://h" }),
-    ).rejects.toThrow(/SSH connection failed/);
+    ).rejects.toThrow(/SSH authentication failed/);
   });
 });

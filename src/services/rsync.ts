@@ -110,10 +110,10 @@ export async function rsyncPull(
       return;
     }
     const err = retry.stderr ?? "";
-    throw new Error(`rsync pull failed with exit code ${retry.exitCode}${pullRsyncFailureHint(err)}`);
+    throw new Error(`rsync pull failed with exit code ${retry.exitCode}${pullRsyncFailureHint(err, remote.identityFile)}`);
   }
 
-  throw new Error(`rsync pull failed with exit code ${first.exitCode}${pullRsyncFailureHint(firstErr)}`);
+  throw new Error(`rsync pull failed with exit code ${first.exitCode}${pullRsyncFailureHint(firstErr, remote.identityFile)}`);
 }
 
 export async function rsyncPushToPath(
@@ -196,12 +196,12 @@ export async function rsyncPush(
     }
     const err = retry.stderr ?? "";
     throw new Error(
-      `rsync push failed with exit code ${retry.exitCode}${pushRsyncFailureHint(err, relPath)}`,
+      `rsync push failed with exit code ${retry.exitCode}${pushRsyncFailureHint(err, relPath, remote.identityFile)}`,
     );
   }
 
   throw new Error(
-    `rsync push failed with exit code ${first.exitCode}${pushRsyncFailureHintAbsolutePath(firstErr, destPath)}`,
+    `rsync push failed with exit code ${first.exitCode}${pushRsyncFailureHintAbsolutePath(firstErr, destPath, remote.identityFile)}`,
   );
 }
 
@@ -250,10 +250,6 @@ export async function rsyncPullFromPath(
     throw new Error(`rsync pull failed with exit code ${retry.exitCode}`);
   }
 
-  let hint = "";
-  if (/Permission denied|mkstemp|Operation not permitted/i.test(firstErr)) {
-    hint =
-      "\n\nLikely fix: run `npm run wp-dev -- fix-permissions` then retry pull theme.";
-  }
+  const hint = pullRsyncFailureHint(firstErr, remote.identityFile);
   throw new Error(`rsync pull failed with exit code ${first.exitCode}${hint}`);
 }

@@ -8,6 +8,8 @@ import {
   canRetryPushWithRelativePath,
   pullRsyncFailureHint,
   pushRsyncFailureHint,
+  classifyRsyncSshError,
+  formatRsyncSshErrorHint,
 } from "../src/utils/rsync-ssh-env.js";
 
 const execaMock = vi.fn();
@@ -89,7 +91,7 @@ describe("rsync-ssh-env helpers", () => {
     rmSync(keyPath, { force: true });
   });
 
-  it("pullRsyncFailureHint suggests fix-permissions", () => {
+  it("pullRsyncFailureHint suggests fix-permissions for local permission errors", () => {
     expect(pullRsyncFailureHint("mkstemp failed")).toContain("fix-permissions");
   });
 
@@ -97,6 +99,104 @@ describe("rsync-ssh-env helpers", () => {
     expect(
       pushRsyncFailureHint("mkdir /customers/foo failed: Permission denied", "staging"),
     ).toContain("staging");
+  });
+
+  it("buildSshRsyncEnv includes IdentitiesOnly=yes when identity file configured", () => {
+    const sshDir = join(os.homedir(), ".ssh");
+    mkdirSync(sshDir, { recursive: true });
+    const keyName = `wp-dev-identity-only-${process.pid}.pem`;
+    const keyPath = join(sshDir, keyName);
+    writeFileSync(keyPath, "fake-key");
+
+    const env = buildSshRsyncEnv({
+      host: "example.com",
+      user: "deploy",
+      path: "/var/www",
+      url: "https://example.com",
+      identityFile: `~/.ssh/${keyName}`,
+    });
+    expect(env).toContain("IdentitiesOnly=yes");
+    expect(env).toContain(`-i '${keyPath}'`);
+
+    rmSync(keyPath, { force: true });
+  });
+});
+
+describe("classifyRsyncSshError", () => {
+  it("classifies unprotected key file error", () => {
+    expect(classifyRsyncSshError("UNPROTECTED PRIVATE KEY FILE!")).toBe("unprotected_key");
+    expect(classifyRsyncSshError("Permissions 0644 are too open")).toBe("unprotected_key");
+  });
+
+  it("classifies publickey denied error", () => {
+    expect(classifyRsyncSshError("Permission denied (publickey)")).toBe("publickey_denied");
+    expect(classifyRsyncSshError("All configured authentication methods failed")).toBe("publickey_denied");
+  });
+
+  it("classifies host not pinned error", () => {
+    expect(classifyRsyncSshError("Host key verification failed")).toBe("host_not_pinned");
+    expect(classifyRsyncSshError("No ED25519 host key is known")).toBe("host_not_pinned");
+  });
+
+  it("classifies local permission error", () => {
+    expect(classifyRsyncSshError("mkstemp wordpress/test: Permission denied")).toBe("local_permission");
+  });
+
+  it("classifies remote permission error", () => {
+    expect(classifyRsyncSshError("mkdir /var/www/html failed: Permission denied")).toBe("remote_permission");
+    expect(classifyRsyncSshError("recv_generator: mkdir failed: Permission denied")).toBe("remote_permission");
+  });
+
+  it("returns unknown for unrecognized errors", () => {
+    expect(classifyRsyncSshError("some random error")).toBe("unknown");
+  });
+});
+
+describe("formatRsyncSshErrorHint", () => {
+  it("provides chmod hint for unprotected key", () => {
+    const hint = formatRsyncSshErrorHint("unprotected_key", "~/.ssh/my-key");
+    expect(hint).toContain("chmod 600");
+    expect(hint).toContain("~/.ssh/my-key");
+  });
+
+  it("provides authorized_keys hint for publickey denied", () => {
+    const hint = formatRsyncSshErrorHint("publickey_denied", "~/.ssh/id_ed25519");
+    expect(hint).toContain("authorized_keys");
+    expect(hint).toContain("~/.ssh/id_ed25519.pub");
+  });
+
+  it("provides pin hint for host not pinned", () => {
+    const hint = formatRsyncSshErrorHint("host_not_pinned");
+    expect(hint).toContain("pin");
+    expect(hint).toContain("fingerprint");
+  });
+
+  it("provides fix-permissions hint for local permission error", () => {
+    const hint = formatRsyncSshErrorHint("local_permission");
+    expect(hint).toContain("fix-permissions");
+  });
+
+  it("returns empty string for unknown errors", () => {
+    expect(formatRsyncSshErrorHint("unknown")).toBe("");
+  });
+});
+
+describe("pullRsyncFailureHint error classification", () => {
+  it("suggests chmod for unprotected key error", () => {
+    const hint = pullRsyncFailureHint("UNPROTECTED PRIVATE KEY FILE!", "~/.ssh/my-key");
+    expect(hint).toContain("chmod 600");
+    expect(hint).not.toContain("fix-permissions");
+  });
+
+  it("suggests authorized_keys for publickey denied", () => {
+    const hint = pullRsyncFailureHint("Permission denied (publickey)", "~/.ssh/id_ed25519");
+    expect(hint).toContain("authorized_keys");
+    expect(hint).not.toContain("fix-permissions");
+  });
+
+  it("suggests fix-permissions only for local docker ownership issues", () => {
+    const hint = pullRsyncFailureHint("mkstemp wordpress/test: Permission denied");
+    expect(hint).toContain("fix-permissions");
   });
 });
 
