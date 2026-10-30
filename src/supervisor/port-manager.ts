@@ -5,6 +5,7 @@ import {
   isPortOwnedByComposeProject,
 } from "../utils/compose-published-ports.js";
 import {
+  buildRunnerOrigin,
   parseDockerEnvPorts,
   persistEnvContent,
   readEnvValue,
@@ -171,7 +172,7 @@ async function relocatePorts(
     const sslEnabled = /^(1|true|yes)$/i.test(readEnvValue(envContent, "WPDEV_LOCAL_HTTPS") || "");
     const activePort = sslEnabled ? next.WP_HTTPS_PORT : next.WP_PORT;
     const protocol = sslEnabled ? "https" : "http";
-    const newOrigin = `${protocol}://localhost:${activePort}`;
+    const newOrigin = buildRunnerOrigin(loaded.config.local.url, activePort, protocol);
     envContent = setEnvValueInContent(envContent, "WPDEV_TERMINAL_RUNNER_ORIGIN", newOrigin);
     persistEnvContent(envPath, envContent, loaded);
   }

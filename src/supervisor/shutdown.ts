@@ -56,20 +56,9 @@ export async function runShutdownStateMachine(
       const args = ["down", ...(options.removeOrphans ? ["--remove-orphans"] : [])];
       logInfo(`docker compose ${args.join(" ")}`);
       // Supply network env vars without writing to .env (supports pre-PR#8 .env files)
+      // Pass via compose env option - NO mutation of process.env.
       const networkEnv = resolveNetworkEnvForCompose(loaded);
-      const savedEnv = { ...process.env };
-      Object.assign(process.env, networkEnv);
-      try {
-        await compose(configDir, config, args);
-      } finally {
-        for (const key of Object.keys(networkEnv)) {
-          if (savedEnv[key] !== undefined) {
-            process.env[key] = savedEnv[key];
-          } else {
-            delete process.env[key];
-          }
-        }
-      }
+      await compose(configDir, config, args, { env: networkEnv });
     }
 
     if (phase === "release_ports" && registry) {

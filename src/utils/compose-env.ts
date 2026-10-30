@@ -160,6 +160,36 @@ export function runnerOriginPortMismatch(runnerOrigin: string, wpPort: number): 
   return currentPort !== wpPort;
 }
 
+/**
+ * Build the terminal runner origin URL from local.url.
+ * This is the SINGLE source of truth for runner origin construction.
+ *
+ * @param localUrl - The local.url from config (e.g., "http://localhost:8888")
+ * @param overridePort - Optional port override (used when relocating ports)
+ * @param overrideProtocol - Optional protocol override ("http" or "https")
+ */
+export function buildRunnerOrigin(
+  localUrl: string,
+  overridePort?: number,
+  overrideProtocol?: "http" | "https",
+): string {
+  let u: URL;
+  try {
+    u = new URL(localUrl);
+  } catch {
+    // Fallback if localUrl is malformed
+    const port = overridePort ?? DEFAULT_DOCKER_ENV_PORTS.WP_PORT;
+    const protocol = overrideProtocol ?? "http";
+    return `${protocol}://localhost:${port}`;
+  }
+
+  const protocol = overrideProtocol ?? (u.protocol === "https:" ? "https" : "http");
+  const host = u.hostname;
+  const port = overridePort ?? (u.port ? Number.parseInt(u.port, 10) : (protocol === "https" ? 443 : 80));
+
+  return `${protocol}://${host}:${port}`;
+}
+
 export function maybeUpdateLocalUrlPort(loaded: LoadedConfig, newPort: number): void {
   const raw = loaded.config.local.url;
   let u: URL;

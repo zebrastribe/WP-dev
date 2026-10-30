@@ -10,11 +10,47 @@
  */
 
 import { existsSync, rmdirSync, statSync, readdirSync, writeFileSync, lstatSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { LoadedConfig } from "../config/load.js";
 import { generateRemoteIpConf } from "./network-config.js";
 import { logInfo } from "./logger.js";
+
+/**
+ * Assert that a path is not a symlink. If it is, throw a clear error.
+ * This is a shared helper used by both ensureGeneratedFile and ensureRemoteIpConf.
+ *
+ * Handles all symlink types:
+ * - Valid symlink (target exists)
+ * - Dangling symlink (target doesn't exist)
+ * - Symlink to directory
+ *
+ * @param filePath - The path to check
+ * @param fileDescription - Human-readable description for error messages
+ * @throws Error if the path is a symlink of any kind
+ */
+export function assertNotSymlink(filePath: string, fileDescription: string): void {
+  // Use lstatSync to detect symlinks (including dangling ones).
+  // existsSync returns false for dangling symlinks, so we can't rely on it.
+  let lstat;
+  try {
+    lstat = lstatSync(filePath);
+  } catch (e) {
+    // Path doesn't exist at all (not even as a symlink)
+    if (e && typeof e === "object" && "code" in e && e.code === "ENOENT") {
+      return;
+    }
+    throw e;
+  }
+
+  if (lstat.isSymbolicLink()) {
+    const fileName = basename(filePath);
+    throw new Error(
+      `${filePath} is a symlink. wp-dev manages ${fileName} — remove the symlink and let wp-dev generate the file. ` +
+        `(${fileDescription})`,
+    );
+  }
+}
 
 /**
  * Relative path from configDir to each generated bind-mount file.
@@ -49,21 +85,16 @@ export interface EnsureResult {
 
 /**
  * Self-heal: if the path is an empty directory (Docker created it), remove and return true.
- * If it's a non-empty directory, throw. If it's a symlink, leave it as-is.
+ * If it's a non-empty directory, throw. If it's a symlink, throw (not silently ignored).
  * If it doesn't exist or is a file, return false.
  */
-function healIfEmptyDirectory(filePath: string): boolean {
+function healIfEmptyDirectory(filePath: string, fileDescription: string): boolean {
   if (!existsSync(filePath)) {
     return false;
   }
 
-  // Use lstat to detect symlinks (stat follows symlinks, lstat doesn't)
-  const lstat = lstatSync(filePath);
-  if (lstat.isSymbolicLink()) {
-    // Leave symlinks alone - they're intentional user configuration
-    logInfo(`up: ${filePath} is a symlink, leaving unchanged`);
-    return false;
-  }
+  // Symlinks are refused with a clear error - not silently ignored
+  assertNotSymlink(filePath, fileDescription);
 
   const stat = statSync(filePath);
   if (!stat.isDirectory()) {
@@ -85,7 +116,7 @@ function healIfEmptyDirectory(filePath: string): boolean {
   }
 
   rmdirSync(filePath);
-  logInfo(`up: healed ${filePath} (removed empty directory created by Docker)`);
+  logInfo(`compose-prereq: healed ${filePath} (removed empty directory created by Docker)`);
   return true;
 }
 
@@ -95,6 +126,7 @@ function healIfEmptyDirectory(filePath: string): boolean {
  * - If missing: create it with default content
  * - If empty directory (Docker artifact): remove and create file
  * - If non-empty directory: throw error
+ * - If symlink: throw error (wp-dev manages this file)
  * - If already a file: leave unchanged
  */
 export function ensureGeneratedFile(
@@ -103,7 +135,10 @@ export function ensureGeneratedFile(
 ): EnsureResult {
   const filePath = join(dockerDir, file.relPath);
 
-  const healed = healIfEmptyDirectory(filePath);
+  // Symlinks are refused with a clear error before any other check
+  assertNotSymlink(filePath, file.description);
+
+  const healed = healIfEmptyDirectory(filePath, file.description);
   if (healed) {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, file.generateDefault(), "utf8");
@@ -113,14 +148,8 @@ export function ensureGeneratedFile(
   if (!existsSync(filePath)) {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, file.generateDefault(), "utf8");
-    logInfo(`up: created ${filePath} (${file.description})`);
+    logInfo(`compose-prereq: created ${filePath} (${file.description})`);
     return { path: filePath, action: "created", message: file.description };
-  }
-
-  // Check for symlinks (intentional user configuration) - leave them alone
-  const lstat = lstatSync(filePath);
-  if (lstat.isSymbolicLink()) {
-    return { path: filePath, action: "unchanged" };
   }
 
   const stat = statSync(filePath);

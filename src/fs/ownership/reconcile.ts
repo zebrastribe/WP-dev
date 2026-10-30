@@ -13,6 +13,7 @@ import { ownershipManifestPath, projectConfigPath, projectDockerDir, projectDock
 import { detectPlatform } from "../platform/detect.js";
 import { buildOwnershipManifest } from "./profiles.js";
 import { resolveNetworkEnvForCompose } from "../../utils/compose-prerequisites.js";
+import { ensureGeneratedBindMountFiles } from "../../utils/generated-bind-mounts.js";
 
 /**
  * Ensure shared config paths stay writable by host CLI + www-data admin API,
@@ -46,25 +47,44 @@ export function buildSharedConfigReconcileShell(
 export async function reconcileSharedConfig(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
 
+  // Ensure generated bind-mount files exist BEFORE any compose call.
+  // This prevents Docker from creating them as directories during compose run.
+  // This doesn't touch .env (which may be unwritable - we're here to repair it).
+  ensureGeneratedBindMountFiles(loaded);
+
   // Use read-only network env resolution (no writes) so this function can be called
   // to repair an unwritable .env file. The caller (up.ts) calls ensureComposePrerequisites
   // after the repair if needed.
+  // Pass via compose env option - NO mutation of process.env.
   const networkEnv = resolveNetworkEnvForCompose(loaded);
-  const savedEnv = { ...process.env };
-  Object.assign(process.env, networkEnv);
 
   // Prefer host bind ownership — process may be root inside the terminal container.
   const { uid, gid } = resolveHostIdentity(loaded.configDir);
   if (uid < 0 || gid < 0) return;
 
   logInfo("fs: reconcile shared config paths (wp-dev.config.json, docker/.env)");
-  try {
+  await compose(
+    loaded.configDir,
+    loaded.config,
+    [
+      "exec",
+      "-T",
+      "-u",
+      "0",
+      "wordpress",
+      "sh",
+      "-lc",
+      buildSharedConfigReconcileShell(uid, gid),
+    ],
+    { stdio: "pipe", env: networkEnv },
+  ).catch(async () => {
     await compose(
       loaded.configDir,
       loaded.config,
       [
-        "exec",
-        "-T",
+        "run",
+        "--rm",
+        "--no-deps",
         "-u",
         "0",
         "wordpress",
@@ -72,38 +92,13 @@ export async function reconcileSharedConfig(loaded: LoadedConfig): Promise<void>
         "-lc",
         buildSharedConfigReconcileShell(uid, gid),
       ],
-      { stdio: "pipe" },
-    ).catch(async () => {
-      await compose(
-        loaded.configDir,
-        loaded.config,
-        [
-          "run",
-          "--rm",
-          "--no-deps",
-          "-u",
-          "0",
-          "wordpress",
-          "sh",
-          "-lc",
-          buildSharedConfigReconcileShell(uid, gid),
-        ],
-        { stdio: "pipe" },
-      );
-    });
+      { stdio: "pipe", env: networkEnv },
+    );
+  });
 
-    fsAuditLog(loaded.configDir, loaded.config.project, "fs.reconcile", {
-      profile: "SHARED_CONFIG",
-    });
-  } finally {
-    for (const key of Object.keys(networkEnv)) {
-      if (savedEnv[key] !== undefined) {
-        process.env[key] = savedEnv[key];
-      } else {
-        delete process.env[key];
-      }
-    }
-  }
+  fsAuditLog(loaded.configDir, loaded.config.project, "fs.reconcile", {
+    profile: "SHARED_CONFIG",
+  });
 }
 
 /**

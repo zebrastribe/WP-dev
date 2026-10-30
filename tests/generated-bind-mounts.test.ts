@@ -173,7 +173,7 @@ describe("generated-bind-mounts", () => {
 
 describe("startup ordering - compose prerequisites", () => {
   let tmpDir: string;
-  let composeCalls: string[][];
+  let composeCalls: Array<{ args: string[]; envOption?: Record<string, string> }>;
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "wpdev-startup-order-test-"));
@@ -188,7 +188,11 @@ describe("startup ordering - compose prerequisites", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function assertComposePrerequisites(tmpDir: string, args: string[]): void {
+  function assertComposePrerequisites(
+    tmpDir: string,
+    args: string[],
+    envOption?: Record<string, string>,
+  ): void {
     const envPath = join(tmpDir, "docker", ".env");
     const remoteIpPath = join(tmpDir, "docker", "remoteip.conf");
 
@@ -198,20 +202,20 @@ describe("startup ordering - compose prerequisites", () => {
 
     const envContent = readFileSync(envPath, "utf8");
 
-    // Network config can be in .env file OR in process.env (set by resolveNetworkEnvForCompose)
+    // Network config can be in .env file OR in compose env option (passed by resolveNetworkEnvForCompose)
     const hasSubnetInFile = envContent.includes("WPDEV_NETWORK_SUBNET=");
-    const hasSubnetInEnv = !!process.env.WPDEV_NETWORK_SUBNET;
-    if (!hasSubnetInFile && !hasSubnetInEnv) {
+    const hasSubnetInEnvOption = !!envOption?.WPDEV_NETWORK_SUBNET;
+    if (!hasSubnetInFile && !hasSubnetInEnvOption) {
       throw new Error(
-        `TEST FAILURE: compose called before WPDEV_NETWORK_SUBNET is set (neither in .env nor process.env). Args: ${args.join(" ")}`,
+        `TEST FAILURE: compose called before WPDEV_NETWORK_SUBNET is set (neither in .env nor compose env option). Args: ${args.join(" ")}`,
       );
     }
 
     const hasGatewayInFile = envContent.includes("WPDEV_NETWORK_GATEWAY=");
-    const hasGatewayInEnv = !!process.env.WPDEV_NETWORK_GATEWAY;
-    if (!hasGatewayInFile && !hasGatewayInEnv) {
+    const hasGatewayInEnvOption = !!envOption?.WPDEV_NETWORK_GATEWAY;
+    if (!hasGatewayInFile && !hasGatewayInEnvOption) {
       throw new Error(
-        `TEST FAILURE: compose called before WPDEV_NETWORK_GATEWAY is set (neither in .env nor process.env). Args: ${args.join(" ")}`,
+        `TEST FAILURE: compose called before WPDEV_NETWORK_GATEWAY is set (neither in .env nor compose env option). Args: ${args.join(" ")}`,
       );
     }
 
@@ -240,9 +244,9 @@ describe("startup ordering - compose prerequisites", () => {
 
     const dockerCompose = await import("../src/services/docker-compose.js");
     vi.spyOn(dockerCompose, "compose").mockImplementation(
-      async (configDir, config, args) => {
-        composeCalls.push(args);
-        assertComposePrerequisites(tmpDir, args);
+      async (configDir, config, args, options) => {
+        composeCalls.push({ args, envOption: options?.env });
+        assertComposePrerequisites(tmpDir, args, options?.env);
         return { stdout: "", stderr: "", exitCode: 0 };
       },
     );
@@ -254,8 +258,8 @@ describe("startup ordering - compose prerequisites", () => {
 
     expect(composeCalls.length).toBeGreaterThan(0);
 
-    // reconcileSharedConfig uses resolveNetworkEnvForCompose which sets process.env
-    // but doesn't write to .env. The compose mock's assertComposePrerequisites
+    // reconcileSharedConfig uses resolveNetworkEnvForCompose which passes network vars
+    // via compose env option (not process.env mutation). assertComposePrerequisites
     // already verified that network vars were available during the call.
     const remoteIpPath = join(dockerDir, "remoteip.conf");
     expect(existsSync(remoteIpPath)).toBe(true);
@@ -274,24 +278,26 @@ describe("startup ordering - compose prerequisites", () => {
     const dockerCompose = await import("../src/services/docker-compose.js");
     let firstCallFailed = false;
 
-    vi.spyOn(dockerCompose, "compose").mockImplementation(async (configDir, config, args) => {
-      composeCalls.push(args);
-      assertComposePrerequisites(tmpDir, args);
+    vi.spyOn(dockerCompose, "compose").mockImplementation(
+      async (configDir, config, args, options) => {
+        composeCalls.push({ args, envOption: options?.env });
+        assertComposePrerequisites(tmpDir, args, options?.env);
 
-      if (args.includes("exec") && !firstCallFailed) {
-        firstCallFailed = true;
-        throw new Error("exec failed (container not running)");
-      }
+        if (args.includes("exec") && !firstCallFailed) {
+          firstCallFailed = true;
+          throw new Error("exec failed (container not running)");
+        }
 
-      return { stdout: "", stderr: "", exitCode: 0 };
-    });
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+    );
 
     const loaded = makeLoadedConfig(tmpDir);
 
     const { reconcileSharedConfig } = await import("../src/fs/ownership/reconcile.js");
     await reconcileSharedConfig(loaded);
 
-    expect(composeCalls.some((args) => args.includes("run"))).toBe(true);
+    expect(composeCalls.some((call) => call.args.includes("run"))).toBe(true);
     expect(firstCallFailed).toBe(true);
     // assertComposePrerequisites already verified network vars were available during compose calls
   });
@@ -419,7 +425,7 @@ describe("mutation tests for compose prerequisites", () => {
     expect(envAfter).toBe(envBefore);
   });
 
-  it("symlinked remoteip.conf is preserved", () => {
+  it("symlinked remoteip.conf throws clear error (never write through)", () => {
     const dockerDir = join(tmpDir, "docker");
     mkdirSync(dockerDir, { recursive: true });
 
@@ -434,14 +440,16 @@ describe("mutation tests for compose prerequisites", () => {
     expect(lstat(linkPath).isSymbolicLink()).toBe(true);
 
     const loaded = makeLoadedConfig(tmpDir);
-    const results = ensureGeneratedBindMountFiles(loaded);
 
-    // Should leave symlink unchanged
-    expect(results.some((r) => r.action === "unchanged" && r.path === linkPath)).toBe(true);
+    // Symlinks are refused with a clear error - never write through
+    expect(() => ensureGeneratedBindMountFiles(loaded)).toThrow(/symlink/i);
+    expect(() => ensureGeneratedBindMountFiles(loaded)).toThrow(/remove the symlink/i);
+
+    // The symlink should still exist (we didn't modify it)
     expect(lstat(linkPath).isSymbolicLink()).toBe(true);
 
-    // Original content should be preserved
-    expect(readFileSync(linkPath, "utf8")).toBe("# custom remoteip config\n");
+    // Original target content should be untouched (no write-through)
+    expect(readFileSync(targetPath, "utf8")).toBe("# custom remoteip config\n");
   });
 
   it("empty directory at remoteip.conf path is healed", () => {

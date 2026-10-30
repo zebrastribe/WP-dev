@@ -44,11 +44,17 @@ export function getComposeFilePath(
   return join(getComposeProjectDir(configDir, config), config.local.composeFile);
 }
 
+export interface ComposeOptions {
+  stdio?: "inherit" | "pipe";
+  /** Additional env vars to pass to compose (merged with process.env, without mutating it) */
+  env?: Record<string, string>;
+}
+
 export async function compose(
   configDir: string,
   config: WpDevConfig,
   composeArgs: string[],
-  options: { stdio?: "inherit" | "pipe" } = {},
+  options: ComposeOptions = {},
 ): Promise<void> {
   const projectDir = getComposeProjectDir(configDir, config);
   const composeEnvPath = join(projectDir, ".env");
@@ -71,6 +77,8 @@ export async function compose(
         WPDEV_HOST_HOME: hostHome,
         WPDEV_HOST_UID: process.env.WPDEV_HOST_UID || hostUid,
         WPDEV_HOST_GID: process.env.WPDEV_HOST_GID || hostGid,
+        // Additional env vars passed by caller (for network vars without mutating process.env)
+        ...options.env,
       },
     },
   ).then((r) => {

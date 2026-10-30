@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { LoadedConfig } from "../config/load.js";
 import { writeWpDevConfig } from "../config/load.js";
-import { DEFAULT_DOCKER_ENV_PORTS, persistEnvContent, setEnvValueInContent } from "../utils/compose-env.js";
+import { buildRunnerOrigin, DEFAULT_DOCKER_ENV_PORTS, persistEnvContent, setEnvValueInContent } from "../utils/compose-env.js";
 
 function readEnvValue(content: string, key: string): string {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -54,10 +54,10 @@ export async function cmdSslEnable(loaded: LoadedConfig): Promise<void> {
   let next = current;
   next = setEnvValue(next, "WPDEV_LOCAL_HTTPS", "1");
   next = setEnvValue(next, "WP_HTTPS_PORT", String(safeHttpsPort));
-  next = setEnvValue(next, "WPDEV_TERMINAL_RUNNER_ORIGIN", `https://localhost:${safeHttpsPort}`);
-  persistEnvContent(envPath, next, loaded);
-
+  // Update local.url first, then derive runner origin from it
   loaded.config.local.url = `https://localhost:${safeHttpsPort}`;
+  next = setEnvValue(next, "WPDEV_TERMINAL_RUNNER_ORIGIN", buildRunnerOrigin(loaded.config.local.url));
+  persistEnvContent(envPath, next, loaded);
   writeWpDevConfig(loaded.configDir, loaded.config);
 
   console.error(
@@ -77,10 +77,10 @@ export async function cmdSslDisable(loaded: LoadedConfig): Promise<void> {
 
   let next = current;
   next = setEnvValue(next, "WPDEV_LOCAL_HTTPS", "0");
-  next = setEnvValue(next, "WPDEV_TERMINAL_RUNNER_ORIGIN", `http://localhost:${safeWpPort}`);
-  persistEnvContent(envPath, next, loaded);
-
+  // Update local.url first, then derive runner origin from it
   loaded.config.local.url = `http://localhost:${safeWpPort}`;
+  next = setEnvValue(next, "WPDEV_TERMINAL_RUNNER_ORIGIN", buildRunnerOrigin(loaded.config.local.url));
+  persistEnvContent(envPath, next, loaded);
   writeWpDevConfig(loaded.configDir, loaded.config);
 
   console.error(

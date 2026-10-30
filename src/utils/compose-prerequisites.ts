@@ -21,6 +21,7 @@ import { join } from "node:path";
 import type { LoadedConfig } from "../config/load.js";
 import { dockerComposeProjectId } from "../services/docker-compose.js";
 import {
+  buildRunnerOrigin,
   DEFAULT_DOCKER_ENV_PORTS,
   persistEnvContent,
   readEnvValue,
@@ -47,6 +48,7 @@ import {
 } from "./host-paths.js";
 import { logInfo } from "./logger.js";
 import {
+  assertNotSymlink,
   ensureGeneratedBindMountFiles,
   getRemoteIpConfPath,
 } from "./generated-bind-mounts.js";
@@ -76,7 +78,7 @@ function ensureComposeEnvExists(loaded: LoadedConfig): string {
     return envPath;
   }
 
-  writeEnvFile(envPath, "WP_PORT=8888\n", {
+  writeEnvFile(envPath, `WP_PORT=${DEFAULT_DOCKER_ENV_PORTS.WP_PORT}\n`, {
     configDir: loaded.configDir,
     projectId: loaded.config.project,
   });
@@ -240,6 +242,10 @@ function ensureBindLocalConfig(
 
 function ensureRemoteIpConf(loaded: LoadedConfig, sslProxyIp: string | null, sslEnabled: boolean): void {
   const confPath = getRemoteIpConfPath(loaded);
+
+  // Refuse symlinks with a clear error - never write through a symlink
+  assertNotSymlink(confPath, "Apache RemoteIP configuration");
+
   const trustedProxyIp = sslEnabled ? sslProxyIp : null;
   const content = generateRemoteIpConf(trustedProxyIp);
 
@@ -309,7 +315,8 @@ export function ensureComposePrerequisites(loaded: LoadedConfig): ComposePrerequ
     runnerOrigin.includes("change-me") ||
     runnerOriginPortMismatch(runnerOrigin, Number.parseInt(currentWpPort, 10));
   if (shouldResetOrigin) {
-    next = setEnvValueInContent(next, "WPDEV_TERMINAL_RUNNER_ORIGIN", `http://localhost:${currentWpPort}`);
+    const newOrigin = buildRunnerOrigin(loaded.config.local.url, Number.parseInt(currentWpPort, 10));
+    next = setEnvValueInContent(next, "WPDEV_TERMINAL_RUNNER_ORIGIN", newOrigin);
     changed = true;
     changedKeys.push("WPDEV_TERMINAL_RUNNER_ORIGIN");
   }
@@ -430,9 +437,9 @@ export function checkComposePrerequisites(loaded: LoadedConfig): {
  * Resolution order:
  * 1. Existing .env values (if set)
  * 2. Existing Docker network (if it exists)
- * 3. Derived defaults from DEFAULT_SUBNET_PREFIX
+ * 3. Allocate via findAvailableSubnet (same as up path - ONE source of truth)
  *
- * Returns env vars to set in process.env before calling compose.
+ * Returns env vars to set via compose's env option (not process.env mutation).
  */
 export function resolveNetworkEnvForCompose(loaded: LoadedConfig): {
   WPDEV_NETWORK_SUBNET: string;
@@ -474,13 +481,25 @@ export function resolveNetworkEnvForCompose(loaded: LoadedConfig): {
     }
   }
 
-  const defaultSubnet = `${getSubnetPoolPrefix()}.1.0/24`;
-  const derived = deriveNetworkIps(defaultSubnet);
+  // Use the SAME allocator as ensureNetworkConfig - ONE source of truth
+  // This prevents subnet conflicts when another project holds .1
+  const available = findAvailableSubnet();
+  if (!available) {
+    const poolPrefix = getSubnetPoolPrefix();
+    throw new Error(
+      `Could not find available subnet in ${poolPrefix}.0.0/16 range for network env resolution. ` +
+        `Run wp-dev up to allocate, or set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY in docker/.env.`,
+    );
+  }
+  const derived = deriveNetworkIps(available);
+  if (!derived) {
+    throw new Error(`Invalid subnet ${available}`);
+  }
   return {
-    WPDEV_NETWORK_SUBNET: defaultSubnet,
-    WPDEV_NETWORK_GATEWAY: derived?.gateway || `${getSubnetPoolPrefix()}.1.1`,
-    WPDEV_SSL_PROXY_IP: derived?.sslProxyIp || "",
-    WPDEV_ADMIN_TRUSTED_GATEWAY: derived?.gateway || `${getSubnetPoolPrefix()}.1.1`,
+    WPDEV_NETWORK_SUBNET: derived.subnet,
+    WPDEV_NETWORK_GATEWAY: derived.gateway,
+    WPDEV_SSL_PROXY_IP: derived.sslProxyIp,
+    WPDEV_ADMIN_TRUSTED_GATEWAY: derived.gateway,
   };
 }
 

@@ -95,9 +95,8 @@ async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fai
   }
 
   // Supply network env vars without writing (doctor is read-only)
+  // Pass via compose env option - NO mutation of process.env.
   const networkEnv = resolveNetworkEnvForCompose(loaded);
-  const savedEnv = { ...process.env };
-  Object.assign(process.env, networkEnv);
 
   try {
     await compose(
@@ -115,7 +114,7 @@ async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fai
         "-lc",
         script,
       ],
-      { stdio: "pipe" },
+      { stdio: "pipe", env: networkEnv },
     );
     console.error(`Local runtime write: OK (www-data can write ${label})`);
     return "ok";
@@ -127,15 +126,6 @@ async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fai
     );
     logInfo(`doctor: local runtime write check failed (${msg})`);
     return "fail";
-  } finally {
-    // Restore original env
-    for (const key of Object.keys(networkEnv)) {
-      if (savedEnv[key] !== undefined) {
-        process.env[key] = savedEnv[key];
-      } else {
-        delete process.env[key];
-      }
-    }
   }
 }
 

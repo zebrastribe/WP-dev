@@ -18,7 +18,6 @@ import {
 import {
   ensureComposePrerequisites,
   getComposeEnvPath,
-  resolveNetworkEnvForCompose,
 } from "../utils/compose-prerequisites.js";
 import { recoverStaleState } from "../supervisor/recovery.js";
 import {
