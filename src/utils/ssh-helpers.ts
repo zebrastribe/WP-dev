@@ -267,7 +267,21 @@ export function formatSshAuthError(
       /All configured authentication methods failed|publickey/i.test(e.message),
   );
 
-  if (hasAuthFailed && keyPath && keyExists) {
+  const hasPassphraseError = attemptErrors.some(
+    (e) =>
+      /Encrypted private OpenSSH key detected.*no passphrase|Cannot parse privateKey.*Encrypted/i.test(e.message),
+  );
+
+  if (hasPassphraseError && keyPath && keyExists) {
+    const hasAgent = process.env.SSH_AUTH_SOCK && process.env.SSH_AUTH_SOCK.trim() !== "";
+    lines.push("");
+    lines.push(`Key ${preferTildePath(keyPath)} is passphrase-protected.`);
+    if (hasAgent) {
+      lines.push(`Load it with: ssh-add ${preferTildePath(keyPath)}`);
+    } else {
+      lines.push("Start an ssh-agent and run ssh-add, or use a key without a passphrase.");
+    }
+  } else if (hasAuthFailed && keyPath && keyExists) {
     lines.push("");
     lines.push(`Key exists but server rejected it: ${preferTildePath(keyPath)}`);
     lines.push(`Add the public key to the remote host: cat ${preferTildePath(keyPath)}.pub`);

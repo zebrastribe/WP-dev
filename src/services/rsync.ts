@@ -75,6 +75,7 @@ async function execRsync(
         });
         if (r.stdout) {
           process.stdout.write(r.stdout);
+          if (!r.stdout.endsWith("\n")) process.stdout.write("\n");
         }
         return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "", stdout: r.stdout ?? "" };
       } else {

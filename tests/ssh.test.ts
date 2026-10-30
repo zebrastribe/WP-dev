@@ -171,8 +171,15 @@ describe("checkSshPreflight", () => {
 });
 
 describe("formatSshAuthError", () => {
+  let tempDir: string;
+
   beforeEach(() => {
     process.env.WPDEV_SSH_INSECURE = "1";
+    tempDir = mkdtempSync(join(os.tmpdir(), "ssh-auth-err-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("formats publickey denied error with guidance", () => {
@@ -200,6 +207,42 @@ describe("formatSshAuthError", () => {
       [{ label: "test", message: "fail" }],
     );
     expect(msg).toContain("deploy@example.com:2222");
+  });
+
+  it("maps ssh2 encrypted key error to passphrase hint", () => {
+    const prevSock = process.env.SSH_AUTH_SOCK;
+    process.env.SSH_AUTH_SOCK = "/tmp/ssh-agent.sock";
+    try {
+      const keyPath = join(tempDir, "enc-key");
+      writeFileSync(keyPath, "fake-key");
+      const msg = formatSshAuthError(
+        { host: "example.com", user: "deploy", path: "/var/www", url: "https://example.com", identityFile: keyPath },
+        [{ label: "key", message: "Encrypted private OpenSSH key detected, but no passphrase given" }],
+      );
+      expect(msg).toContain("passphrase-protected");
+      expect(msg).toContain("ssh-add");
+    } finally {
+      if (prevSock === undefined) delete process.env.SSH_AUTH_SOCK;
+      else process.env.SSH_AUTH_SOCK = prevSock;
+    }
+  });
+
+  it("maps ssh2 Cannot parse encrypted key error to passphrase hint", () => {
+    const prevSock = process.env.SSH_AUTH_SOCK;
+    delete process.env.SSH_AUTH_SOCK;
+    try {
+      const keyPath = join(tempDir, "enc-key2");
+      writeFileSync(keyPath, "fake-key");
+      const msg = formatSshAuthError(
+        { host: "example.com", user: "deploy", path: "/var/www", url: "https://example.com", identityFile: keyPath },
+        [{ label: "key", message: "Cannot parse privateKey: Encrypted OpenSSH key" }],
+      );
+      expect(msg).toContain("passphrase-protected");
+      expect(msg).toContain("ssh-agent");
+    } finally {
+      if (prevSock === undefined) delete process.env.SSH_AUTH_SOCK;
+      else process.env.SSH_AUTH_SOCK = prevSock;
+    }
   });
 });
 

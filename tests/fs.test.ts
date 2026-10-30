@@ -46,15 +46,28 @@ describe("fs atomic-write", () => {
     expect(readFileSync(target, "utf8")).toBe('{"v":2}\n');
   });
 
-  it("inPlace write preserves temp file on failure", () => {
-    if (process.getuid?.() === 0) return;
+  it.skipIf(process.getuid?.() === 0)("inPlace write preserves temp file on failure", () => {
     const target = join(dir, "readonly.json");
     writeFileAtomic(target, '{"v":1}\n');
     const fs = require("node:fs");
     fs.chmodSync(target, 0o444);
-    expect(() => writeFileAtomic(target, '{"v":2}\n', { inPlace: true })).toThrow(/EACCES|EPERM/);
+
+    let thrownError: Error | null = null;
+    try {
+      writeFileAtomic(target, '{"v":2}\n', { inPlace: true });
+    } catch (e) {
+      thrownError = e as Error;
+    }
+
+    expect(thrownError).not.toBeNull();
+    expect(thrownError!.message).toMatch(/EACCES|EPERM/);
+    expect(thrownError!.message).toContain(target);
+
+    expect(readFileSync(target, "utf8")).toBe('{"v":1}\n');
+
     const tmpFiles = fs.readdirSync(dir).filter((f: string) => f.endsWith(".tmp"));
     expect(tmpFiles.length).toBe(1);
+
     fs.chmodSync(target, 0o644);
   });
 });

@@ -35,7 +35,7 @@ npm run check
 npm run wp-dev -- up
 ```
 
-- Site: `http://localhost:<your-port>` (default 8894, see `WP_PORT` in `docker/.env`)
+- Site: `http://localhost:<your-port>` (default 8888, see `WP_PORT` in `docker/.env`)
 - Admin UI: `http://localhost:<your-port>/admin/` — **Backup · Setup · Sync**  
   Unlock with `WPDEV_ADMIN_SAVE_TOKEN` from `docker/.env` if asked.
 
