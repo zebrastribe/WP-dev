@@ -1,9 +1,36 @@
-import { chmodSync, chownSync, copyFileSync, existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
-import { basename } from "node:path";
+import { chmodSync, chownSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { LoadedConfig } from "../config/load.js";
 import { writeWpDevConfig } from "../config/load.js";
 import { fsAuditLog } from "../fs/audit-log.js";
 import { resolveHostIdentity } from "./host-paths.js";
+import { assertNotSymlink } from "./generated-bind-mounts.js";
+
+/**
+ * Default local hostname for wp-dev sites.
+ * Single source of truth - used for runner origin fallback and placeholder detection.
+ */
+export const DEFAULT_LOCAL_HOST = "127.0.0.1";
+
+/**
+ * Assert that an .env path is not a symlink. Reuses the shared assertNotSymlink
+ * but with a .env-specific error message that tells the user to COPY the file
+ * (not regenerate, which would lose tokens).
+ */
+function assertNotSymlinkEnv(envPath: string): void {
+  try {
+    assertNotSymlink(envPath, "Docker Compose environment file");
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("symlink")) {
+      // Rethrow with .env-specific guidance
+      throw new Error(
+        `${envPath} is a symlink. wp-dev cannot write through symlinks. ` +
+          `Replace it with a regular copy of the target file to preserve your tokens: ` +
+          `cp --remove-destination "$(readlink -f ${envPath})" "${envPath}"`,
+      );
+    }
+    throw e;
+  }
+}
 
 export type DockerEnvPortKey =
   | "WP_PORT"
@@ -52,22 +79,8 @@ export function writeEnvFile(
   meta?: { configDir: string; projectId: string },
 ): void {
   // P1: Never write through a symlinked .env - refuse with clear error.
-  // Use lstatSync to detect symlinks (including dangling ones).
-  try {
-    const lstat = lstatSync(path);
-    if (lstat.isSymbolicLink()) {
-      const fileName = basename(path);
-      throw new Error(
-        `${path} is a symlink. wp-dev manages ${fileName} — remove the symlink and let wp-dev generate the file. ` +
-          `(Docker Compose environment file)`,
-      );
-    }
-  } catch (e) {
-    // ENOENT is fine - path doesn't exist yet
-    if (!(e && typeof e === "object" && "code" in e && (e as { code: string }).code === "ENOENT")) {
-      throw e;
-    }
-  }
+  // Uses shared assertNotSymlink helper with .env-specific error message.
+  assertNotSymlinkEnv(path);
 
   const normalized = content.endsWith("\n") ? content : `${content}\n`;
   // docker/.env is a Docker *file* bind-mount. Atomic rename replaces the host inode
@@ -165,6 +178,10 @@ export function extractBoundPort(message: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/**
+ * Check if runner origin port mismatches WP_PORT.
+ * Only applies to localhost origins (using DEFAULT_LOCAL_HOST or common aliases).
+ */
 export function runnerOriginPortMismatch(runnerOrigin: string, wpPort: number): boolean {
   let u: URL;
   try {
@@ -173,7 +190,9 @@ export function runnerOriginPortMismatch(runnerOrigin: string, wpPort: number): 
     return true;
   }
   const host = u.hostname.toLowerCase();
-  if (host !== "localhost" && host !== "127.0.0.1") return false;
+  // Check against DEFAULT_LOCAL_HOST and common localhost aliases
+  const localhostAliases = [DEFAULT_LOCAL_HOST, "localhost", "127.0.0.1"];
+  if (!localhostAliases.includes(host)) return false;
   const currentPort =
     u.port.length > 0 ? Number.parseInt(u.port, 10) : u.protocol === "https:" ? 443 : 80;
   return currentPort !== wpPort;
@@ -196,10 +215,10 @@ export function buildRunnerOrigin(
   try {
     u = new URL(localUrl);
   } catch {
-    // Fallback if localUrl is malformed
+    // Fallback if localUrl is malformed - use single source of truth for host/port
     const port = overridePort ?? DEFAULT_DOCKER_ENV_PORTS.WP_PORT;
     const protocol = overrideProtocol ?? "http";
-    return `${protocol}://localhost:${port}`;
+    return `${protocol}://${DEFAULT_LOCAL_HOST}:${port}`;
   }
 
   const protocol = overrideProtocol ?? (u.protocol === "https:" ? "https" : "http");
@@ -256,17 +275,23 @@ export function maybeUpdateRunnerOriginPort(
 }
 
 export function listSecurityEnvPlaceholderKeys(content: string): string[] {
-  // Detect placeholder runner origin by checking for the default port without customization
-  const defaultRunnerOriginPlaceholder = `localhost:${DEFAULT_DOCKER_ENV_PORTS.WP_PORT}`;
+  // Detect placeholder runner origin by checking for default host:port combinations
+  // Uses single source of truth: DEFAULT_LOCAL_HOST and DEFAULT_DOCKER_ENV_PORTS.WP_PORT
+  const defaultPort = DEFAULT_DOCKER_ENV_PORTS.WP_PORT;
+  const placeholderPatterns = [
+    `${DEFAULT_LOCAL_HOST}:${defaultPort}`,
+    `localhost:${defaultPort}`,
+    `127.0.0.1:${defaultPort}`,
+  ];
 
   return SECURITY_ENV_KEYS.filter((k) => {
     const v = readEnvValue(content, k);
     if (!v) return true;
-    return (
-      v.includes("change-me") ||
-      v === "wpdev:wpdev" ||
-      (k === "WPDEV_TERMINAL_RUNNER_ORIGIN" && v.includes(defaultRunnerOriginPlaceholder))
-    );
+    if (v.includes("change-me") || v === "wpdev:wpdev") return true;
+    if (k === "WPDEV_TERMINAL_RUNNER_ORIGIN") {
+      return placeholderPatterns.some((p) => v.includes(p));
+    }
+    return false;
   });
 }
 

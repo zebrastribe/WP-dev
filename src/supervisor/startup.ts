@@ -254,7 +254,7 @@ async function composeUp(
     const key = resolveConflictPortKey(conflictPort, ports);
     const nextPort = await findFreePort(
       conflictPort + 1,
-      await getComposePublishedHostPorts(loaded.configDir, loaded.config),
+      await getComposePublishedHostPorts(loaded),
     );
     setPortInEnvFile(envPath, key, nextPort, {
       configDir: loaded.configDir,

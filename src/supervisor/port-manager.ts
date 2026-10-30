@@ -55,7 +55,7 @@ export async function validateReservedPorts(
 ): Promise<PortValidationResult> {
   const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const ports = parseDockerEnvPorts(envContent);
-  const projectPorts = await getComposePublishedHostPorts(loaded.configDir, loaded.config);
+  const projectPorts = await getComposePublishedHostPorts(loaded);
   const conflicts: PortConflictInfo[] = [];
   const used = new Set<number>();
 
