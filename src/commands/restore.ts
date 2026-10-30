@@ -27,7 +27,7 @@ import {
 import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
 import { assertValidSqlDump } from "../utils/sql-dump-validate.js";
 import { confirmRemoteTarget } from "../utils/confirm.js";
-import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
+import { acquireSyncLock, releaseSyncLock } from "@wpdev/sync-engine";
 import { logInfo } from "../utils/logger.js";
 import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
 import { runLocalWordpressFileMutation } from "../fs/index.js";

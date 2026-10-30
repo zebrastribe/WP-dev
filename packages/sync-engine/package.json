@@ -1,0 +1,24 @@
+{
+  "name": "@wpdev/sync-engine",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Shared WP-dev sync policy (locks, later rsync/wpcli/SSH helpers). CLI and future hosted workers both consume this package — no reimplementation in cloud.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./sync-lock": {
+      "types": "./dist/sync-lock.d.ts",
+      "import": "./dist/sync-lock.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

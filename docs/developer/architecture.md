@@ -26,7 +26,9 @@ wp-dev CLI (src/cli.ts)
 | Commands | `src/commands/` | `up`, `pull`, `push`, `doctor`, … |
 | Supervisor | `src/supervisor/` | Startup/shutdown state machines, port manager |
 | Filesystem | `src/fs/` | Ownership profiles, atomic writes, recovery |
-| Services | `src/services/` | rsync, ssh, wpcli, backup, sync engine |
+| Services | `src/services/` | rsync, ssh, wpcli, backup (CLI wrappers) |
+| Sync engine | `packages/sync-engine/` | Shared sync policy (lock now; rsync/wpcli move next) — Phase 1 |
+| Shared web UI | `packages/wpdev-web/` | Backup · Setup · Sync pages (local + future hosted) |
 | Docker | `docker/` | Compose stack, terminal image, runners |
 | Admin | `docs/admin/` | React wizard → `wordpress/admin/` |
 

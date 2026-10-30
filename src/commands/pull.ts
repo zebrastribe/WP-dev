@@ -42,7 +42,7 @@ import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
 import { pullExcludePatterns } from "../services/sync-excludes.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
 import { confirmRemoteTarget } from "../utils/confirm.js";
-import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
+import { acquireSyncLock, releaseSyncLock } from "@wpdev/sync-engine";
 
 export type PullOptions = {
   dryRun: boolean;

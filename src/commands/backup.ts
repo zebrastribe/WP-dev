@@ -32,7 +32,7 @@ import {
 } from "../utils/disk-space.js";
 import { logInfo } from "../utils/logger.js";
 import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
-import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
+import { acquireSyncLock, releaseSyncLock } from "@wpdev/sync-engine";
 
 export type BackupTarget = RemoteEnvName | "local";
 

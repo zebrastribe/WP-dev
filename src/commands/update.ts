@@ -10,7 +10,7 @@ import {
   formatUpdatePreflight,
 } from "../services/update-preflight.js";
 import { acquireUpdateLock, releaseUpdateLock } from "../fs/update-lock.js";
-import { acquireSyncLock, releaseSyncLock, type SyncLockHandle } from "../utils/sync-lock.js";
+import { acquireSyncLock, releaseSyncLock, type SyncLockHandle } from "@wpdev/sync-engine";
 
 export const UPDATE_WORDPRESS_SAFETY =
   "This updates the wp-dev tool only. Your wordpress/ site (themes, plugins, uploads, database) is not replaced.";

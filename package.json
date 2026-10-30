@@ -11,7 +11,7 @@
     "setup": "node scripts/check-prereqs.mjs && npm install && npm run build && npm ci --prefix docs/admin && npm run build --prefix docs/admin && npm run build:wp --prefix docs/admin",
     "quickstart": "npm run setup && npm run wp-dev -- quickstart",
     "generate:config-artifacts": "tsx scripts/generate-config-artifacts.ts",
-    "build": "npm run generate:config-artifacts && tsc",
+    "build": "npm run generate:config-artifacts && npm run build --prefix packages/sync-engine && tsc",
     "postbuild": "node scripts/chmod-cli.mjs",
     "dev": "node --import tsx src/cli.ts",
     "wp-dev": "node dist/cli.js",
@@ -33,6 +33,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@wpdev/sync-engine": "file:packages/sync-engine",
     "commander": "^12.1.0",
     "execa": "^9.5.2",
     "node-ssh": "^13.2.0",

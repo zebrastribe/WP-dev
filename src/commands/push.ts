@@ -38,7 +38,7 @@ import { getUrlVariants } from "../utils/url-variants.js";
 import { verifyRemoteSiteUrls } from "../utils/sync-verify.js";
 import { pushExcludePatterns } from "../services/sync-excludes.js";
 import { assertHostSyncTools } from "../utils/host-prereq.js";
-import { acquireSyncLock, releaseSyncLock } from "../utils/sync-lock.js";
+import { acquireSyncLock, releaseSyncLock } from "@wpdev/sync-engine";
 import { posixShellQuote, remoteRmFile, remoteRmRf } from "../utils/shell-quote.js";
 import {
   buildRemoteWpDevAdminProbeCommand,
