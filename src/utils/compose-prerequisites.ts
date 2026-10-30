@@ -65,19 +65,49 @@ function getComposeEnvExamplePath(loaded: LoadedConfig): string {
   return join(loaded.configDir, loaded.config.local.path, ".env.example");
 }
 
+/**
+ * Build a POSIX-portable shell command to replace a symlink with a copy of its target.
+ * Works on both GNU/Linux and macOS without requiring GNU coreutils.
+ * Properly quotes paths with spaces.
+ */
+function buildSymlinkCopyCommand(symPath: string): string {
+  const escaped = symPath.replace(/'/g, "'\\''");
+  return `target="$(cd "$(dirname '${escaped}')" && pwd -P)/$(readlink '${escaped}')" && ` +
+    `cp "$target" '${escaped}.tmp' && rm '${escaped}' && mv '${escaped}.tmp' '${escaped}'`;
+}
+
+/**
+ * Assert .env is not a symlink with .env-specific error message.
+ * Tells user to COPY (preserves tokens) not regenerate.
+ */
+function assertNotSymlinkEnvPath(envPath: string): void {
+  try {
+    assertNotSymlink(envPath, "Docker Compose environment file");
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("symlink")) {
+      const cmd = buildSymlinkCopyCommand(envPath);
+      throw new Error(
+        `${envPath} is a symlink. wp-dev cannot write through symlinks. ` +
+          `Replace it with a regular copy of the target file to preserve your tokens:\n  ${cmd}`,
+      );
+    }
+    throw e;
+  }
+}
+
 function ensureComposeEnvExists(loaded: LoadedConfig): string {
   const envPath = getComposeEnvPath(loaded);
   const dockerDir = join(loaded.configDir, loaded.config.local.path);
   mkdirSync(dockerDir, { recursive: true });
 
-  // P1: Never write through a symlinked .env - refuse with clear error
-  assertNotSymlink(envPath, "Docker Compose environment file");
+  // P1: Never write through a symlinked .env - refuse with .env-specific error
+  assertNotSymlinkEnvPath(envPath);
 
   if (existsSync(envPath)) return envPath;
 
   const example = getComposeEnvExamplePath(loaded);
   if (existsSync(example)) {
-    // Also refuse to copy over a symlink target
+    // Also refuse to copy over a symlink target (but with generic message for .env.example)
     assertNotSymlink(example, "Docker Compose environment example");
     copyFileSync(example, envPath);
     return envPath;

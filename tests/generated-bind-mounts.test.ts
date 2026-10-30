@@ -526,9 +526,9 @@ describe("mutation tests for compose prerequisites", () => {
     const loaded = makeLoadedConfig(tmpDir);
     const { ensureComposePrerequisites } = await import("../src/utils/compose-prerequisites.js");
 
-    // Symlinks are refused with a clear error - never write through
+    // Symlinks are refused with a clear error - instructs to copy to preserve tokens
     expect(() => ensureComposePrerequisites(loaded)).toThrow(/symlink/i);
-    expect(() => ensureComposePrerequisites(loaded)).toThrow(/remove the symlink/i);
+    expect(() => ensureComposePrerequisites(loaded)).toThrow(/preserve your tokens/i);
 
     // The symlink should still exist (we didn't modify it)
     expect(lstat(linkPath).isSymbolicLink()).toBe(true);

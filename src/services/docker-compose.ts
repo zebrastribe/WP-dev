@@ -52,17 +52,38 @@ export interface ComposeOptions {
 }
 
 /**
+ * Keys where shell-exported values are allowed to win over computed defaults.
+ * LIMITED to network vars - host path vars (PROJECT_ROOT, HOME, UID, GID) must
+ * always go through validation in resolveHostProjectRoot/resolveHostHome/resolveHostIdentity
+ * to reject /workspace, /root, relative paths, etc.
+ */
+const SHELL_PRECEDENCE_KEYS = new Set([
+  "WPDEV_NETWORK_SUBNET",
+  "WPDEV_NETWORK_GATEWAY",
+  "WPDEV_SSL_PROXY_IP",
+  "WPDEV_ADMIN_TRUSTED_GATEWAY",
+]);
+
+/**
  * Build the env object for compose calls, respecting precedence:
- * 1. Shell-exported values (process.env) win over everything
- * 2. options.env provides fallbacks for missing values
  * 
- * This ensures `export WPDEV_NETWORK_SUBNET=10.50.0.0/24` wins over injected defaults.
+ * For NETWORK vars (WPDEV_NETWORK_SUBNET, etc.):
+ *   1. Shell-exported values (process.env) win over options.env
+ *   2. options.env provides fallbacks for missing values
+ * 
+ * For HOST PATH vars (WPDEV_HOST_PROJECT_ROOT, HOME, UID, GID):
+ *   ALWAYS computed via resolveHostProjectRoot/resolveHostHome/resolveHostIdentity
+ *   which validate and reject /workspace, /root, relative paths, etc.
+ *   Shell exports do NOT bypass this validation.
  */
 export function buildComposeEnv(
   configDir: string,
   options: ComposeOptions = {},
 ): Record<string, string | undefined> {
   const composeEnvPath = join(configDir, ".env");
+  
+  // ALWAYS compute host paths through validation functions
+  // These reject /workspace, /root, relative paths even if shell-exported
   const hostProjectRoot = resolveHostProjectRoot(configDir, composeEnvPath);
   const hostHome = resolveHostHome(composeEnvPath);
   const hostId = resolveHostIdentity(configDir);
@@ -72,17 +93,22 @@ export function buildComposeEnv(
   // Base env from process.env
   const base: Record<string, string | undefined> = { ...process.env };
 
-  // Add host paths (only if not already set in process.env)
-  if (!base.WPDEV_HOST_PROJECT_ROOT) base.WPDEV_HOST_PROJECT_ROOT = hostProjectRoot;
-  if (!base.WPDEV_HOST_HOME) base.WPDEV_HOST_HOME = hostHome;
-  if (!base.WPDEV_HOST_UID) base.WPDEV_HOST_UID = hostUid;
-  if (!base.WPDEV_HOST_GID) base.WPDEV_HOST_GID = hostGid;
+  // ALWAYS set host paths from validated functions (not shell precedence)
+  base.WPDEV_HOST_PROJECT_ROOT = hostProjectRoot;
+  base.WPDEV_HOST_HOME = hostHome;
+  base.WPDEV_HOST_UID = hostUid;
+  base.WPDEV_HOST_GID = hostGid;
 
-  // Add options.env as FALLBACKS (shell values win)
-  // Only set if not already in process.env
+  // Add options.env - shell precedence ONLY for network vars
   if (options.env) {
     for (const [key, value] of Object.entries(options.env)) {
-      if (!base[key]) {
+      if (SHELL_PRECEDENCE_KEYS.has(key)) {
+        // Network vars: shell wins, options.env is fallback
+        if (!base[key]) {
+          base[key] = value;
+        }
+      } else {
+        // All other options.env values are set (host paths already handled above)
         base[key] = value;
       }
     }

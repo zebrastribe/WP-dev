@@ -259,9 +259,10 @@ describe("behavioral tests - symlink error messages", () => {
       errorMessage = (e as Error).message;
     }
 
-    // Error should instruct copying, not regenerating
+    // Error should instruct copying to preserve tokens, not regenerating
     expect(errorMessage).toContain("symlink");
-    expect(errorMessage).toContain("cp --remove-destination");
+    expect(errorMessage).toContain("preserve your tokens");
+    expect(errorMessage).toContain("cp"); // Contains cp command
     expect(errorMessage).not.toContain("regenerate");
     expect(errorMessage).not.toContain("let wp-dev generate");
   });

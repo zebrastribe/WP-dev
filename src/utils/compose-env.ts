@@ -12,6 +12,19 @@ import { assertNotSymlink } from "./generated-bind-mounts.js";
 export const DEFAULT_LOCAL_HOST = "127.0.0.1";
 
 /**
+ * Build a POSIX-portable shell command to replace a symlink with a copy of its target.
+ * Works on both GNU/Linux and macOS without requiring GNU coreutils.
+ * Properly quotes paths with spaces.
+ */
+function buildSymlinkCopyCommand(symPath: string): string {
+  // Shell-escape the path for use in command
+  const escaped = symPath.replace(/'/g, "'\\''");
+  // POSIX: cd to containing dir, resolve relative symlink, copy, remove link
+  return `target="$(cd "$(dirname '${escaped}')" && pwd -P)/$(readlink '${escaped}')" && ` +
+    `cp "$target" '${escaped}.tmp' && rm '${escaped}' && mv '${escaped}.tmp' '${escaped}'`;
+}
+
+/**
  * Assert that an .env path is not a symlink. Reuses the shared assertNotSymlink
  * but with a .env-specific error message that tells the user to COPY the file
  * (not regenerate, which would lose tokens).
@@ -21,11 +34,11 @@ function assertNotSymlinkEnv(envPath: string): void {
     assertNotSymlink(envPath, "Docker Compose environment file");
   } catch (e) {
     if (e instanceof Error && e.message.includes("symlink")) {
-      // Rethrow with .env-specific guidance
+      const cmd = buildSymlinkCopyCommand(envPath);
+      // Rethrow with .env-specific guidance - portable POSIX command
       throw new Error(
         `${envPath} is a symlink. wp-dev cannot write through symlinks. ` +
-          `Replace it with a regular copy of the target file to preserve your tokens: ` +
-          `cp --remove-destination "$(readlink -f ${envPath})" "${envPath}"`,
+          `Replace it with a regular copy of the target file to preserve your tokens:\n  ${cmd}`,
       );
     }
     throw e;

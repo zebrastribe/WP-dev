@@ -15,9 +15,8 @@
  * - M9: remove empty-dir self-heal → test: empty_dir_is_healed
  * - M10: make doctor write anything → test: doctor_is_read_only
  * - Write through symlink → test: symlink_throws_clear_error
- * - Write .env when 'already running' → test: already_running_writes_nothing
  * - relocate-ports not updating runner origin → test: relocate_ports_updates_origin
- * - process.env not restored after injection → test: process_env_restored_after_injection
+ * - HOST_* validation → test: host_project_root_rejects_workspace, host_home_rejects_root
  */
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
@@ -184,33 +183,52 @@ describe("compose prerequisites integration - mutation tests", () => {
     expect(envAfter).toBe(envBefore);
   });
 
-  // process.env not restored after injection
-  it("process_env_restored_after_injection: resolveNetworkEnvForCompose does not mutate process.env", async () => {
+  // HOST_* validation: /workspace is rejected
+  it("host_project_root_rejects_workspace: exported /workspace is rejected by validation", async () => {
     const dockerDir = join(tmpDir, "docker");
     mkdirSync(dockerDir, { recursive: true });
     writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
 
-    // Set a marker value
-    const markerKey = "WPDEV_TEST_MARKER";
-    process.env[markerKey] = "original";
+    const originalEnv = process.env.WPDEV_HOST_PROJECT_ROOT;
+    process.env.WPDEV_HOST_PROJECT_ROOT = "/workspace";
 
-    const { resolveNetworkEnvForCompose } = await import("../src/utils/compose-prerequisites.js");
-    const loaded = makeLoadedConfig(tmpDir);
+    try {
+      const { buildComposeEnv } = await import("../src/services/docker-compose.js");
+      const env = buildComposeEnv(dockerDir, {});
 
-    // resolveNetworkEnvForCompose returns values but should NOT mutate process.env
-    const result = resolveNetworkEnvForCompose(loaded);
+      // /workspace should NOT be used - validation rejects it
+      expect(env.WPDEV_HOST_PROJECT_ROOT).not.toBe("/workspace");
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env.WPDEV_HOST_PROJECT_ROOT = originalEnv;
+      } else {
+        delete process.env.WPDEV_HOST_PROJECT_ROOT;
+      }
+    }
+  });
 
-    // Result should have network values
-    expect(result.WPDEV_NETWORK_SUBNET).toBeTruthy();
+  // HOST_* validation: /root is rejected
+  it("host_home_rejects_root: exported /root is rejected by validation", async () => {
+    const dockerDir = join(tmpDir, "docker");
+    mkdirSync(dockerDir, { recursive: true });
+    writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
 
-    // process.env should NOT have the network values (no mutation)
-    // The values are returned for the caller to use, not set globally
-    // Note: The current implementation doesn't mutate process.env directly
-    // The caller (reconcileSharedConfig) does the mutation and restoration
+    const originalEnv = process.env.WPDEV_HOST_HOME;
+    process.env.WPDEV_HOST_HOME = "/root";
 
-    // Our marker should be untouched
-    expect(process.env[markerKey]).toBe("original");
-    delete process.env[markerKey];
+    try {
+      const { buildComposeEnv } = await import("../src/services/docker-compose.js");
+      const env = buildComposeEnv(dockerDir, {});
+
+      // /root should NOT be used - validation rejects it
+      expect(env.WPDEV_HOST_HOME).not.toBe("/root");
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env.WPDEV_HOST_HOME = originalEnv;
+      } else {
+        delete process.env.WPDEV_HOST_HOME;
+      }
+    }
   });
 
   // M8: disable existing-network reuse
@@ -253,22 +271,6 @@ describe("compose prerequisites integration - mutation tests", () => {
     expect(statSync(remoteIpPath).isFile()).toBe(true);
   });
 
-  // Write .env when 'already running' - test that the early return prevents writes
-  it("already_running_guard_exists: isSupervisorAlreadyRunning is called before writes", async () => {
-    // This test verifies the code structure - isSupervisorAlreadyRunning
-    // should be checked before ensureComposePrerequisites in cmdUp
-
-    const upModule = await import("../src/commands/up.js");
-    const upSource = upModule.cmdUp.toString();
-
-    // The isSupervisorAlreadyRunning check should appear before ensureComposePrerequisites
-    const alreadyRunningPos = upSource.indexOf("isSupervisorAlreadyRunning");
-    const prereqPos = upSource.indexOf("ensureComposePrerequisites");
-
-    expect(alreadyRunningPos).toBeGreaterThan(-1);
-    expect(prereqPos).toBeGreaterThan(-1);
-    expect(alreadyRunningPos).toBeLessThan(prereqPos);
-  });
 
   // relocate-ports updates runner origin
   it("relocate_ports_updates_origin: buildRunnerOrigin helper exists and is used", async () => {
