@@ -37,6 +37,10 @@ import {
   reconcileContainerRuntime,
   reconcileSharedConfig,
 } from "../fs/index.js";
+import {
+  ensureGeneratedBindMountFiles,
+  getRemoteIpConfPath,
+} from "../utils/generated-bind-mounts.js";
 import { recoverStaleState } from "../supervisor/recovery.js";
 import {
   ensureSupervisorRunning,
@@ -261,33 +265,23 @@ function ensureBindLocalConfig(
 
 /**
  * Generate remoteip.conf to restrict X-Forwarded-For trust.
- * Must be called BEFORE compose runs - if missing, Docker creates a directory.
+ *
+ * By this point, ensureGeneratedBindMountFiles has already ensured remoteip.conf
+ * exists as a regular file with default content. This function updates it with
+ * the correct SSL-aware content.
  *
  * @param sslEnabled Whether SSL profile is enabled (only trust proxy when SSL is on)
  */
 function ensureRemoteIpConf(loaded: LoadedConfig, sslProxyIp: string | null, sslEnabled: boolean): void {
-  const confPath = join(loaded.configDir, "docker/remoteip.conf");
+  const confPath = getRemoteIpConfPath(loaded);
 
-  // Detect if Docker created a directory (happens if compose ran without the file)
-  if (existsSync(confPath)) {
-    const stat = statSync(confPath);
-    if (stat.isDirectory()) {
-      throw new Error(
-        `docker/remoteip.conf is a directory (Docker created it because the file was missing). ` +
-          `Remove it and run wp-dev up again: rm -rf "${confPath}"`,
-      );
-    }
-  }
-
-  // Only trust the SSL proxy IP when SSL profile is enabled
-  // When SSL is off, trust no proxy (any container could get .10 IP)
   const trustedProxyIp = sslEnabled ? sslProxyIp : null;
   const content = generateRemoteIpConf(trustedProxyIp);
 
   const existing = existsSync(confPath) ? readFileSync(confPath, "utf8") : "";
   if (existing !== content) {
     writeFileSync(confPath, content, "utf8");
-    logInfo(`up: generated docker/remoteip.conf (ssl=${sslEnabled ? "on" : "off"})`);
+    logInfo(`up: updated docker/remoteip.conf (ssl=${sslEnabled ? "on" : "off"})`);
   }
 }
 
@@ -526,6 +520,12 @@ async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
 
 export async function cmdUp(loaded: LoadedConfig, options: UpOptions = {}): Promise<void> {
   assertDockerReady();
+
+  // Ensure generated bind-mount files exist BEFORE any compose call.
+  // Docker creates missing bind-mount sources as directories, breaking subsequent writes.
+  // This must happen before recoverStaleState/autoReconcileOnStartup which may call compose.
+  ensureGeneratedBindMountFiles(loaded);
+
   await recoverStaleState(loaded);
   await autoReconcileOnStartup(loaded);
 
