@@ -148,7 +148,7 @@ export function ConfigAssistant() {
         )}
         <div className="grid gap-3 sm:grid-cols-2">
           {field("project", ["project"], "Unique per clone; used for Docker Compose -p and backup paths.")}
-          {field("local.url", ["local", "url"], "Browser URL for Docker WordPress, e.g. http://localhost:8888")}
+          {field("local.url", ["local", "url"], "Browser URL for Docker WordPress (your WP_PORT)")}
         </div>
         <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Staging (remote)</h4>
         <div className="grid gap-3 sm:grid-cols-2">

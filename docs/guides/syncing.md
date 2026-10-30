@@ -17,8 +17,8 @@ Before overwriting a database, WP-dev creates an automatic backup when possible.
 
 ```bash
 npm run wp-dev -- up
-npm run wp-dev -- doctor production
-npm run wp-dev -- pull production
+npm run wp-dev -- validate --remote staging
+npm run wp-dev -- pull staging
 ```
 
 Open `local.url` from config in your browser.
@@ -44,11 +44,11 @@ npm run wp-dev -- pull theme production
 
 See [Theme deploy](./theme-deploy.md).
 
-## First production pull (large sites)
+## First pull (large sites)
 
 ```bash
-npm run wp-dev -- doctor production --rsync
-npm run wp-dev -- pull production --yes
+npm run wp-dev -- doctor staging --rsync
+npm run wp-dev -- pull staging --yes
 ```
 
 Use **`--yes`** for production (required in non-interactive / scripted runs). Large `uploads/` trees can take tens of minutes.

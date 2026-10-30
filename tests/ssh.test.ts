@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import * as os from "node:os";
 import {
   buildBaseConnectOptions,
@@ -57,7 +58,8 @@ describe("ssh-helpers", () => {
     process.env.SSH_AUTH_SOCK = "/tmp/ssh-agent.sock";
     const attempts = buildSshConnectAttempts(remote);
     expect(attempts.some((a) => a.label.includes("ssh-agent"))).toBe(true);
-    process.env.SSH_AUTH_SOCK = prev;
+    if (prev === undefined) delete process.env.SSH_AUTH_SOCK;
+    else process.env.SSH_AUTH_SOCK = prev;
   });
 });
 
@@ -129,7 +131,8 @@ describe("checkSshPreflight", () => {
       expect(result.errors.length).toBeGreaterThan(0);
       expect(result.errors[0]).toContain("not found");
     } finally {
-      process.env.SSH_AUTH_SOCK = prev;
+      if (prev === undefined) delete process.env.SSH_AUTH_SOCK;
+      else process.env.SSH_AUTH_SOCK = prev;
     }
   });
 
@@ -147,7 +150,8 @@ describe("checkSshPreflight", () => {
       expect(result.ok).toBe(true);
       expect(result.warnings.some((w) => w.includes("not found") && w.includes("ssh-agent"))).toBe(true);
     } finally {
-      process.env.SSH_AUTH_SOCK = prev;
+      if (prev === undefined) delete process.env.SSH_AUTH_SOCK;
+      else process.env.SSH_AUTH_SOCK = prev;
     }
   });
 
@@ -201,24 +205,37 @@ describe("formatSshAuthError", () => {
 
 describe("detectPassphraseProtectedKey", () => {
   let tempDir: string;
+  let hasSshKeygen = true;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(os.tmpdir(), "passphrase-detect-"));
+    const check = spawnSync("ssh-keygen", ["-h"], { encoding: "utf8", timeout: 2000 });
+    hasSshKeygen = check.status !== null;
   });
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("detects ENCRYPTED marker in key", () => {
-    const keyPath = join(tempDir, "encrypted-key");
-    writeFileSync(keyPath, "-----BEGIN OPENSSH PRIVATE KEY-----\nENCRYPTED\n-----END OPENSSH PRIVATE KEY-----");
+  it("detects passphrase-protected key via ssh-keygen", () => {
+    if (!hasSshKeygen) return;
+    const keyPath = join(tempDir, "test-key-protected");
+    const result = spawnSync("ssh-keygen", ["-t", "ed25519", "-N", "testpass", "-f", keyPath, "-q"], {
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    if (result.status !== 0) return;
     expect(detectPassphraseProtectedKey(keyPath)).toBe(true);
   });
 
-  it("returns false for unencrypted key", () => {
-    const keyPath = join(tempDir, "plain-key");
-    writeFileSync(keyPath, "-----BEGIN OPENSSH PRIVATE KEY-----\nbase64data\n-----END OPENSSH PRIVATE KEY-----");
+  it("returns false for unprotected key", () => {
+    if (!hasSshKeygen) return;
+    const keyPath = join(tempDir, "test-key-plain");
+    const result = spawnSync("ssh-keygen", ["-t", "ed25519", "-N", "", "-f", keyPath, "-q"], {
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    if (result.status !== 0) return;
     expect(detectPassphraseProtectedKey(keyPath)).toBe(false);
   });
 

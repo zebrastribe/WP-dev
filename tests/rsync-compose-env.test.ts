@@ -120,6 +120,19 @@ describe("rsync-ssh-env helpers", () => {
 
     rmSync(keyPath, { force: true });
   });
+
+  it("buildSshRsyncEnv omits -i and IdentitiesOnly when configured key missing (agent fallback)", () => {
+    const env = buildSshRsyncEnv({
+      host: "example.com",
+      user: "deploy",
+      path: "/var/www",
+      url: "https://example.com",
+      identityFile: "~/.ssh/nonexistent-key-12345.pem",
+    });
+    expect(env).not.toContain("-i ");
+    expect(env).not.toContain("IdentitiesOnly");
+    expect(env).toContain("BatchMode=yes");
+  });
 });
 
 describe("classifyRsyncSshError", () => {

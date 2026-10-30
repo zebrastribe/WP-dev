@@ -35,6 +35,16 @@ describe("fs atomic-write", () => {
     const n = sweepStaleTmpFiles(dir, 0);
     expect(n).toBeGreaterThanOrEqual(0);
   });
+
+  it("inPlace write preserves inode", () => {
+    const target = join(dir, "bindmount.json");
+    writeFileAtomic(target, '{"v":1}\n');
+    const { ino: inoBefore } = require("node:fs").statSync(target);
+    writeFileAtomic(target, '{"v":2}\n', { inPlace: true });
+    const { ino: inoAfter } = require("node:fs").statSync(target);
+    expect(inoAfter).toBe(inoBefore);
+    expect(readFileSync(target, "utf8")).toBe('{"v":2}\n');
+  });
 });
 
 describe("fs path-resolver", () => {

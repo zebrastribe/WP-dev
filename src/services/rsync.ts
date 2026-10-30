@@ -43,19 +43,13 @@ function logRsyncRetry(info: {
   );
 }
 
-function parseDryRunSummary(stdout: string): { fileCount: number; totalBytes: number } {
-  const lines = stdout.split("\n").filter((l) => l.trim() && !l.startsWith("sending ") && !l.startsWith("receiving "));
-  let fileCount = 0;
-  let totalBytes = 0;
-  for (const line of lines) {
-    if (line.startsWith("deleting ") || line.endsWith("/")) continue;
-    fileCount++;
-    const sizeMatch = line.match(/^\s*([\d,]+)\s+/);
-    if (sizeMatch) {
-      const size = parseInt(sizeMatch[1].replace(/,/g, ""), 10);
-      if (!Number.isNaN(size)) totalBytes += size;
-    }
-  }
+function parseDryRunStats(output: string): { fileCount: number; totalBytes: number } | null {
+  const filesMatch = output.match(/Number of (?:regular )?files(?: transferred)?:\s*([\d,]+)/i);
+  const sizeMatch = output.match(/Total (?:transferred )?file size:\s*([\d,]+)/i) ||
+                    output.match(/total size is\s+([\d,]+)/i);
+  if (!filesMatch && !sizeMatch) return null;
+  const fileCount = filesMatch ? parseInt(filesMatch[1].replace(/,/g, ""), 10) : 0;
+  const totalBytes = sizeMatch ? parseInt(sizeMatch[1].replace(/,/g, ""), 10) : 0;
   return { fileCount, totalBytes };
 }
 
@@ -71,14 +65,15 @@ async function execRsync(
   options: { dryRun: boolean },
 ): Promise<RsyncAttemptResult> {
   const envBase = Number(process.env.WPDEV_RSYNC_RETRY_BASE_MS);
+  const finalArgs = options.dryRun ? [...args, "--stats"] : args;
   const result = await runRsyncWithConnectionRetries(
     async () => {
-      const r = await execa("rsync", args, {
+      const r = await execa("rsync", finalArgs, {
         reject: false,
-        stdout: options.dryRun ? "pipe" : "inherit",
+        stdout: "pipe",
         stderr: "pipe",
       });
-      if (options.dryRun && r.stdout) {
+      if (r.stdout) {
         process.stdout.write(r.stdout);
       }
       return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "", stdout: r.stdout ?? "" };
@@ -91,8 +86,8 @@ async function execRsync(
   );
   if (result.stderr) process.stderr.write(result.stderr);
   if (options.dryRun && result.stdout) {
-    const summary = parseDryRunSummary(result.stdout);
-    if (summary.fileCount > 0) {
+    const summary = parseDryRunStats(result.stdout);
+    if (summary && (summary.fileCount > 0 || summary.totalBytes > 0)) {
       console.error(`\n[dry-run summary] ${summary.fileCount} files, ${formatBytes(summary.totalBytes)} total`);
     }
   }

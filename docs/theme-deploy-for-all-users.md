@@ -272,7 +272,7 @@ npm test    # includes tests/theme-path.test.ts
 
 ### Manual (timework.dk)
 
-1. `npm run wp-dev -- doctor production`
+1. `npm run wp-dev -- validate --remote staging`
 2. `npm run wp-dev -- theme build`
 3. `npm run wp-dev -- push theme production --dry-run` — verify remote path only
 4. `npm run wp-dev -- push theme production --build` — deploy

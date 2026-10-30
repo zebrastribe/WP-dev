@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { RemoteEnvConfig } from "../config/schema.js";
@@ -48,10 +49,9 @@ export function buildSshRsyncEnv(remote: RemoteEnvConfig): string {
     parts.push("-p", String(remote.port));
   }
   const key = resolveIdentityFile(remote.identityFile);
-  if (key) {
+  if (key && existsSync(key)) {
     assertSafeSshField("identityFile", key);
     parts.push("-i", shellQuote(key));
-    // Prevent OpenSSH from offering other default keys before the configured one
     parts.push("-o", "IdentitiesOnly=yes");
   }
   return parts.join(" ");

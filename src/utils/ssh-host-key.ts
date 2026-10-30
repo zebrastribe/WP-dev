@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import type { RemoteEnvConfig } from "../config/schema.js";
 import { resolveIdentityFile } from "./remote-config-helpers.js";
+import { resolveSshConfigAlias } from "./ssh-helpers.js";
 
 function knownHostsTarget(host: string, port?: number): string {
   if (port != null && port !== 22) return `[${host}]:${port}`;
@@ -24,15 +26,19 @@ export function knownHostSha256Fingerprints(host: string, port?: number): string
 
 /** Build an SSH command string suitable for pinning the host key. */
 export function buildSshPinCommand(remote: RemoteEnvConfig): string {
+  const aliasCheck = resolveSshConfigAlias(remote.host);
+  const effectiveHost = aliasCheck?.isAlias ? aliasCheck.hostname : remote.host;
+  const effectivePort = remote.port ?? aliasCheck?.port;
+
   const parts = ["ssh"];
-  if (remote.port != null && remote.port !== 22) {
-    parts.push("-p", String(remote.port));
+  if (effectivePort != null && effectivePort !== 22) {
+    parts.push("-p", String(effectivePort));
   }
   const key = resolveIdentityFile(remote.identityFile);
-  if (key) {
+  if (key && existsSync(key)) {
     parts.push("-i", key);
   }
-  parts.push(`${remote.user}@${remote.host}`);
+  parts.push(`${remote.user}@${effectiveHost}`);
   return parts.join(" ");
 }
 

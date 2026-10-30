@@ -1422,15 +1422,15 @@ export function Wizard() {
                 type="button"
                 onClick={() =>
                   void runTerminalCommand(
-                    "npm run wp-dev -- doctor production --http",
+                    "npm run wp-dev -- doctor staging --http",
                     "plain",
                     "wpdev_doctor",
-                    { env: "production" },
+                    { env: "staging" },
                   )
                 }
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Full doctor (production)
+                Full doctor (staging)
               </button>
               {pathVerified.production ? (
                 <span className="self-center text-xs font-medium text-emerald-700 dark:text-emerald-300">

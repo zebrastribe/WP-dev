@@ -109,14 +109,20 @@ function commandForAction(action, args) {
       return 'echo "FAIL: WordPress path is required. Set staging.path / production.path to the folder that contains wp-config.php (not a parent of other sites)." >&2; exit 1';
     }
     let sshOpts;
+    let configError = null;
     try {
       const remote = readRemoteEnv(env);
       sshOpts = sshOptsShell(remote) + " -o UpdateHostKeys=no";
-    } catch {
-      sshOpts = "-F /dev/null -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes -o UpdateHostKeys=no";
+    } catch (e) {
+      configError = e?.message || String(e);
     }
+    if (configError) {
+      return `echo "FAIL: Could not read SSH config for ${env}: ${configError.replace(/"/g, '\\"')}. Save wp-dev.config.json first." >&2; exit 1`;
+    }
+    const sshCmd = `ssh ${sshOpts} ${user}@${host}`;
     return (
-      `ssh ${sshOpts} ${user}@${host} ` +
+      `echo "Running: ${sshCmd.replace(/'/g, "\\'")} ..."; ` +
+      `${sshCmd} ` +
       `'set -e; P=${path}; ` +
       `test -d "\$P" || { echo "FAIL: path does not exist: \$P"; exit 1; }; ` +
       `if [ ! -f "\$P/wp-config.php" ] && [ ! -f "\$P/wp-config-sample.php" ]; then ` +

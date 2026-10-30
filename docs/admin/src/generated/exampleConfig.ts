@@ -3,7 +3,7 @@
 export const EXAMPLE_WP_DEV_CONFIG = {
   "project": "my-site",
   "local": {
-    "url": "http://localhost:8888",
+    "url": "http://localhost:8894",
     "path": "./docker",
     "composeFile": "docker-compose.yml",
     "composeService": "wpcli",
