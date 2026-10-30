@@ -43,28 +43,63 @@ function logRsyncRetry(info: {
   );
 }
 
+function parseDryRunStats(output: string): { fileCount: number; totalBytes: number } | null {
+  const filesMatch = output.match(/Number of regular files transferred:\s*([\d,]+)/i);
+  const sizeMatch = output.match(/Total transferred file size:\s*([\d,]+)/i);
+  if (!filesMatch && !sizeMatch) return null;
+  const fileCount = filesMatch ? parseInt(filesMatch[1].replace(/,/g, ""), 10) : 0;
+  const totalBytes = sizeMatch ? parseInt(sizeMatch[1].replace(/,/g, ""), 10) : 0;
+  return { fileCount, totalBytes };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 async function execRsync(
   args: string[],
   options: { dryRun: boolean },
 ): Promise<RsyncAttemptResult> {
   const envBase = Number(process.env.WPDEV_RSYNC_RETRY_BASE_MS);
+  const finalArgs = options.dryRun ? [...args, "--stats"] : args;
   const result = await runRsyncWithConnectionRetries(
     async () => {
-      const r = await execa("rsync", args, {
-        reject: false,
-        stdout: "inherit",
-        stderr: "pipe",
-      });
-      return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "" };
+      if (options.dryRun) {
+        const r = await execa("rsync", finalArgs, {
+          reject: false,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        if (r.stdout) {
+          process.stdout.write(r.stdout);
+          if (!r.stdout.endsWith("\n")) process.stdout.write("\n");
+        }
+        return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "", stdout: r.stdout ?? "" };
+      } else {
+        const r = await execa("rsync", finalArgs, {
+          reject: false,
+          stdout: "inherit",
+          stderr: "pipe",
+        });
+        return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "", stdout: "" };
+      }
     },
     {
-      // Dry-run is short; still retry a couple of times for flaky SSH.
       maxAttempts: options.dryRun ? 2 : 5,
       baseDelayMs: Number.isFinite(envBase) && envBase >= 0 ? envBase : 2_000,
       onRetry: logRsyncRetry,
     },
   );
   if (result.stderr) process.stderr.write(result.stderr);
+  if (options.dryRun && result.stdout) {
+    const summary = parseDryRunStats(result.stdout);
+    if (summary && (summary.fileCount > 0 || summary.totalBytes > 0)) {
+      console.error(`\n\n[dry-run summary] ${summary.fileCount} files, ${formatBytes(summary.totalBytes)} total\n`);
+    }
+  }
   return result;
 }
 
@@ -110,10 +145,10 @@ export async function rsyncPull(
       return;
     }
     const err = retry.stderr ?? "";
-    throw new Error(`rsync pull failed with exit code ${retry.exitCode}${pullRsyncFailureHint(err)}`);
+    throw new Error(`rsync pull failed with exit code ${retry.exitCode}${pullRsyncFailureHint(err, remote.identityFile, remote)}`);
   }
 
-  throw new Error(`rsync pull failed with exit code ${first.exitCode}${pullRsyncFailureHint(firstErr)}`);
+  throw new Error(`rsync pull failed with exit code ${first.exitCode}${pullRsyncFailureHint(firstErr, remote.identityFile, remote)}`);
 }
 
 export async function rsyncPushToPath(
@@ -196,12 +231,12 @@ export async function rsyncPush(
     }
     const err = retry.stderr ?? "";
     throw new Error(
-      `rsync push failed with exit code ${retry.exitCode}${pushRsyncFailureHint(err, relPath)}`,
+      `rsync push failed with exit code ${retry.exitCode}${pushRsyncFailureHint(err, relPath, remote.identityFile, remote)}`,
     );
   }
 
   throw new Error(
-    `rsync push failed with exit code ${first.exitCode}${pushRsyncFailureHintAbsolutePath(firstErr, destPath)}`,
+    `rsync push failed with exit code ${first.exitCode}${pushRsyncFailureHintAbsolutePath(firstErr, destPath, remote.identityFile, remote)}`,
   );
 }
 
@@ -250,10 +285,6 @@ export async function rsyncPullFromPath(
     throw new Error(`rsync pull failed with exit code ${retry.exitCode}`);
   }
 
-  let hint = "";
-  if (/Permission denied|mkstemp|Operation not permitted/i.test(firstErr)) {
-    hint =
-      "\n\nLikely fix: run `npm run wp-dev -- fix-permissions` then retry pull theme.";
-  }
+  const hint = pullRsyncFailureHint(firstErr, remote.identityFile, remote);
   throw new Error(`rsync pull failed with exit code ${first.exitCode}${hint}`);
 }

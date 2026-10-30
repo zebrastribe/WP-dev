@@ -158,6 +158,7 @@ export function writeWpDevConfig(configDir: string, config: WpDevConfig): void {
     projectId: validated.project,
     backup: true,
     mode: 0o664,
+    inPlace: true,
   });
 }
 

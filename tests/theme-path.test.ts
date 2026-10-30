@@ -1,7 +1,7 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import type { LoadedConfig } from "../src/config/load.js";
 import {
   checkThemeBuildArtifacts,
@@ -46,8 +46,16 @@ function makeLoaded(
 }
 
 describe("theme-path", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
+    tempDirs.length = 0;
+  });
+
   it("resolves _tw nested theme/ deploy dir", () => {
     const root = mkdtempSync(join(tmpdir(), "wpdev-theme-"));
+    tempDirs.push(root);
     const source = join(root, "agency-starter");
     mkdirSync(join(source, "theme"), { recursive: true });
     writeFileSync(
@@ -66,6 +74,7 @@ describe("theme-path", () => {
 
   it("resolves flat theme deploy dir", () => {
     const root = mkdtempSync(join(tmpdir(), "wpdev-flat-"));
+    tempDirs.push(root);
     const source = join(root, "my-theme");
     mkdirSync(source, { recursive: true });
     writeFileSync(join(source, "style.css"), "/* Theme Name: My Theme */\n", "utf8");
@@ -76,6 +85,7 @@ describe("theme-path", () => {
 
   it("uses configured themeSlug override", () => {
     const root = mkdtempSync(join(tmpdir(), "wpdev-slug-"));
+    tempDirs.push(root);
     const source = join(root, "src");
     mkdirSync(join(source, "theme"), { recursive: true });
     writeFileSync(join(source, "theme", "style.css"), "/* Text Domain: other */\n", "utf8");
@@ -91,6 +101,7 @@ describe("theme-path", () => {
 
   it("checkThemeBuildArtifacts flags large style.css", () => {
     const root = mkdtempSync(join(tmpdir(), "wpdev-check-"));
+    tempDirs.push(root);
     const deploy = join(root, "theme");
     mkdirSync(deploy, { recursive: true });
     writeFileSync(join(deploy, "functions.php"), "<?php\n", "utf8");

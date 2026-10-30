@@ -15,20 +15,48 @@ Shared hosts often differ from VPS layouts. `wp-dev init` guesses may not match 
 
 1. SSH in manually and find the WordPress root (`wp-config.php` location).
 2. Run `wp-dev init` with those exact values.
-3. `wp-dev doctor production --rsync` before first pull.
+3. `npm run wp-dev -- validate --remote staging` before first pull (no production contact).
 4. See [Syncing — first pull checklist](../guides/syncing.md#first-pull-checklist).
 
 ## SSH keys on Simply.com / UnoEuro (authorized_keys)
 
-Many shared hosts enable SSH only after you install a public key yourself:
+Many shared hosts enable SSH only after you install a public key. There are two ways to do this:
 
-1. Generate a key locally: `ssh-keygen -t ed25519 -f ~/.ssh/site_ed25519 -N ""`
-2. Create `~/.ssh` on the account (via FTP/file manager if needed) and upload `authorized_keys` containing your **public** key line.
-3. Permissions on the host: `.ssh` → `700`, `authorized_keys` → `600` (owner = FTP/SSH user).
-4. Set `production.identityFile` (and staging if used) in `wp-dev.config.json` to that private key path.
-5. `npm run wp-dev -- doctor production` then `doctor production --rsync`.
+### Option A: Hosting panel (recommended)
 
-Password-only FTP accounts often cannot use key SSH until this file exists.
+Most control panels have an "SSH keys" or "SFTP keys" section:
+
+1. Generate a key locally: `ssh-keygen -t ed25519 -f ~/.ssh/site_ed25519`
+   (use an empty passphrase or remember to run `ssh-add` before syncing)
+2. Copy the **public** key: `cat ~/.ssh/site_ed25519.pub`
+3. Paste into the hosting panel's SSH keys section.
+4. Set `staging.identityFile` (and production if used) in `wp-dev.config.json` to `~/.ssh/site_ed25519`.
+5. Pin the host key: `ssh -i ~/.ssh/site_ed25519 user@host` (accept fingerprint when prompted).
+6. `npm run wp-dev -- validate --remote staging` (no production contact for first setup).
+
+### Option B: Manual authorized_keys file
+
+If the panel has no SSH keys section, upload the file yourself:
+
+1. Generate a key locally: `ssh-keygen -t ed25519 -f ~/.ssh/site_ed25519`
+2. Create `~/.ssh` on the account (via FTP/file manager if needed).
+3. Upload `authorized_keys` containing your **public** key line (the `.pub` file contents).
+4. Set permissions on the host: `.ssh` → `700`, `authorized_keys` → `600` (owner = FTP/SSH user).
+5. Set `staging.identityFile` in `wp-dev.config.json` to `~/.ssh/site_ed25519`.
+6. Pin the host key: `ssh -i ~/.ssh/site_ed25519 user@host` (accept fingerprint when prompted).
+7. `npm run wp-dev -- validate --remote staging` (no production contact for first setup).
+
+Password-only FTP accounts cannot use key SSH until authorized_keys exists.
+
+### Key permissions
+
+Your **local** private key must have mode 600:
+
+```bash
+chmod 600 ~/.ssh/site_ed25519
+```
+
+OpenSSH refuses keys that are readable by other users ("UNPROTECTED PRIVATE KEY FILE").
 
 ## One site per `path` (important)
 

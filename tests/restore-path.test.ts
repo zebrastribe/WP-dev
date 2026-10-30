@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   mkdirSync,
   mkdtempSync,
@@ -7,22 +7,16 @@ import {
   symlinkSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { assertRestoreBackupPath } from "../src/utils/restore-path.js";
 
 describe("assertRestoreBackupPath", () => {
   const project = "lock-test-site";
   const env = "staging";
-  let root: string;
-
-  beforeAll(() => {
-    // HOME is set by tests/setup.ts (or use temp dir if no global setup)
-    const home = process.env.HOME!;
-    root = join(home, ".wp-dev", "backups", project, env);
-    mkdirSync(root, { recursive: true });
-  });
+  const getRoot = () => join(homedir(), ".wp-dev", "backups", project, env);
 
   it("accepts a file under ~/.wp-dev/backups/<project>/<env>/", () => {
+    const root = getRoot();
     mkdirSync(root, { recursive: true });
     const file = join(root, "db-allowlisted.sql");
     writeFileSync(file, "-- ok\n");
@@ -43,8 +37,7 @@ describe("assertRestoreBackupPath", () => {
   });
 
   it("refuses a backup for a different env under the same project", () => {
-    const home = process.env.HOME!;
-    const prodRoot = join(home, ".wp-dev", "backups", project, "production");
+    const prodRoot = join(homedir(), ".wp-dev", "backups", project, "production");
     mkdirSync(prodRoot, { recursive: true });
     const file = join(prodRoot, "db-prod.sql");
     writeFileSync(file, "-- prod\n");
@@ -54,6 +47,7 @@ describe("assertRestoreBackupPath", () => {
   });
 
   it("refuses an in-tree symlink whose target is outside the backup tree", () => {
+    const root = getRoot();
     mkdirSync(root, { recursive: true });
     const outside = mkdtempSync(join(tmpdir(), "wp-dev-restore-symlink-"));
     const target = join(outside, "outside.sql");
@@ -72,6 +66,7 @@ describe("assertRestoreBackupPath", () => {
   });
 
   it("refuses an empty backup file", () => {
+    const root = getRoot();
     mkdirSync(root, { recursive: true });
     const file = join(root, "db-empty.sql");
     writeFileSync(file, "");

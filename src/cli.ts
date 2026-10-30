@@ -70,7 +70,7 @@ async function runWithConfig(
     const detail = e instanceof Error ? e.stack || e.message : String(e);
     // Expected refusals: message only (no stack in UI/runner panel). Unexpected: keep stack in the log.
     const expectedRefuse =
-      /^(Restore refused|Backup file not found|Path safety FAIL|Refusing to |SSH host |Invalid JSON in |Invalid config in )/i.test(
+      /^(Restore refused|Backup file not found|Path safety FAIL|Refusing to |SSH host |SSH authentication failed|SSH key |Configured SSH key|Invalid JSON in |Invalid config in |rsync pull failed|rsync push failed)/i.test(
         short,
       ) || /user aborted/i.test(short);
     // logError mirrors to stderr once — enough for CLI + runner panel (no extra console.error).
@@ -542,34 +542,34 @@ async function main(): Promise<void> {
         "--no-backup-local",
         "Skip exporting local DB to ~/.wp-dev/backups/<project>/local/ before overwriting it",
       )
-      .option(
-        "--skip-simply-staging-dns",
-        "After pull production, skip auto simply setup-staging-dns when staging is still a placeholder",
-      )
       .option("--yes", "Skip interactive confirmation (used by admin runner / CI)")
       .option(
         "--confirm-host <host>",
         "With --yes on staging: must equal staging.host from config",
       )
+      .option("--skip-simply-staging-dns", "[deprecated, no-op] DNS setup is no longer automatic")
       .action(
         async (opts: {
           dryRun?: boolean;
           backupLocal?: boolean;
-          skipSimplyStagingDns?: boolean;
           yes?: boolean;
           confirmHost?: string;
+          skipSimplyStagingDns?: boolean;
         }) => {
+          if (opts.skipSimplyStagingDns) {
+            console.error(
+              "Warning: --skip-simply-staging-dns is deprecated (DNS setup is no longer automatic during pull).",
+            );
+          }
           const dry = Boolean(opts.dryRun);
           const backupLocal = Boolean(opts.backupLocal);
-          const skipSimplyStagingDns = Boolean(opts.skipSimplyStagingDns);
           const yes = Boolean(opts.yes);
           const confirmHost = opts.confirmHost?.trim();
-          const label = `pull ${envName}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}${yes ? " --yes" : ""}${confirmHost ? ` --confirm-host ${confirmHost}` : ""}`;
+          const label = `pull ${envName}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${yes ? " --yes" : ""}${confirmHost ? ` --confirm-host ${confirmHost}` : ""}`;
           await runWithConfig(label, (loaded) =>
             cmdPull(loaded, envName, {
               dryRun: dry,
               backupLocal,
-              skipSimplyStagingDns,
               yes,
               confirmHost,
             }),

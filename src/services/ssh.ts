@@ -1,8 +1,13 @@
 import { NodeSSH } from "node-ssh";
 import { statSync } from "node:fs";
 import type { RemoteEnvConfig } from "../config/schema.js";
-import { buildSshConnectAttempts } from "../utils/ssh-helpers.js";
-import { logInfo } from "../utils/logger.js";
+import {
+  buildSshConnectAttempts,
+  checkSshPreflight,
+  formatSshAuthError,
+  type SshAttemptError,
+} from "../utils/ssh-helpers.js";
+import { logInfo, logWarn } from "../utils/logger.js";
 
 const SSH_READY_TIMEOUT_MS = 20_000;
 /** Keep the control channel alive during short gaps; still dispose before long rsync. */
@@ -20,10 +25,18 @@ export type SshSession = {
 };
 
 export async function connectSsh(remote: RemoteEnvConfig): Promise<SshSession> {
+  const preflight = checkSshPreflight(remote);
+  for (const warn of preflight.warnings) {
+    logWarn(`SSH: ${warn}`);
+  }
+  if (!preflight.ok) {
+    throw new Error(preflight.errors.join("\n"));
+  }
+
   const ssh = new NodeSSH();
   const attempts = buildSshConnectAttempts(remote);
 
-  const errors: string[] = [];
+  const attemptErrors: SshAttemptError[] = [];
   for (const a of attempts) {
     try {
       await ssh.connect({
@@ -32,17 +45,15 @@ export async function connectSsh(remote: RemoteEnvConfig): Promise<SshSession> {
         keepaliveInterval: SSH_KEEPALIVE_INTERVAL_MS,
         keepaliveCountMax: SSH_KEEPALIVE_COUNT_MAX,
       });
-      errors.length = 0;
+      attemptErrors.length = 0;
       break;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      errors.push(`${a.label}: ${msg}`);
+      attemptErrors.push({ label: a.label, message: msg });
     }
   }
-  if (errors.length > 0) {
-    throw new Error(
-      `SSH connection failed (${remote.user}@${remote.host}). Tried ${attempts.length} auth method(s): ${errors.join(" | ")}`,
-    );
+  if (attemptErrors.length > 0) {
+    throw new Error(formatSshAuthError(remote, attemptErrors));
   }
 
   // Late resets must not take down the whole CLI (e.g. after we intended to dispose).

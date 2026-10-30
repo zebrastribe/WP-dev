@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { minimalWpDevConfig } from "./helpers/fixtures.js";
@@ -66,6 +66,10 @@ describe("cmdPushTheme build-before-dry-run", () => {
       dispose: vi.fn(),
     });
     loaded = makeLoaded(mkdtempSync(join(tmpdir(), "wp-dev-theme-")));
+  });
+
+  afterEach(() => {
+    if (loaded?.configDir) rmSync(loaded.configDir, { recursive: true, force: true });
   });
 
   it("runs theme build when Preview uses --build even on dry-run", async () => {

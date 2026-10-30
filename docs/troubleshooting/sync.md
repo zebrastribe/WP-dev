@@ -6,7 +6,7 @@
 
 **Cause:** WP-CLI error on remote, wrong `path`, or permissions.
 
-**Fix:** Check `logs/wp-dev.log`. Run `doctor production`. Verify `wp` works on server.
+**Fix:** Check `logs/wp-dev.log`. Run `validate --remote staging`. Verify `wp` works on server.
 
 **Verify:** `npm run wp-dev -- status` shows WordPress installed.
 
