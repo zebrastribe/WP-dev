@@ -15,6 +15,8 @@ fi
 # 2. ttyd runs on container-internal loopback (127.0.0.1:17681) without -c
 # 3. ttyd uses --auth-header to trust the proxy's header after auth succeeds
 # 4. WPDEV_TERMINAL_AUTH is stripped from ttyd's environment (env -u)
+# 5. Proxy Origin check: same Host as the terminal tab (host-mapped port) OR
+#    WPDEV_TERMINAL_RUNNER_ORIGIN allowlist — NOT admin-only (terminal opens in its own tab)
 #
 # This approach was chosen because ttyd does not support credential files:
 # - Issue #1262: "Support --credential-file" (closed, not planned)

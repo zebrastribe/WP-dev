@@ -218,6 +218,40 @@ describe("ttyd-auth-proxy behavioral tests", () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it("accepts Origin matching request Host (terminal tab / host-mapped port)", async () => {
+    // Admin UI opens ttyd at http://127.0.0.1:<hostPort>/ — Origin is the terminal,
+    // not WPDEV_TERMINAL_RUNNER_ORIGIN (WordPress admin). Host may be the mapped
+    // publish port, not the in-container listen port.
+    const terminalOrigin = `http://127.0.0.1:${TEST_PORT}`;
+    const res = await httpRequest({
+      hostname: "127.0.0.1",
+      port: TEST_PORT,
+      path: "/",
+      method: "GET",
+      headers: {
+        Authorization: basicAuth(TEST_USER, TEST_PASS),
+        Origin: terminalOrigin,
+        Host: `127.0.0.1:${TEST_PORT}`,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("rejects Origin that matches neither Host nor allowlist", async () => {
+    const res = await httpRequest({
+      hostname: "127.0.0.1",
+      port: TEST_PORT,
+      path: "/",
+      method: "GET",
+      headers: {
+        Authorization: basicAuth(TEST_USER, TEST_PASS),
+        Origin: "http://127.0.0.1:65535",
+        Host: `127.0.0.1:${TEST_PORT}`,
+      },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
   it("allows request with no Origin header (curl/non-browser)", async () => {
     const res = await httpRequest({
       hostname: "127.0.0.1",

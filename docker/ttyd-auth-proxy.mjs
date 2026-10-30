@@ -96,24 +96,35 @@ function validateBasicAuth(authHeader) {
 }
 
 /**
- * Check Origin header for CSRF protection.
- * Only allows the exact configured origins (scheme+host+port must match).
- * Does NOT allow arbitrary localhost ports - the admin UI is on a specific port.
+ * Check Origin header for CSRF protection (ttyd -O semantics + optional allowlist).
+ *
+ * Terminal opens in its own tab at http://127.0.0.1:<hostMappedPort>/, so the
+ * browser WebSocket Origin is the *terminal* origin — not the WordPress admin
+ * origin. Matching Origin.host to the request Host header covers that case
+ * (host-mapped ports differ from the in-container listen port).
+ *
+ * WPDEV_TERMINAL_RUNNER_ORIGIN remains an optional allowlist (admin/CORS reuse).
+ * Missing Origin is allowed for curl/non-browser clients (Basic auth still required).
  */
-function validateOrigin(origin) {
+function validateOrigin(origin, requestHost) {
   if (!origin) {
-    // No origin header - allow (curl, non-browser clients)
     return true;
   }
 
-  // Must match one of the configured allowed origins exactly (scheme+host+port)
   try {
     const url = new URL(origin);
+
+    // Same-origin to this proxy as the browser sees it (Host header).
+    if (requestHost) {
+      const hostOnly = String(requestHost).split(",")[0].trim(); // strip extras
+      if (hostOnly && url.host === hostOnly) {
+        return true;
+      }
+    }
 
     for (const allowed of ALLOWED_ORIGINS) {
       try {
         const allowedUrl = new URL(allowed);
-        // Compare full origin (scheme://host:port)
         if (url.origin === allowedUrl.origin) {
           return true;
         }
@@ -253,8 +264,8 @@ function forwardWebSocketUpgrade(clientReq, clientSocket, head) {
 const server = http.createServer((req, res) => {
   // Validate Origin for CSRF protection
   const origin = req.headers["origin"];
-  if (!validateOrigin(origin)) {
-    console.error(`[ttyd-auth-proxy] Origin rejected: ${origin}`);
+  if (!validateOrigin(origin, req.headers["host"])) {
+    console.error(`[ttyd-auth-proxy] Origin rejected: ${origin} (Host: ${req.headers["host"]})`);
     return send403(res, "Origin not allowed");
   }
 
@@ -272,8 +283,8 @@ const server = http.createServer((req, res) => {
 server.on("upgrade", (req, socket, head) => {
   // Validate Origin
   const origin = req.headers["origin"];
-  if (!validateOrigin(origin)) {
-    console.error(`[ttyd-auth-proxy] WebSocket Origin rejected: ${origin}`);
+  if (!validateOrigin(origin, req.headers["host"])) {
+    console.error(`[ttyd-auth-proxy] WebSocket Origin rejected: ${origin} (Host: ${req.headers["host"]})`);
     socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
     socket.destroy();
     return;
