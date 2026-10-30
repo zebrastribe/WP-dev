@@ -1,19 +1,11 @@
 {
-  "$comment": "Docker image digests for reproducible builds. This is the SINGLE source of truth for image versions.",
-  "$updated": "2026-10-30",
+  "$comment": "Docker image digests for reproducible builds. SINGLE source of truth. Only include digests verified against the registry — never fabricate placeholders (pull would fail closed). Missing versions fall back to floating tags via image-digests.ts.",
+  "$updated": "2026-10-31",
   "wordpress": {
-    "php7.4-apache": "wordpress:php7.4-apache@sha256:0000000000000000000000000000000000000000000000000000000000000074",
-    "php8.0-apache": "wordpress:php8.0-apache@sha256:0000000000000000000000000000000000000000000000000000000000000080",
-    "php8.1-apache": "wordpress:php8.1-apache@sha256:0000000000000000000000000000000000000000000000000000000000000081",
-    "php8.2-apache": "wordpress:php8.2-apache@sha256:8ca746c43b29cc29258c2c9e420745daa88417fe5f9232220b69b8b1bbed15a7",
-    "php8.3-apache": "wordpress:php8.3-apache@sha256:0000000000000000000000000000000000000000000000000000000000000083"
+    "php8.2-apache": "wordpress:php8.2-apache@sha256:8ca746c43b29cc29258c2c9e420745daa88417fe5f9232220b69b8b1bbed15a7"
   },
   "wordpress-cli": {
-    "cli-php7.4": "wordpress:cli-php7.4@sha256:1000000000000000000000000000000000000000000000000000000000000074",
-    "cli-php8.0": "wordpress:cli-php8.0@sha256:1000000000000000000000000000000000000000000000000000000000000080",
-    "cli-php8.1": "wordpress:cli-php8.1@sha256:1000000000000000000000000000000000000000000000000000000000000081",
-    "cli-php8.2": "wordpress:cli-php8.2@sha256:a8eb972af44dd9600db6e6511b66a0c8d5300eb42bf8d3a2f7d2bbb0a95133fb",
-    "cli-php8.3": "wordpress:cli-php8.3@sha256:1000000000000000000000000000000000000000000000000000000000000083"
+    "cli-php8.2": "wordpress:cli-php8.2@sha256:a8eb972af44dd9600db6e6511b66a0c8d5300eb42bf8d3a2f7d2bbb0a95133fb"
   },
   "mysql": {
     "8.0": "mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b"

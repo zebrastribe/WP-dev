@@ -7,8 +7,11 @@ import {
   DEFAULT_PHP_VERSION,
   getWordPressImageWithDigest,
   getWpCliImageWithDigest,
+  isPlausibleImageDigestRef,
+  PINNED_PHP_VERSIONS,
   SUPPORTED_PHP_VERSIONS,
 } from "../src/utils/image-digests.js";
+
 
 describe("PHP version image selection", () => {
   const configDir = process.cwd();
@@ -20,12 +23,25 @@ describe("PHP version image selection", () => {
     expect(image).toContain("@sha256:");
   });
 
-  it("returns correct WordPress image for PHP 8.3", () => {
+  it("returns tag-only WordPress image for PHP 8.3 (no fabricated digest)", () => {
     const image = getWordPressImageWithDigest(configDir, "8.3");
-    expect(image).toContain("wordpress:");
-    expect(image).toContain("php8.3-apache");
-    // May or may not have digest depending on image-digests.json
+    expect(image).toBe("wordpress:php8.3-apache");
+    expect(image).not.toContain("@sha256:");
   });
+
+  it("rejects fabricated near-zero digests", () => {
+    expect(
+      isPlausibleImageDigestRef(
+        "wordpress:php8.3-apache@sha256:0000000000000000000000000000000000000000000000000000000000000083",
+      ),
+    ).toBe(false);
+    expect(
+      isPlausibleImageDigestRef(
+        "wordpress:php8.2-apache@sha256:8ca746c43b29cc29258c2c9e420745daa88417fe5f9232220b69b8b1bbed15a7",
+      ),
+    ).toBe(true);
+  });
+
 
   it("returns correct WP-CLI image for PHP 8.2", () => {
     const image = getWpCliImageWithDigest(configDir, "8.2");
@@ -116,29 +132,41 @@ WPDEV_HOST_HOME=/home/test
 });
 
 describe("image-digests.json", () => {
-  it("contains digests for all supported PHP versions", () => {
+  it("pins verified digests for PINNED_PHP_VERSIONS only (no fabricated placeholders)", () => {
     const digestsPath = join(process.cwd(), "docker/image-digests.json");
     expect(existsSync(digestsPath)).toBe(true);
-    
+
     const digests = JSON.parse(readFileSync(digestsPath, "utf8"));
-    
-    for (const version of SUPPORTED_PHP_VERSIONS) {
+
+    for (const version of PINNED_PHP_VERSIONS) {
       const wpKey = `php${version}-apache`;
       const cliKey = `cli-php${version}`;
-      
-      // Each supported version should have entries
       expect(digests.wordpress).toHaveProperty(wpKey);
       expect(digests["wordpress-cli"]).toHaveProperty(cliKey);
+      expect(isPlausibleImageDigestRef(digests.wordpress[wpKey])).toBe(true);
+      expect(isPlausibleImageDigestRef(digests["wordpress-cli"][cliKey])).toBe(true);
+    }
+
+    // Unpinned supported versions must not ship fake digests
+    for (const version of SUPPORTED_PHP_VERSIONS) {
+      if (PINNED_PHP_VERSIONS.includes(version)) continue;
+      expect(digests.wordpress[`php${version}-apache`]).toBeUndefined();
+      expect(digests["wordpress-cli"][`cli-php${version}`]).toBeUndefined();
     }
   });
 
-  it("digests are in correct format", () => {
+  it("every listed digest is plausible and correctly formatted", () => {
     const digestsPath = join(process.cwd(), "docker/image-digests.json");
     const digests = JSON.parse(readFileSync(digestsPath, "utf8"));
-    
-    // WordPress images should have @sha256: digests
-    for (const [key, value] of Object.entries(digests.wordpress as Record<string, string>)) {
+
+    for (const value of Object.values(digests.wordpress as Record<string, string>)) {
       expect(value).toMatch(/^wordpress:php[\d.]+-apache@sha256:[a-f0-9]{64}$/);
+      expect(isPlausibleImageDigestRef(value)).toBe(true);
+    }
+    for (const value of Object.values(digests["wordpress-cli"] as Record<string, string>)) {
+      expect(value).toMatch(/^wordpress:cli-php[\d.]+@sha256:[a-f0-9]{64}$/);
+      expect(isPlausibleImageDigestRef(value)).toBe(true);
     }
   });
 });
+

@@ -19,6 +19,21 @@ interface ImageDigests {
 let cachedDigests: ImageDigests | null = null;
 
 /**
+ * Reject placeholder/fabricated digests (e.g. sha256:0000…0074).
+ * A real sha256 hex digest is 64 chars and must not be near-all-zero padding.
+ */
+export function isPlausibleImageDigestRef(ref: string): boolean {
+  const m = /@sha256:([0-9a-fA-F]+)$/.exec(ref);
+  if (!m) return false;
+  const hex = m[1]!.toLowerCase();
+  if (hex.length !== 64) return false;
+  const nonzero = hex.replace(/0/g, "").length;
+  // Fabricated placeholders in earlier drafts used almost-all-zero digests.
+  if (nonzero < 8) return false;
+  return true;
+}
+
+/**
  * Load image digests from docker/image-digests.json.
  * Caches the result for subsequent calls.
  */
@@ -41,14 +56,15 @@ export function loadImageDigests(configDir: string): ImageDigests | null {
 
 /**
  * Get the WordPress image reference with digest for a PHP version.
- * Falls back to tag-only reference if digest not found.
+ * Falls back to tag-only reference if digest not found or looks fabricated.
  */
 export function getWordPressImageWithDigest(configDir: string, phpVersion: string): string {
   const digests = loadImageDigests(configDir);
   const key = `php${phpVersion}-apache`;
+  const ref = digests?.wordpress?.[key];
 
-  if (digests?.wordpress?.[key]) {
-    return digests.wordpress[key];
+  if (ref && isPlausibleImageDigestRef(ref)) {
+    return ref;
   }
 
   // Fallback to tag without digest
@@ -57,14 +73,15 @@ export function getWordPressImageWithDigest(configDir: string, phpVersion: strin
 
 /**
  * Get the WP-CLI image reference with digest for a PHP version.
- * Falls back to tag-only reference if digest not found.
+ * Falls back to tag-only reference if digest not found or looks fabricated.
  */
 export function getWpCliImageWithDigest(configDir: string, phpVersion: string): string {
   const digests = loadImageDigests(configDir);
   const key = `cli-php${phpVersion}`;
+  const ref = digests?.["wordpress-cli"]?.[key];
 
-  if (digests?.["wordpress-cli"]?.[key]) {
-    return digests["wordpress-cli"][key];
+  if (ref && isPlausibleImageDigestRef(ref)) {
+    return ref;
   }
 
   // Fallback to tag without digest
@@ -72,9 +89,15 @@ export function getWpCliImageWithDigest(configDir: string, phpVersion: string): 
 }
 
 /**
- * Supported PHP versions (those with digests in image-digests.json).
+ * PHP versions wp-dev can select (tag fallback when no verified digest is pinned).
  */
 export const SUPPORTED_PHP_VERSIONS = ["7.4", "8.0", "8.1", "8.2", "8.3"];
+
+/**
+ * PHP versions with verified digests in docker/image-digests.json.
+ * Prefer pinning new versions only after resolving a real registry digest.
+ */
+export const PINNED_PHP_VERSIONS = ["8.2"];
 
 /**
  * Default PHP version when not specified.
