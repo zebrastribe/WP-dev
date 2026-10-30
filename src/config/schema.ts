@@ -8,35 +8,32 @@ const remoteDbSchema = z.object({
   prefix: z.string().min(1).optional(),
 });
 
-/** Hostname / IP — reject spaces, shell metacharacters, schemes, and paths (dogfood injection canaries). */
+/**
+ * Hostname / IP — the regex exports to JSON Schema so PHP/ajv validate too.
+ * Friendly messages live in superRefine (not exported to schema).
+ */
 const sshHostSchema = z
   .string()
   .trim()
   .min(1)
-  .refine(
-    (s) => !/\s/.test(s),
-    { message: "must not contain whitespace" },
+  .regex(
+    /^[a-zA-Z0-9]([a-zA-Z0-9._:-]*[a-zA-Z0-9])?$/,
+    "must be a valid hostname (letters, digits, . _ : - only; start/end with alphanumeric)",
   )
-  .refine(
-    (s) => !/^https?:\/\//i.test(s),
-    { message: "must be a hostname, not a URL (remove http:// or https://)" },
-  )
-  .refine(
-    (s) => !/[;|&`$(){}[\]<>\\'"!#%^*~?\n\r]/.test(s),
-    { message: "must not contain shell metacharacters" },
-  )
-  .refine(
-    (s) => !s.includes("/"),
-    { message: "must be a hostname only (no path component)" },
-  )
-  .refine(
-    (s) => /^[a-zA-Z0-9]/.test(s) && /[a-zA-Z0-9]$/.test(s),
-    { message: "must start and end with a letter or digit" },
-  )
-  .refine(
-    (s) => /^[a-zA-Z0-9._:-]+$/.test(s),
-    { message: "must be a hostname or IP (letters, digits, . _ : - only)" },
-  );
+  .superRefine((s, ctx) => {
+    if (/\s/.test(s)) {
+      ctx.addIssue({ code: "custom", message: "must not contain whitespace" });
+    }
+    if (/^https?:\/\//i.test(s)) {
+      ctx.addIssue({ code: "custom", message: "must be a hostname, not a URL (remove http:// or https://)" });
+    }
+    if (/[;|&`$(){}[\]<>\\'"!#%^*~?\n\r]/.test(s)) {
+      ctx.addIssue({ code: "custom", message: "must not contain shell metacharacters" });
+    }
+    if (s.includes("/")) {
+      ctx.addIssue({ code: "custom", message: "must be a hostname only (no path component)" });
+    }
+  });
 
 const remoteEnvSchema = z.object({
   host: sshHostSchema,

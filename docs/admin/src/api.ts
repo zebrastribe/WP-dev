@@ -216,6 +216,7 @@ let syncRunnerPort = 7683;
 export type LoadWpDevConfigResult =
   | { status: "ok"; config: Record<string, unknown> }
   | { status: "missing" }
+  | { status: "unreadable"; detail: string }
   | { status: "invalid"; detail: string }
   | { status: "error"; detail: string };
 
@@ -261,6 +262,9 @@ export async function loadWpDevConfigDetailed(): Promise<LoadWpDevConfigResult> 
           ? o.detail
           : String(o.error ?? "invalid config");
       logAdmin("info", "loadWpDevConfig: API returned ok=false", detail);
+      if (res.status === 403 || o.error === "unreadable") {
+        return { status: "unreadable", detail };
+      }
       if (res.status === 422 || o.error === "invalid_json") {
         return { status: "invalid", detail };
       }
@@ -786,6 +790,7 @@ export type TerminalAction =
   | "wpdev_staging_http_auth_disable"
   | "backup_create"
   | "backup_list"
+  | "validate_restore_path"
   | "restore_env"
   | "git_status"
   | "git_log"

@@ -22,6 +22,8 @@ export type UpdatePreflight = {
   commitsBehind: number | null;
   forkWorkflowRecommended: boolean;
   warnings: string[];
+  /** Informational notes that are not warnings (e.g. stale fetch notice). */
+  info: string[];
   filesystemWarnings: string[];
   filesystemOk: boolean;
   updateLockHeld: boolean;
@@ -43,6 +45,7 @@ export async function collectUpdatePreflight(
   loaded?: LoadedConfig,
 ): Promise<UpdatePreflight> {
   const warnings: string[] = [];
+  const info: string[] = [];
   const filesystemWarnings = detectFilesystemWarnings(configDir);
   let filesystemOk = true;
   if (loaded) {
@@ -63,6 +66,7 @@ export async function collectUpdatePreflight(
       commitsBehind: null,
       forkWorkflowRecommended: false,
       warnings: ["Not a git repository — git pull will fail unless you use --skip-pull."],
+      info: [],
       filesystemWarnings,
       filesystemOk,
       updateLockHeld,
@@ -100,8 +104,8 @@ export async function collectUpdatePreflight(
   // based on the last fetch and may be stale. Run `git fetch` before preflight
   // for accurate counts, or let the actual update fetch when it runs.
   if (upstream && (commitsAhead != null || commitsBehind != null)) {
-    warnings.push(
-      "Note: behind/ahead counts are based on last fetch (preflight does not fetch). Run `git fetch origin` for accurate counts.",
+    info.push(
+      "Behind/ahead counts are based on last fetch (preflight does not fetch). Run `git fetch origin` for accurate counts.",
     );
   }
 
@@ -136,6 +140,7 @@ export async function collectUpdatePreflight(
     commitsBehind,
     forkWorkflowRecommended,
     warnings,
+    info,
     filesystemWarnings,
     filesystemOk,
     updateLockHeld,

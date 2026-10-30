@@ -246,6 +246,18 @@ function commandForAction(action, args) {
     }
     return `mkdir -p ${base}; OUT="$(ls -1t ${base}/db-*.sql ${base}/pre-*.sql 2>/dev/null | awk '!seen[$0]++' | head -n 30 || true)"; if [ -z "$OUT" ]; then echo "No database backups found for ${project}/${env}."; else printf "%s\\n" "$OUT"; fi`;
   }
+  if (action === "validate_restore_path") {
+    const env = safeArg(args?.env);
+    const file = safeArg(args?.file);
+    const project = readProjectId();
+    if (!["local", "staging", "production"].includes(env) || !file || !project) return null;
+    if (file.includes("..")) return null;
+    return [
+      `FILE_REAL="$(realpath -e ${file} 2>/dev/null || true)"`,
+      'if [ -z "$FILE_REAL" ]; then echo "INVALID: file not found"; exit 1; fi',
+      `case "$FILE_REAL" in "$HOME"/.wp-dev/backups/${project}/${env}/*) echo "VALID: $FILE_REAL";; *) echo "INVALID: must be under ~/.wp-dev/backups/${project}/${env}/"; exit 1;; esac`,
+    ].join("; ");
+  }
   if (action === "restore_env") {
     const env = safeArg(args?.env);
     const file = safeArg(args?.file);
@@ -291,6 +303,37 @@ function commandForAction(action, args) {
     return `git -c safe.directory=/workspace reset --hard ${commit} && git -c safe.directory=/workspace status --short`;
   }
   return null;
+}
+
+function describeRefusal(action, args) {
+  if (action === "wpdev_pull" || action === "wpdev_push") {
+    const env = safeArg(args?.env);
+    const confirm = safeArg(args?.confirm);
+    if (!["staging", "production"].includes(env)) return `invalid env "${args?.env}"`;
+    if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production sync requires SYNC_PRODUCTION confirm token";
+    if (env === "staging" && !confirm) return "staging sync requires --confirm-host";
+    return "invalid args";
+  }
+  if (action === "wpdev_push_theme") {
+    const env = safeArg(args?.env);
+    const confirm = safeArg(args?.confirm);
+    if (!["staging", "production"].includes(env)) return `invalid env "${args?.env}"`;
+    if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production theme push requires SYNC_PRODUCTION confirm token";
+    if (env === "staging" && !confirm) return "staging theme push requires --confirm-host";
+    return "invalid args";
+  }
+  if (action === "restore_env") {
+    const env = safeArg(args?.env);
+    const file = safeArg(args?.file);
+    const confirm = safeArg(args?.confirm);
+    if (!["local", "staging", "production"].includes(env)) return `invalid env "${args?.env}"`;
+    if (!file) return "missing backup file";
+    if (file.includes("..")) return "backup path contains ..";
+    if (env === "production" && confirm !== "RESTORE_PRODUCTION") return "production restore requires RESTORE_PRODUCTION confirm token";
+    if (env === "staging" && !confirm) return "staging restore requires confirm host token";
+    return "invalid args";
+  }
+  return `unknown action "${action}"`;
 }
 
 function startJob(command) {
@@ -467,7 +510,9 @@ const server = http.createServer(async (req, res) => {
       const action = typeof data.action === "string" ? data.action : "";
       const command = commandForAction(action, data.args || {});
       if (!command) {
-        json(req, res, 400, { ok: false, error: "invalid_action_or_args" });
+        const reason = describeRefusal(action, data.args || {});
+        console.error(`[terminal-runner] action refused: ${action} - ${reason}`);
+        json(req, res, 400, { ok: false, error: "invalid_action_or_args", reason });
         return;
       }
       const jobId = startJob(command);

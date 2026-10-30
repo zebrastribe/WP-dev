@@ -71,15 +71,12 @@ describe("wp-dev update", () => {
     }
   });
 
-  it("buildUpdateSteps uses --autostash which preserves existing stashes", () => {
+  it("buildUpdateSteps uses --autostash for safe rebasing", () => {
     const steps = buildUpdateSteps({});
     const pullStep = steps.find((s) => s.shell.includes("git"));
     expect(pullStep).toBeDefined();
     expect(pullStep!.shell).toContain("--autostash");
-    // Git's --autostash uses a separate mechanism from manual stashes.
-    // It creates a temporary stash before rebase and applies it after,
-    // without affecting the regular stash stack. This test documents
-    // that we use --autostash which is safe with existing stashes.
+    expect(pullStep!.shell).toContain("--rebase");
   });
 });
 
@@ -102,8 +99,10 @@ describe("update preflight", () => {
 
       const preflight = await collectUpdatePreflight(configDir);
       expect(preflight.isGitRepo).toBe(true);
-      // Should warn about stale fetch
-      expect(preflight.warnings.some((w) => w.includes("preflight does not fetch"))).toBe(true);
+      // Should note about stale fetch (info, not warning)
+      expect(preflight.info.some((n) => n.includes("preflight does not fetch"))).toBe(true);
+      // Should not be in warnings
+      expect(preflight.warnings.some((w) => w.includes("preflight does not fetch"))).toBe(false);
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }

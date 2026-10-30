@@ -92,6 +92,7 @@ services:
       context: .
       dockerfile: terminal.Dockerfile
     restart: unless-stopped
+    init: true
     ports:
       - "127.0.0.1:${WPDEV_TERMINAL_PORT:-7681}:7681"
       - "127.0.0.1:${WPDEV_TERMINAL_RUNNER_PORT:-7682}:7682"

@@ -214,6 +214,26 @@ function commandForAction(action, args) {
   return null;
 }
 
+function describeRefusal(action, args) {
+  if (action === "wpdev_pull" || action === "wpdev_push") {
+    const env = safeArg(args?.env);
+    const confirm = safeArg(args?.confirm);
+    if (!["staging", "production"].includes(env)) return `invalid env "${args?.env}"`;
+    if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production sync requires SYNC_PRODUCTION confirm token";
+    if (env === "staging" && !confirm) return "staging sync requires --confirm-host";
+    return "invalid args";
+  }
+  if (action === "wpdev_push_theme") {
+    const env = safeArg(args?.env);
+    const confirm = safeArg(args?.confirm);
+    if (!["staging", "production"].includes(env)) return `invalid env "${args?.env}"`;
+    if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production theme push requires SYNC_PRODUCTION confirm token";
+    if (env === "staging" && !confirm) return "staging theme push requires --confirm-host";
+    return "invalid args";
+  }
+  return `unknown action "${action}"`;
+}
+
 function startJob(command) {
   const id = randomUUID();
   const job = {
@@ -390,7 +410,9 @@ const server = http.createServer(async (req, res) => {
       const action = typeof data.action === "string" ? data.action : "";
       const command = commandForAction(action, data.args || {});
       if (!command) {
-        json(req, res, 400, { ok: false, error: "invalid_action_or_args" });
+        const reason = describeRefusal(action, data.args || {});
+        console.error(`[host-runner] action refused: ${action} - ${reason}`);
+        json(req, res, 400, { ok: false, error: "invalid_action_or_args", reason });
         return;
       }
       const jobId = startJob(command);

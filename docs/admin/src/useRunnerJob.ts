@@ -32,6 +32,7 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
   const outputRef = useRef<HTMLPreElement>(null);
   const activeJobIdRef = useRef<string | null>(null);
   const abortRef = useRef(false);
+  const reattachAbortRef = useRef(false);
   const reattachAttemptedRef = useRef(false);
 
   useEffect(() => {
@@ -42,10 +43,11 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
   useEffect(() => {
     if (!canRun || reattachAttemptedRef.current) return;
     reattachAttemptedRef.current = true;
+    reattachAbortRef.current = false;
 
     void (async () => {
       const res = await getRunnerActiveJob(runnerKind);
-      if (!res.ok || !res.activeJob) return;
+      if (!res.ok || !res.activeJob || reattachAbortRef.current) return;
       
       const activeJob = res.activeJob;
       if (activeJob.status !== "running") return;
@@ -62,10 +64,17 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
       });
 
       for (let i = 0; i < 1800; i += 1) {
-        if (abortRef.current) return;
+        if (abortRef.current || reattachAbortRef.current) return;
 
         const st = await getTerminalJobStatus(activeJob.id, runnerKind);
         if (!st.ok) {
+          // Match run()'s transient error handling
+          const transient =
+            /runner_secrets_unavailable|runner_unreachable/i.test(st.error || "");
+          if (transient && i < 1795) {
+            await new Promise((r) => window.setTimeout(r, 1000));
+            continue;
+          }
           setJob((prev) => ({
             ...prev,
             phase: "error",
@@ -79,6 +88,18 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
 
         if (st.status === "done") {
           activeJobIdRef.current = null;
+          // Exit 130 means cancelled
+          if (st.exitCode === 130) {
+            setJob({
+              phase: "cancelled",
+              output: st.output || "",
+              exitCode: 130,
+              error: "Stopped by user",
+              label: st.command || activeJob.command || "",
+              startedAt,
+            });
+            return;
+          }
           const ok = st.exitCode === 0;
           setJob({
             phase: ok ? "success" : "error",
@@ -138,6 +159,8 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
         return { ok: false, output: error };
       }
 
+      // Cancel any ongoing re-attach to avoid race on activeJobIdRef and setJob
+      reattachAbortRef.current = true;
       abortRef.current = false;
       activeJobIdRef.current = null;
       const startedAt = Date.now();

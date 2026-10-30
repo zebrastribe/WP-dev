@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   mkdirSync,
   mkdtempSync,
@@ -7,13 +7,28 @@ import {
   symlinkSync,
 } from "node:fs";
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { assertRestoreBackupPath } from "../src/utils/restore-path.js";
 
 describe("assertRestoreBackupPath", () => {
   const project = "lock-test-site";
   const env = "staging";
-  const root = join(homedir(), ".wp-dev", "backups", project, env);
+  let tempHome: string;
+  let originalHome: string | undefined;
+  let root: string;
+
+  beforeAll(() => {
+    // Use temp dir to avoid writing to real $HOME/.wp-dev
+    tempHome = mkdtempSync(join(tmpdir(), "wp-dev-restore-test-"));
+    originalHome = process.env.HOME;
+    process.env.HOME = tempHome;
+    root = join(tempHome, ".wp-dev", "backups", project, env);
+  });
+
+  afterAll(() => {
+    process.env.HOME = originalHome;
+    rmSync(tempHome, { recursive: true, force: true });
+  });
 
   it("accepts a file under ~/.wp-dev/backups/<project>/<env>/", () => {
     mkdirSync(root, { recursive: true });
@@ -36,7 +51,7 @@ describe("assertRestoreBackupPath", () => {
   });
 
   it("refuses a backup for a different env under the same project", () => {
-    const prodRoot = join(homedir(), ".wp-dev", "backups", project, "production");
+    const prodRoot = join(tempHome, ".wp-dev", "backups", project, "production");
     mkdirSync(prodRoot, { recursive: true });
     const file = join(prodRoot, "db-prod.sql");
     writeFileSync(file, "-- prod\n");

@@ -733,10 +733,23 @@ if ($method === 'POST' && $action === 'logout') {
 
 if ($method === 'GET' && $action === 'load') {
     wpdev_require_admin_token($token, 'GET load');
-    if (!is_file($configPath) || !is_readable($configPath)) {
+    if (!file_exists($configPath)) {
         http_response_code(404);
         echo json_encode(['ok' => false, 'error' => 'not_found'], JSON_UNESCAPED_SLASHES);
         wpdev_admin_api_log('GET load 404 not_found');
+        exit;
+    }
+    if (!is_file($configPath) || !is_readable($configPath)) {
+        http_response_code(403);
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => 'unreadable',
+                'detail' => 'wp-dev.config.json exists but is not readable. Check file permissions.',
+            ],
+            JSON_UNESCAPED_SLASHES,
+        );
+        wpdev_admin_api_log('GET load 403 unreadable');
         exit;
     }
     $raw = file_get_contents($configPath);

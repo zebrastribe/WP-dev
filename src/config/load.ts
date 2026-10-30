@@ -26,73 +26,36 @@ export function formatConfigFileError(path: string, err: unknown): Error {
   return new Error(`${path}: ${String(err)}`);
 }
 
-/** Result of attempting to read and parse the config file. */
-export type ConfigReadResult =
-  | { status: "ok"; raw: unknown; path: string }
-  | { status: "not_found"; path: string }
-  | { status: "parse_error"; path: string; error: string }
-  | { status: "validation_error"; path: string; error: string };
+/** Known keys at each level of the config schema. */
+const KNOWN_KEYS: Record<string, Set<string>> = {
+  "": new Set(["$schema", "project", "local", "staging", "production", "simply", "sync", "importWorkspace"]),
+  local: new Set(["url", "path", "composeFile", "composeProjectName", "composeService", "wpRoot", "themePath", "themeSlug"]),
+  staging: new Set(["host", "user", "path", "url", "port", "identityFile", "db", "httpAuth"]),
+  production: new Set(["host", "user", "path", "url", "port", "identityFile", "db"]),
+  simply: new Set(["account"]),
+  sync: new Set(["plugins", "localOnlyPlugins", "themes", "disabledRecommended", "extraPushExcludes", "extraPullExcludes", "skipUploadsOnPush", "recommendationsDismissed"]),
+  importWorkspace: new Set(["enabled", "localUrl", "storagePath", "knowledgeBasePath", "deployPath", "tokenEnvVar"]),
+  "staging.db": new Set(["host", "name", "user", "password", "prefix"]),
+  "production.db": new Set(["host", "name", "user", "password", "prefix"]),
+  "staging.httpAuth": new Set(["enabled", "username", "password"]),
+};
 
-/** Read and parse config without throwing - for UI to show specific errors. */
-export function readConfigFile(configDir: string): ConfigReadResult {
-  const path = join(configDir, "wp-dev.config.json");
-  if (!existsSync(path)) {
-    return { status: "not_found", path };
-  }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
-  } catch (e) {
-    const msg = e instanceof SyntaxError ? e.message : String(e);
-    return { status: "parse_error", path, error: `Invalid JSON: ${msg}` };
-  }
-  try {
-    wpDevConfigSchema.parse(raw);
-    return { status: "ok", raw, path };
-  } catch (e) {
-    if (e instanceof ZodError) {
-      const lines = e.issues.map((issue) => {
-        const where = issue.path.length > 0 ? issue.path.join(".") : "(root)";
-        return `${where}: ${issue.message}`;
-      });
-      return { status: "validation_error", path, error: lines.join("; ") };
-    }
-    return { status: "validation_error", path, error: String(e) };
-  }
-}
-
-/** Check if the config file can be parsed as valid JSON. */
-export function isConfigFileReadable(configDir: string): boolean {
-  const path = join(configDir, "wp-dev.config.json");
-  if (!existsSync(path)) return false;
-  try {
-    JSON.parse(readFileSync(path, "utf8"));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Known top-level keys in the config schema. */
-const KNOWN_CONFIG_KEYS = new Set([
-  "project",
-  "local",
-  "staging",
-  "production",
-  "simply",
-  "sync",
-  "importWorkspace",
-]);
-
-/** Detect unknown top-level keys (potential typos). */
-export function detectUnknownConfigKeys(raw: unknown): string[] {
+/** Detect unknown keys at all levels (potential typos). Returns array of "path.key" strings. */
+export function detectUnknownConfigKeys(raw: unknown, path = ""): string[] {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return [];
   }
   const unknown: string[] = [];
+  const knownAtLevel = KNOWN_KEYS[path] ?? new Set<string>();
   for (const key of Object.keys(raw)) {
-    if (!KNOWN_CONFIG_KEYS.has(key)) {
-      unknown.push(key);
+    const fullPath = path ? `${path}.${key}` : key;
+    if (!knownAtLevel.has(key)) {
+      unknown.push(fullPath);
+    }
+    // Recurse into nested objects (but not into record types like sync.plugins or sync.themes)
+    const val = (raw as Record<string, unknown>)[key];
+    if (val && typeof val === "object" && !Array.isArray(val) && KNOWN_KEYS[fullPath]) {
+      unknown.push(...detectUnknownConfigKeys(val, fullPath));
     }
   }
   return unknown;
@@ -133,6 +96,13 @@ export function loadConfig(cwd = process.cwd()): LoadedConfig {
     raw = JSON.parse(readFileSync(path, "utf8"));
   } catch (e) {
     throw formatConfigFileError(path, e);
+  }
+  // Warn about unknown keys (typos) before validation
+  const unknownKeys = detectUnknownConfigKeys(raw);
+  if (unknownKeys.length > 0) {
+    console.error(
+      `[wp-dev] Warning: unknown keys in ${path}: ${unknownKeys.join(", ")} (possible typo)`,
+    );
   }
   try {
     const config = wpDevConfigSchema.parse(raw);

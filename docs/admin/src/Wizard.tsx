@@ -461,7 +461,19 @@ export function Wizard() {
           } else {
             setAlert(null);
           }
+        } else if (loadedResult.status === "unreadable") {
+          logAdmin("warn", "Wizard: config file exists but is unreadable");
+          setAlert({
+            tone: "error",
+            text: `wp-dev.config.json exists but is not readable: ${loadedResult.detail}`,
+          });
+        } else if (loadedResult.status === "error") {
+          setAlert({
+            tone: "error",
+            text: `Could not load wp-dev.config.json: ${loadedResult.detail}`,
+          });
         } else {
+          // status is "missing" - try localStorage draft or show defaults
           const raw = localStorage.getItem(DRAFT_KEY);
           if (raw) {
             try {
@@ -477,16 +489,11 @@ export function Wizard() {
             } catch (e) {
               logAdmin("warn", "Wizard: draft in localStorage is invalid JSON", e instanceof Error ? e.message : "");
             }
-          } else if (loadedResult.status === "missing") {
+          } else {
             logAdmin("info", "Wizard: no server config and no draft — using defaults");
             setAlert({
               tone: "info",
-              text: "No wp-dev.config.json on the server yet (or not readable). Defaults are shown — complete the steps and save.",
-            });
-          } else if (loadedResult.status === "error") {
-            setAlert({
-              tone: "error",
-              text: `Could not load wp-dev.config.json: ${loadedResult.detail}`,
+              text: "No wp-dev.config.json on the server yet. Defaults are shown — complete the steps and save.",
             });
           }
         }
