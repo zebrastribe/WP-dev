@@ -78,12 +78,15 @@ describe("network-config utilities", () => {
   });
 
   describe("deriveBindLocal", () => {
-    it("returns true for localhost bindings", () => {
+    it("returns true for explicit localhost bindings", () => {
       expect(deriveBindLocal("127.0.0.1")).toBe(true);
       expect(deriveBindLocal("::1")).toBe(true);
       expect(deriveBindLocal("localhost")).toBe(true);
-      expect(deriveBindLocal("")).toBe(true); // Empty defaults to localhost
-      expect(deriveBindLocal(undefined)).toBe(true);
+    });
+
+    it("returns false for empty/undefined (Docker default = all interfaces)", () => {
+      expect(deriveBindLocal("")).toBe(false);
+      expect(deriveBindLocal(undefined)).toBe(false);
     });
 
     it("returns false for non-localhost bindings", () => {
@@ -127,6 +130,9 @@ describe("network-config utilities", () => {
   });
 });
 
+// In CI, PHP must be available - tests should fail, not silently skip
+const isCI = process.env.CI === "true" || process.env.CI === "1";
+
 describe("PHP gate logic (real PHP execution)", () => {
   let tmpDir: string;
   let phpFile: string;
@@ -139,6 +145,9 @@ describe("PHP gate logic (real PHP execution)", () => {
       phpAvailable = true;
     } catch {
       phpAvailable = false;
+      if (isCI) {
+        throw new Error("PHP is required in CI but not available. Install PHP or add setup-php to CI workflow.");
+      }
     }
 
     if (!phpAvailable) return;
@@ -147,9 +156,11 @@ describe("PHP gate logic (real PHP execution)", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "wpdev-gate-test-"));
     phpFile = join(tmpDir, "test-gate.php");
 
-    // Copy the auth-session.inc.php content for testing
+    // Read the auth-session.inc.php content and strip the opening <?php tag
     const authSessionPath = join(process.cwd(), "docs/admin/public/auth-session.inc.php");
-    const authSessionContent = readFileSync(authSessionPath, "utf8");
+    let authSessionContent = readFileSync(authSessionPath, "utf8");
+    // Remove leading <?php (with optional whitespace/newline after)
+    authSessionContent = authSessionContent.replace(/^<\?php\s*\n?/, "");
 
     // Create a test harness that includes the functions and runs tests
     const testHarness = `<?php

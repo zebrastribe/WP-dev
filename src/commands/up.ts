@@ -17,16 +17,18 @@ import {
   resolveHostProjectRoot,
 } from "../utils/host-paths.js";
 import {
-  DEFAULT_SUBNET_PREFIX,
   deriveBindLocal,
   deriveNetworkIps,
   findAvailableSubnet,
   generateRemoteIpConf,
   getDockerNetworkGateway,
   getDockerNetworkSubnet,
+  getSubnetPoolPrefix,
   dockerNetworkExists,
+  listDockerNetworkSubnets,
+  subnetsOverlap,
 } from "../utils/network-config.js";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -131,11 +133,13 @@ function ensureNetworkConfig(
     }
   } else {
     // Find an available subnet that doesn't conflict with other Docker networks
-    const available = findAvailableSubnet(DEFAULT_SUBNET_PREFIX);
+    // Uses WPDEV_SUBNET_POOL env var if set, otherwise default prefix from network-config
+    const available = findAvailableSubnet();
     if (!available) {
+      const poolPrefix = getSubnetPoolPrefix();
       throw new Error(
-        `Could not find available subnet in ${DEFAULT_SUBNET_PREFIX}.0.0/16 range. ` +
-          `Set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY manually in docker/.env.`,
+        `Could not find available subnet in ${poolPrefix}.0.0/16 range. ` +
+          `Override with WPDEV_SUBNET_POOL or set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY manually in docker/.env.`,
       );
     }
     const derived = deriveNetworkIps(available);
@@ -181,8 +185,10 @@ function ensureNetworkConfig(
 }
 
 /**
- * Derive bind-local flag from WP_BIND value.
- * Only set if not explicitly configured by user.
+ * Ensure WP_BIND and WPDEV_WP_BIND_LOCAL are correctly set.
+ * - WP_BIND defaults to 127.0.0.1 (secure)
+ * - WPDEV_WP_BIND_LOCAL is ALWAYS derived from actual WP_BIND value
+ * - User can force BIND_LOCAL=0 but never force 1 with non-loopback bind
  */
 function ensureBindLocalConfig(
   current: string,
@@ -191,27 +197,34 @@ function ensureBindLocalConfig(
   let changed = false;
   const changedKeys: string[] = [];
 
-  const wpBind = readEnvValue(current, "WP_BIND");
+  let wpBind = readEnvValue(current, "WP_BIND");
   const existingBindLocal = readEnvValue(current, "WPDEV_WP_BIND_LOCAL");
 
-  // If user explicitly set WPDEV_WP_BIND_LOCAL, respect it
-  if (existingBindLocal === "0" || existingBindLocal === "1") {
-    return { next, changed, changedKeys };
-  }
-
-  // Derive from WP_BIND
-  const isLocal = deriveBindLocal(wpBind);
-  const bindLocalValue = isLocal ? "1" : "0";
-
-  // Set WP_BIND to 127.0.0.1 if not set (secure default)
-  if (!wpBind) {
-    next = setEnvValueInContent(next, "WP_BIND", "127.0.0.1");
+  // Always set WP_BIND to 127.0.0.1 if not set (secure default)
+  if (!wpBind || wpBind.trim() === "") {
+    wpBind = "127.0.0.1";
+    next = setEnvValueInContent(next, "WP_BIND", wpBind);
     changed = true;
     changedKeys.push("WP_BIND");
   }
 
-  if (readEnvValue(next, "WPDEV_WP_BIND_LOCAL") !== bindLocalValue) {
-    next = setEnvValueInContent(next, "WPDEV_WP_BIND_LOCAL", bindLocalValue);
+  // ALWAYS derive bind-local from actual WP_BIND (recompute on every up)
+  const isLocal = deriveBindLocal(wpBind);
+  const derivedBindLocal = isLocal ? "1" : "0";
+
+  // User can force 0 (disable auto-unlock) but NEVER force 1 with non-loopback bind
+  let finalBindLocal = derivedBindLocal;
+  if (existingBindLocal === "0") {
+    // User explicitly disabled auto-unlock - respect it
+    finalBindLocal = "0";
+  } else if (existingBindLocal === "1" && !isLocal) {
+    // User tried to force 1 with non-loopback bind - override to 0 (security)
+    finalBindLocal = "0";
+    logInfo("up: WP_BIND is not localhost, forcing WPDEV_WP_BIND_LOCAL=0");
+  }
+
+  if (readEnvValue(next, "WPDEV_WP_BIND_LOCAL") !== finalBindLocal) {
+    next = setEnvValueInContent(next, "WPDEV_WP_BIND_LOCAL", finalBindLocal);
     changed = true;
     changedKeys.push("WPDEV_WP_BIND_LOCAL");
   }
@@ -221,14 +234,33 @@ function ensureBindLocalConfig(
 
 /**
  * Generate remoteip.conf to restrict X-Forwarded-For trust.
+ * Must be called BEFORE compose runs - if missing, Docker creates a directory.
+ *
+ * @param sslEnabled Whether SSL profile is enabled (only trust proxy when SSL is on)
  */
-function ensureRemoteIpConf(loaded: LoadedConfig, sslProxyIp: string | null): void {
+function ensureRemoteIpConf(loaded: LoadedConfig, sslProxyIp: string | null, sslEnabled: boolean): void {
   const confPath = join(loaded.configDir, "docker/remoteip.conf");
-  const content = generateRemoteIpConf(sslProxyIp);
+
+  // Detect if Docker created a directory (happens if compose ran without the file)
+  if (existsSync(confPath)) {
+    const stat = statSync(confPath);
+    if (stat.isDirectory()) {
+      throw new Error(
+        `docker/remoteip.conf is a directory (Docker created it because the file was missing). ` +
+          `Remove it and run wp-dev up again: rm -rf "${confPath}"`,
+      );
+    }
+  }
+
+  // Only trust the SSL proxy IP when SSL profile is enabled
+  // When SSL is off, trust no proxy (any container could get .10 IP)
+  const trustedProxyIp = sslEnabled ? sslProxyIp : null;
+  const content = generateRemoteIpConf(trustedProxyIp);
+
   const existing = existsSync(confPath) ? readFileSync(confPath, "utf8") : "";
   if (existing !== content) {
     writeFileSync(confPath, content, "utf8");
-    logInfo("up: generated docker/remoteip.conf");
+    logInfo(`up: generated docker/remoteip.conf (ssl=${sslEnabled ? "on" : "off"})`);
   }
 }
 
@@ -325,8 +357,9 @@ function ensureSecurityEnvDefaults(loaded: LoadedConfig, envPath: string): void 
     changedKeys.push(...bindResult.changedKeys);
   }
 
-  // Generate remoteip.conf with the SSL proxy IP
-  ensureRemoteIpConf(loaded, networkResult.networkInfo?.sslProxyIp || null);
+  // Generate remoteip.conf - only trust proxy IP when SSL profile is enabled
+  const sslEnabled = /^(1|true|yes)$/i.test(readEnvValue(next, "WPDEV_LOCAL_HTTPS") || "");
+  ensureRemoteIpConf(loaded, networkResult.networkInfo?.sslProxyIp || null, sslEnabled);
 
   if (changed) {
     persistEnvContent(envPath, next, loaded);

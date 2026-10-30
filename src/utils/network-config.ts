@@ -5,7 +5,7 @@
  * or from the actual Docker network state.
  */
 
-import { execSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 /**
  * Default subnet prefix for wp-dev networks. Each stack gets a unique /24 subnet
@@ -87,28 +87,39 @@ export function deriveNetworkIps(subnet: string): NetworkInfo | null {
 }
 
 /**
- * List existing Docker networks and their subnets.
+ * List existing Docker networks and their IPv4 subnets.
+ * Returns a map of network name -> array of IPv4 subnets (handles dual-stack).
  */
-export function listDockerNetworkSubnets(): Map<string, string> {
-  const result = new Map<string, string>();
+export function listDockerNetworkSubnets(): Map<string, string[]> {
+  const result = new Map<string, string[]>();
   try {
-    const output = execSync(
-      'docker network ls --format "{{.Name}}" 2>/dev/null',
+    const output = execFileSync(
+      "docker",
+      ["network", "ls", "--format", "{{.Name}}"],
       { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
     );
     const names = output.trim().split("\n").filter(Boolean);
     for (const name of names) {
       try {
-        const inspect = execSync(
-          `docker network inspect "${name}" --format "{{range .IPAM.Config}}{{.Subnet}}{{end}}" 2>/dev/null`,
+        // Use JSON output for reliable parsing of multiple subnets
+        const inspect = execFileSync(
+          "docker",
+          ["network", "inspect", name, "--format", "{{json .IPAM.Config}}"],
           { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
         );
-        const subnet = inspect.trim();
-        if (subnet) {
-          result.set(name, subnet);
+        const configs = JSON.parse(inspect.trim()) as Array<{ Subnet?: string }>;
+        const ipv4Subnets: string[] = [];
+        for (const cfg of configs) {
+          if (cfg.Subnet && !cfg.Subnet.includes(":")) {
+            // IPv4 only (no colons)
+            ipv4Subnets.push(cfg.Subnet);
+          }
+        }
+        if (ipv4Subnets.length > 0) {
+          result.set(name, ipv4Subnets);
         }
       } catch {
-        // Network may have been removed
+        // Network may have been removed or inspect failed
       }
     }
   } catch {
@@ -139,16 +150,49 @@ export function subnetsOverlap(a: string, b: string): boolean {
 }
 
 /**
- * Find an available /24 subnet that doesn't overlap with existing Docker networks.
- * Returns a subnet in the form "172.28.X.0/24".
+ * Get the subnet pool prefix from environment or use default.
+ * Override via WPDEV_SUBNET_POOL env var.
  */
-export function findAvailableSubnet(prefix: string = DEFAULT_SUBNET_PREFIX): string | null {
+export function getSubnetPoolPrefix(): string {
+  const fromEnv = process.env.WPDEV_SUBNET_POOL?.trim();
+  if (fromEnv && /^\d+\.\d+$/.test(fromEnv)) {
+    return fromEnv;
+  }
+  return DEFAULT_SUBNET_PREFIX;
+}
+
+/**
+ * Find an available /24 subnet that doesn't overlap with existing Docker networks.
+ * Returns a subnet in the form "{prefix}.X.0/24" or null if none available.
+ *
+ * The prefix can be overridden via WPDEV_SUBNET_POOL env var.
+ */
+export function findAvailableSubnet(prefix?: string): string | null {
+  const poolPrefix = prefix ?? getSubnetPoolPrefix();
   const existing = listDockerNetworkSubnets();
-  const existingSubnets = Array.from(existing.values());
+
+  // Flatten all subnets from all networks
+  const existingSubnets: string[] = [];
+  for (const subnets of existing.values()) {
+    existingSubnets.push(...subnets);
+  }
+
+  // Check if the entire pool /16 is already taken by another network
+  const poolRange = `${poolPrefix}.0.0/16`;
+  for (const subnet of existingSubnets) {
+    // If someone has the exact /16 or a larger block containing our pool
+    if (subnet === poolRange || subnetsOverlap(poolRange, subnet)) {
+      const parsed = parseSubnet(subnet);
+      if (parsed && parsed.prefix <= 16) {
+        // A /16 or larger block covers our entire pool
+        return null;
+      }
+    }
+  }
 
   // Try third octets 1-254 (skip 0 and 255)
   for (let third = 1; third < 255; third++) {
-    const candidate = `${prefix}.${third}.0/24`;
+    const candidate = `${poolPrefix}.${third}.0/24`;
     const hasOverlap = existingSubnets.some((s) => subnetsOverlap(candidate, s));
     if (!hasOverlap) {
       return candidate;
@@ -158,32 +202,46 @@ export function findAvailableSubnet(prefix: string = DEFAULT_SUBNET_PREFIX): str
 }
 
 /**
- * Get the actual gateway IP of an existing Docker network.
+ * Get the actual gateway IP of an existing Docker network (IPv4 only).
  */
 export function getDockerNetworkGateway(networkName: string): string | null {
   try {
-    const output = execSync(
-      `docker network inspect "${networkName}" --format "{{range .IPAM.Config}}{{.Gateway}}{{end}}" 2>/dev/null`,
+    const output = execFileSync(
+      "docker",
+      ["network", "inspect", networkName, "--format", "{{json .IPAM.Config}}"],
       { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
     );
-    const gateway = output.trim();
-    return gateway || null;
+    const configs = JSON.parse(output.trim()) as Array<{ Gateway?: string; Subnet?: string }>;
+    // Find the first IPv4 config with a gateway
+    for (const cfg of configs) {
+      if (cfg.Gateway && !cfg.Gateway.includes(":")) {
+        return cfg.Gateway;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
 /**
- * Get the subnet of an existing Docker network.
+ * Get the IPv4 subnet of an existing Docker network.
  */
 export function getDockerNetworkSubnet(networkName: string): string | null {
   try {
-    const output = execSync(
-      `docker network inspect "${networkName}" --format "{{range .IPAM.Config}}{{.Subnet}}{{end}}" 2>/dev/null`,
+    const output = execFileSync(
+      "docker",
+      ["network", "inspect", networkName, "--format", "{{json .IPAM.Config}}"],
       { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
     );
-    const subnet = output.trim();
-    return subnet || null;
+    const configs = JSON.parse(output.trim()) as Array<{ Subnet?: string }>;
+    // Find the first IPv4 subnet
+    for (const cfg of configs) {
+      if (cfg.Subnet && !cfg.Subnet.includes(":")) {
+        return cfg.Subnet;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
@@ -194,7 +252,7 @@ export function getDockerNetworkSubnet(networkName: string): string | null {
  */
 export function dockerNetworkExists(networkName: string): boolean {
   try {
-    execSync(`docker network inspect "${networkName}" 2>/dev/null`, {
+    execFileSync("docker", ["network", "inspect", networkName], {
       stdio: ["pipe", "pipe", "pipe"],
     });
     return true;
@@ -228,10 +286,17 @@ export function isLocalhostBind(portMapping: string): boolean {
 
 /**
  * Derive bind-local flag from WP_BIND env value.
+ * Returns true ONLY for explicit loopback addresses.
+ * Empty/unset means Docker's default (all interfaces) = NOT local.
  */
 export function deriveBindLocal(wpBind: string | undefined): boolean {
   const bind = (wpBind || "").trim();
-  if (bind === "" || bind === "127.0.0.1" || bind === "::1" || bind === "localhost") {
+  // Empty means all interfaces (Docker default) - NOT localhost
+  if (bind === "") {
+    return false;
+  }
+  // Explicit loopback addresses
+  if (bind === "127.0.0.1" || bind === "::1" || bind === "localhost") {
     return true;
   }
   return false;
