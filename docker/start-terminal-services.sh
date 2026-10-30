@@ -39,5 +39,6 @@ chmod 700 /usr/local/bin/docker /usr/bin/docker /usr/bin/docker-compose 2>/dev/n
 chmod 700 /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
 
 # -d 3: quieter than default (7); suppresses ttyd's startup banner that prints Basic-auth as base64.
+# -O: check Origin header matches the terminal URL (defense-in-depth against CSRF).
 # Use env -u to strip WPDEV_TERMINAL_AUTH from ttyd's environment so shells don't inherit it.
-exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -p 7681 -c "$AUTH" -w "$WD" bash -lc "cd \"$WD\" && exec bash"
+exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -O -p 7681 -c "$AUTH" -w "$WD" bash -lc "cd \"$WD\" && exec bash"

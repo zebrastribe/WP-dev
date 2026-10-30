@@ -49,6 +49,36 @@ Local uses Docker image tags. Staging/production only when the host honors `.php
 | `WPDEV_LOCAL_HTTPS` | 0 | Set `1` when SSL enabled |
 | | | Use `wp-dev ssl enable` |
 
+## Network configuration
+
+Auto-configured by `wp-dev up`. Override only if needed for advanced setups.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WP_BIND` | `127.0.0.1` | Bind address for WP port (`127.0.0.1` = localhost only, `0.0.0.0` = all interfaces). `localhost` is normalized to `127.0.0.1`. |
+| `WPDEV_NETWORK_SUBNET` | (auto) | Docker network subnet (e.g. `172.28.1.0/24`) |
+| `WPDEV_NETWORK_GATEWAY` | (auto) | Docker network gateway (e.g. `172.28.1.1`) |
+| `WPDEV_SSL_PROXY_IP` | (auto) | Fixed IP for SSL proxy container |
+
+**Subnet pool override:** Set `WPDEV_SUBNET_POOL=172.29` in your **shell environment** (not docker/.env) before running `wp-dev up` to use a different prefix. This is shell-only because subnet allocation happens before reading docker/.env.
+
+**Two stacks on one host** get unique subnets automatically:
+- `wp-dev up` scans existing Docker networks to find an available /24 subnet
+- If a saved subnet collides with another stack (e.g., stack A saves .1, goes down, stack C takes .1), the next `wp-dev up` detects the collision and reallocates
+
+**Compose fallbacks:** The docker-compose.yml has fallback defaults (`172.28.0.0/24`, `172.28.0.1`) for `docker compose down` to work without `wp-dev up`. These are migration-only; normal usage always runs `wp-dev up` first.
+
+## Security (Gate 0)
+
+These variables protect the browser admin API from spoofed requests. Auto-configured by `wp-dev up`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WPDEV_ADMIN_TRUSTED_GATEWAY` | (gateway) | Docker gateway IP(s) allowed to reach admin API |
+| `WPDEV_WP_BIND_LOCAL` | (derived) | `1` if WP_BIND is localhost, `0` otherwise |
+
+**How it works:** The admin API checks `REMOTE_ADDR` against loopback (`127.0.0.1`, `::1`) and the trusted gateway. Header spoofing (Host, Origin, X-Forwarded-For) is blocked because `REMOTE_ADDR` reveals the true caller position. Auto-unlock features also require `WPDEV_WP_BIND_LOCAL=1` to prevent attacks when the port is exposed to LAN.
+
 ## Browser admin and terminal
 
 | Variable | Description |

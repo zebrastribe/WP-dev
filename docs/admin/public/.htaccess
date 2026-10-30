@@ -1,4 +1,15 @@
-# wp-dev admin is for local development only (localhost). Block on public hosts.
+# wp-dev admin Gate 0: local development only. Block on public hosts.
+#
+# Two-layer defense:
+# 1. Apache: Host header check (blocks DNS rebinding attacks)
+# 2. PHP: REMOTE_ADDR check against WPDEV_ADMIN_TRUSTED_GATEWAY (authoritative)
+#
+# Apache only checks the Host header since it cannot dynamically read the trusted
+# gateway from environment variables. PHP does the authoritative REMOTE_ADDR check.
+# With remoteip.conf restricting XFF trust, spoofing REMOTE_ADDR requires being the
+# trusted proxy.
+
+# Host header check (DNS rebinding protection)
 <IfModule mod_rewrite.c>
 RewriteEngine On
 RewriteCond %{HTTP_HOST} !^localhost(:\d+)?$ [NC]

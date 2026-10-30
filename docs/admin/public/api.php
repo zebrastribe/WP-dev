@@ -669,9 +669,12 @@ if ($method === 'GET' && $action === 'auth-status') {
 }
 
 if ($method === 'POST' && $action === 'auth-bootstrap') {
-    if (!wpdev_is_local_admin_request()) {
+    // Defense-in-depth: require WPDEV_WP_BIND_LOCAL=1 for auto-unlock (guards against
+    // Docker configurations that relay LAN traffic through the gateway).
+    $localCheck = wpdev_is_local_admin_request_full(true);
+    if ($localCheck['ok'] !== true) {
         wpdev_json_error(403, 'forbidden', 'Auto unlock is only available on localhost.');
-        wpdev_admin_api_log('POST auth-bootstrap 403 not_local');
+        wpdev_admin_api_log('POST auth-bootstrap 403 not_local: ' . ($localCheck['reason'] ?? 'unknown'));
         exit;
     }
     // Browser same-origin fetch + Origin match — Sec-Fetch-Site alone is spoofable.
