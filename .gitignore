@@ -17,3 +17,5 @@ docs/admin/node_modules/
 docs/admin/dist/
 local-commands.md
 content-recovery-workspace/storage/**/*.sqlite
+infra/.lab-keys/
+

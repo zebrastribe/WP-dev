@@ -49,6 +49,11 @@ Each clone uses `project` in config as the Docker Compose project name (`-p`). P
 
 Internal RFCs and historical notes live in `purpose/` (not end-user docs).
 
+## Lab fixture (Phase 1)
+
+Disposable SSH + WordPress on loopback only: [`infra/README.md`](../../infra/README.md).  
+`npm run lab:up` / `lab:probe` / `lab:down`. No cloud account required.
+
 ## Related
 
 - [Project structure](./project-structure.md)

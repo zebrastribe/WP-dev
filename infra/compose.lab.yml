@@ -1,0 +1,102 @@
+# Disposable SSH + WordPress lab for Phase 1 (§25 P1.5).
+# Loopback binds only. No production credentials. Not a SaaS stack.
+#
+#   docker compose -f infra/compose.lab.yml -p wpdevlab up -d --build
+#   ./infra/lab-probe.sh
+#   docker compose -f infra/compose.lab.yml -p wpdevlab down -v
+#
+# Images: pinned digests from docker/image-digests.json where available;
+# lab-ssh is built locally (openssh + rsync + wp-cli).
+
+name: wpdevlab
+
+services:
+  db:
+    image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+    command:
+      - mysqld
+      - --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: wordpress
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - lab_db:/var/lib/mysql
+    networks:
+      - lab
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -proot || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 15s
+
+  wordpress:
+    image: wordpress:php8.2-apache@sha256:8ca746c43b29cc29258c2c9e420745daa88417fe5f9232220b69b8b1bbed15a7
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18080:80"
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_TABLE_PREFIX: wp_
+    volumes:
+      - lab_wp:/var/www/html
+    networks:
+      - lab
+
+  wpcli:
+    image: wordpress:cli-php8.2@sha256:a8eb972af44dd9600db6e6511b66a0c8d5300eb42bf8d3a2f7d2bbb0a95133fb
+    user: "33:33"
+    depends_on:
+      db:
+        condition: service_healthy
+      wordpress:
+        condition: service_started
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_TABLE_PREFIX: wp_
+    volumes:
+      - lab_wp:/var/www/html
+    networks:
+      - lab
+    entrypoint: ["wp", "--allow-root"]
+    command: ["--info"]
+
+  ssh:
+    build:
+      context: ./lab-ssh
+      dockerfile: Dockerfile
+    depends_on:
+      wordpress:
+        condition: service_started
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:2222:22"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - lab_wp:/var/www/html
+      - ./.lab-keys/authorized_keys:/etc/ssh/authorized_keys/lab:ro
+    networks:
+      - lab
+
+networks:
+  lab:
+    driver: bridge
+
+volumes:
+  lab_wp:
+  lab_db:
