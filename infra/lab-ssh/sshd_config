@@ -15,3 +15,5 @@ UsePAM no
 X11Forwarding no
 PrintMotd no
 AcceptEnv LANG LC_*
+# Lab only: inject WORDPRESS_DB_* for non-interactive SSH (NodeSSH / BatchMode).
+PermitUserEnvironment yes

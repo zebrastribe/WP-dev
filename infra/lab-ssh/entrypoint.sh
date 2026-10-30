@@ -26,5 +26,14 @@ for f in /home/lab/.profile /home/lab/.bash_profile /home/lab/.bashrc; do
     echo '[ -f "$HOME/.wpdev-lab-env" ] && . "$HOME/.wpdev-lab-env"' >>"$f"
   chown lab:lab "$f"
 done
+# Non-interactive SSH (BatchMode / NodeSSH) skips shell rc — use PermitUserEnvironment.
+{
+  echo "WORDPRESS_DB_HOST=${WORDPRESS_DB_HOST:-db}"
+  echo "WORDPRESS_DB_USER=${WORDPRESS_DB_USER:-wordpress}"
+  echo "WORDPRESS_DB_PASSWORD=${WORDPRESS_DB_PASSWORD:-wordpress}"
+  echo "WORDPRESS_DB_NAME=${WORDPRESS_DB_NAME:-wordpress}"
+} >/home/lab/.ssh/environment
+chown lab:lab /home/lab/.ssh/environment
+chmod 600 /home/lab/.ssh/environment
 
 exec /usr/sbin/sshd -D -e

@@ -12,9 +12,10 @@ Remote WordPress path: `/var/www/html`.
 ## Commands
 
 ```bash
-./infra/lab-up.sh      # build, start, install WP once
-./infra/lab-probe.sh   # SSH: rsync --version + wp core is-installed
-./infra/lab-down.sh    # compose down -v (wipes volumes)
+./infra/lab-up.sh                 # build, start, install WP once
+./infra/lab-probe.sh              # SSH: rsync --version + wp core is-installed
+npm run build && ./infra/lab-restore-roundtrip.sh   # P1.6: backup → mutate → restore → verify
+./infra/lab-down.sh               # compose down -v (wipes volumes)
 ```
 
 Keys live in `infra/.lab-keys/` (gitignored). Regenerated on first `lab-up.sh`.

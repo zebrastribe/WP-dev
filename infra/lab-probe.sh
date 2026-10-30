@@ -20,7 +20,7 @@ echo "lab-probe: rsync --version via SSH…"
 "${SSH[@]}" 'rsync --version' | head -1
 
 echo "lab-probe: wp core is-installed via SSH…"
-# Explicit env — wordpress image wp-config uses getenv_docker(WORDPRESS_DB_*)
-"${SSH[@]}" 'WORDPRESS_DB_HOST=db WORDPRESS_DB_USER=wordpress WORDPRESS_DB_PASSWORD=wordpress WORDPRESS_DB_NAME=wordpress wp --path=/var/www/html core is-installed'
+# WORDPRESS_DB_* come from ~/.ssh/environment (PermitUserEnvironment in lab sshd).
+"${SSH[@]}" 'wp --path=/var/www/html core is-installed'
 
 echo "lab-probe: PASS"

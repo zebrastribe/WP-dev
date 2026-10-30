@@ -25,6 +25,7 @@
     "lab:up": "bash infra/lab-up.sh",
     "lab:probe": "bash infra/lab-probe.sh",
     "lab:down": "bash infra/lab-down.sh",
+    "lab:restore-roundtrip": "bash infra/lab-restore-roundtrip.sh",
     "test:all": "npm test && npm run build && npm run test:smoke && npm run test --prefix docs/admin",
     "postinstall": "node scripts/ensure-config.mjs",
     "admin:dev": "npm run dev --prefix docs/admin",
