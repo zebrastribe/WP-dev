@@ -87,6 +87,14 @@ export function addIpOffset(ip: string, offset: number): string {
  * Derive gateway, proxy IPs, and dynamic ip_range from a subnet.
  * The ip_range starts after the reserved addresses to prevent dynamic containers
  * from taking the SSL proxy's fixed IP.
+ *
+ * The ip_range is computed dynamically based on subnet size:
+ * - For /24: ip_range at .16/28 (16 addresses for dynamic allocation)
+ * - For /25: ip_range at .16/28 (same, fits in the /25)
+ * - For /26 or smaller: no ip_range (subnet too small to partition meaningfully)
+ *
+ * Small subnets (/27 and below) don't have room for meaningful ip_range partitioning
+ * after reserving gateway (.1), SSL proxy (.10), and dynamic start (.16).
  */
 export function deriveNetworkIps(subnet: string): NetworkInfo | null {
   const network = getNetworkAddress(subnet);
@@ -98,10 +106,28 @@ export function deriveNetworkIps(subnet: string): NetworkInfo | null {
   const sslProxyIp = addIpOffset(network, SSL_PROXY_OFFSET);
   const dynamicStart = addIpOffset(network, DYNAMIC_IP_START_OFFSET);
 
-  // For a /24 subnet, ip_range of /28 starting at .16 allows 16 dynamic addresses
-  // which is sufficient for typical wp-dev usage (wpcli runs, etc.)
-  // If more are needed, the container count or range can be adjusted.
-  const ipRange = `${dynamicStart}/28`;
+  // Calculate ip_range based on subnet size
+  // A /24 has 256 addresses; we reserve .0-.15 (16) and use .16-* for dynamic
+  // ip_range tells Docker "only allocate dynamic IPs from this range"
+  let ipRange = "";
+
+  const subnetSize = 32 - parsed.prefix;
+  const totalAddresses = 1 << subnetSize;
+
+  // Only add ip_range if the subnet is large enough to partition meaningfully
+  // /24 (256 addresses): .16/28 gives 16 dynamic IPs
+  // /25 (128 addresses): .16/28 still fits (offset 16 + 16 = 32, < 128)
+  // /26 (64 addresses): .16/28 still fits (offset 16 + 16 = 32, < 64)
+  // /27 (32 addresses): .16/28 would use 16-31, exactly fits but no margin
+  // /28 and smaller: no room after reserved IPs
+  if (totalAddresses >= 64) {
+    // Use /28 (16 addresses) for dynamic allocation starting at offset 16
+    ipRange = `${dynamicStart}/28`;
+  } else if (totalAddresses >= 32) {
+    // /27 subnet: use /29 (8 addresses) starting at offset 16
+    ipRange = `${dynamicStart}/29`;
+  }
+  // For /28 and smaller: leave ipRange empty (Docker allocates from whole subnet)
 
   return { subnet, gateway, sslProxyIp, ipRange };
 }

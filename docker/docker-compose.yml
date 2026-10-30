@@ -159,12 +159,14 @@ networks:
     #
     # ip_range reserves addresses for fixed IPs (gateway .1, SSL proxy .10).
     # Dynamic containers get addresses from .16 onwards, preventing them from
-    # taking the SSL proxy's IP before it starts. Derived from WPDEV_SSL_PROXY_IP.
+    # taking the SSL proxy's IP before it starts.
+    # WPDEV_NETWORK_IP_RANGE is derived from the subnet by wp-dev up.
+    # Empty ip_range (for small subnets) means no restriction.
     ipam:
       config:
         - subnet: ${WPDEV_NETWORK_SUBNET:-172.28.0.0/24}
           gateway: ${WPDEV_NETWORK_GATEWAY:-172.28.0.1}
-          ip_range: ${WPDEV_NETWORK_IP_RANGE:-172.28.0.16/28}
+          ip_range: ${WPDEV_NETWORK_IP_RANGE:-}
 
 volumes:
   db_data:

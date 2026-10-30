@@ -74,7 +74,7 @@ Auto-configured by `wp-dev up`. Override only if needed for advanced setups.
 
 **Legacy network cleanup:** After upgrading from an older version, `wp-dev up` automatically removes the unused `<project>_default` network if no containers are attached.
 
-**Compose fallbacks:** The docker-compose.yml has fallback defaults (`172.28.0.0/24`, `172.28.0.1`, `172.28.0.16/28`) for `docker compose down` to work without `wp-dev up`. These are migration-only; normal usage always runs `wp-dev up` first.
+**Compose fallbacks:** The docker-compose.yml has fallback defaults (`172.28.0.0/24`, `172.28.0.1`) for `docker compose down` to work without `wp-dev up`. The `ip_range` has no fallback (derived from subnet by `wp-dev up`). These fallbacks are migration-only; normal usage always runs `wp-dev up` first.
 
 ## Security (Gate 0)
 

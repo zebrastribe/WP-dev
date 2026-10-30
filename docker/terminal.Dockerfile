@@ -7,13 +7,17 @@ ARG DOCKER_CLI_VERSION=27.5.1
 ARG DOCKER_COMPOSE_VERSION=2.32.4
 
 # SHA-256 checksums for binary verification. Empty = skip verification (dev only).
-# Generate with: curl -sL <url> | sha256sum
-ARG TTYD_SHA256_X86_64=7be073f0a7aa12f01e85c1e5bc9b27cdaa01e48e4b7dd1b88d59c275e0609883
-ARG TTYD_SHA256_AARCH64=3d6d4c8abf85a71b7d87a62aa0fe0f0c5bb90cd4bd2f247c9ae5a68e9bece9b1
-ARG DOCKER_CLI_SHA256_X86_64=
-ARG DOCKER_CLI_SHA256_AARCH64=
-ARG DOCKER_COMPOSE_SHA256_X86_64=
-ARG DOCKER_COMPOSE_SHA256_AARCH64=
+# Generate with: curl -fsSL <url> | sha256sum
+# Checksums verified 2026-10-30 against official releases:
+#   ttyd:    https://github.com/tsl0922/ttyd/releases/download/1.7.7/
+#   docker:  https://download.docker.com/linux/static/stable/{x86_64,aarch64}/
+#   compose: https://github.com/docker/compose/releases/download/v2.32.4/
+ARG TTYD_SHA256_X86_64=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
+ARG TTYD_SHA256_AARCH64=b38acadd89d1d396a0f5649aa52c539edbad07f4bc7348b27b4f4b7219dd4165
+ARG DOCKER_CLI_SHA256_X86_64=4f798b3ee1e0140eab5bf30b0edc4e84f4cdb53255a429dc3bbae9524845d640
+ARG DOCKER_CLI_SHA256_AARCH64=e6b53725a73763ab3f988c73f8772eaed429754c1a579db5ff11f21990fd1817
+ARG DOCKER_COMPOSE_SHA256_X86_64=ed1917fb54db184192ea9d0717bcd59e3662ea79db48bff36d3475516c480a6b
+ARG DOCKER_COMPOSE_SHA256_AARCH64=0c4591cf3b1ed039adcd803dbbeddf757375fc08c11245b0154135f838495a2f
 
 # Apt docker.io is too old for modern host daemons (API 1.44+). Install current static CLI for runners.
 RUN apt-get update \

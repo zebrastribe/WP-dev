@@ -228,8 +228,8 @@ function ensureNetworkConfig(
  * Ensure WP_BIND and WPDEV_WP_BIND_LOCAL are correctly set.
  * - WP_BIND defaults to 127.0.0.1 (secure)
  * - WP_BIND=localhost is normalized to 127.0.0.1 (compose rejects "localhost")
- * - WPDEV_WP_BIND_LOCAL is ALWAYS derived from actual WP_BIND value
- * - User can force BIND_LOCAL=0 but never force 1 with non-loopback bind
+ * - WPDEV_WP_BIND_LOCAL is ALWAYS derived from actual WP_BIND value on every `up`
+ *   (no sticky values - changing WP_BIND back to localhost unlocks the API again)
  */
 function ensureBindLocalConfig(
   current: string,
@@ -239,7 +239,6 @@ function ensureBindLocalConfig(
   const changedKeys: string[] = [];
 
   const rawBind = readEnvValue(current, "WP_BIND");
-  const existingBindLocal = readEnvValue(current, "WPDEV_WP_BIND_LOCAL");
 
   // Normalize WP_BIND: default to 127.0.0.1, convert "localhost" to IP, validate
   const wpBind = normalizeWpBind(rawBind);
@@ -253,24 +252,17 @@ function ensureBindLocalConfig(
   }
 
   // ALWAYS derive bind-local from actual WP_BIND (recompute on every up)
+  // This ensures changing WP_BIND updates the gate: localhost=1, else=0
   const isLocal = deriveBindLocal(wpBind);
-  const derivedBindLocal = isLocal ? "1" : "0";
+  const bindLocal = isLocal ? "1" : "0";
 
-  // User can force 0 (disable auto-unlock) but NEVER force 1 with non-loopback bind
-  let finalBindLocal = derivedBindLocal;
-  if (existingBindLocal === "0") {
-    // User explicitly disabled auto-unlock - respect it
-    finalBindLocal = "0";
-  } else if (existingBindLocal === "1" && !isLocal) {
-    // User tried to force 1 with non-loopback bind - override to 0 (security)
-    finalBindLocal = "0";
-    logInfo("up: WP_BIND is not localhost, forcing WPDEV_WP_BIND_LOCAL=0");
-  }
-
-  if (readEnvValue(next, "WPDEV_WP_BIND_LOCAL") !== finalBindLocal) {
-    next = setEnvValueInContent(next, "WPDEV_WP_BIND_LOCAL", finalBindLocal);
+  if (readEnvValue(next, "WPDEV_WP_BIND_LOCAL") !== bindLocal) {
+    next = setEnvValueInContent(next, "WPDEV_WP_BIND_LOCAL", bindLocal);
     changed = true;
     changedKeys.push("WPDEV_WP_BIND_LOCAL");
+    if (!isLocal) {
+      logInfo("up: WP_BIND is not localhost, setting WPDEV_WP_BIND_LOCAL=0 (admin API gated)");
+    }
   }
 
   return { next, changed, changedKeys };

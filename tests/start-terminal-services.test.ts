@@ -133,19 +133,19 @@ exit 1
     expect(script).toMatch(/exec runuser.*env -u WPDEV_TERMINAL_AUTH.*ttyd/);
   });
 
-  it("passes --credential to ttyd for basic auth (hides credential from ps)", () => {
+  it("passes -c to ttyd for basic auth (G09 DISPUTED: credential visible in ps)", () => {
     const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
-    // Changed from -c "$AUTH" to --credential "$CRED_FILE" to hide credential from ps output
-    expect(script).toMatch(/ttyd.*--credential "\$CRED_FILE"/);
-    // Credential file is written with restricted permissions
-    expect(script).toContain('chmod 600 "$CRED_FILE"');
-    expect(script).toContain('printf \'%s\' "$AUTH" > "$CRED_FILE"');
+    // G09 DISPUTED: ttyd 1.7.7 only supports -c username:password, not credential files.
+    // The credential is visible in `ps aux`. Mitigations documented in the script.
+    // See: https://github.com/tsl0922/ttyd/issues/1190
+    expect(script).toMatch(/ttyd.*-c "\$AUTH"/);
   });
 
-  it("cleans up credential file on exit", () => {
+  it("documents G09 known limitation in script comments", () => {
     const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
-    expect(script).toContain("trap cleanup EXIT INT TERM");
-    expect(script).toContain('rm -f "$CRED_FILE"');
+    // Must document the known limitation for future maintainers
+    expect(script).toContain("KNOWN LIMITATION (G09)");
+    expect(script).toContain("ttyd does not support reading credentials from a file");
   });
 
   it("uses -d 3 to suppress ttyd startup banner", () => {

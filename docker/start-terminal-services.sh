@@ -9,20 +9,13 @@ if [ -z "$AUTH" ] || [ "$AUTH" = "wpdev:wpdev" ] || [ "$AUTH" = "change-me-user:
   exit 1
 fi
 
-# Security: write credential to a temp file readable only by root, then pass via --credential.
-# This prevents the credential from appearing in `ps` output on shared hosts.
-# The file is created with 0600 permissions before writing the credential.
-CRED_FILE="/tmp/.ttyd-credential-$$"
-rm -f "$CRED_FILE"
-touch "$CRED_FILE"
-chmod 600 "$CRED_FILE"
-printf '%s' "$AUTH" > "$CRED_FILE"
-
-# Clean up the credential file on exit
-cleanup() {
-  rm -f "$CRED_FILE"
-}
-trap cleanup EXIT INT TERM
+# KNOWN LIMITATION (G09): ttyd 1.7.7's -c/--credential flag requires passing credentials
+# on the command line as "user:pass". ttyd does not support reading credentials from a file.
+# On multi-user systems this exposes the credential to `ps aux`. Mitigations:
+# 1. Terminal ports bind to 127.0.0.1 only (not exposed to network)
+# 2. The credential is auto-generated per-stack (unique per project)
+# 3. env -u strips WPDEV_TERMINAL_AUTH from the ttyd environment
+# See: https://github.com/tsl0922/ttyd/issues/1190 for upstream feature request
 
 # Sync/terminal runners keep root so they can use the mounted docker.sock for pull/push.
 node /workspace/docker/terminal-runner.mjs >>/tmp/terminal-runner.log 2>&1 &
@@ -46,6 +39,6 @@ chmod 700 /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
 
 # -d 3: quieter than default (7); suppresses ttyd's startup banner.
 # -O: check Origin header matches the terminal URL (defense-in-depth against CSRF).
-# --credential: read auth from file (ttyd 1.7.4+), avoids exposing credential in ps output.
+# -c: basic auth credential (username:password format required by ttyd).
 # env -u: strip WPDEV_TERMINAL_AUTH from ttyd's environment so shells don't inherit it.
-exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -O -p 7681 --credential "$CRED_FILE" -w "$WD" bash -lc "cd \"$WD\" && exec bash"
+exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -O -p 7681 -c "$AUTH" -w "$WD" bash -lc "cd \"$WD\" && exec bash"
