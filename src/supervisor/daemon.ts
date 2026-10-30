@@ -14,8 +14,8 @@ import {
 import { runShutdownStateMachine, releaseProjectLock } from "./shutdown.js";
 import type { ProjectLockData, ServiceRegistry } from "./types.js";
 import { getComposePublishedHostPorts } from "../utils/compose-published-ports.js";
-import { execa } from "execa";
-import { getDockerComposeLeadArgs, getComposeProjectDir } from "../services/docker-compose.js";
+import { composeRead } from "../services/docker-compose.js";
+import { resolveNetworkEnvForCompose } from "../utils/compose-prerequisites.js";
 
 export type SupervisorDaemonOptions = {
   port?: number;
@@ -129,13 +129,14 @@ export class SupervisorDaemon {
   private async healthCheck(): Promise<void> {
     let reg = loadRegistry(this.loaded.configDir) ?? this.registry;
     try {
-      const projectDir = getComposeProjectDir(this.loaded.configDir, this.loaded.config);
-      const r = await execa(
-        "docker",
-        [...getDockerComposeLeadArgs(this.loaded.config), "ps", "--status", "running", "--format", "json"],
-        { cwd: projectDir, reject: false, stdio: ["ignore", "pipe", "pipe"] },
+      // Use resolveNetworkEnvForCompose for network env (works with old .env files)
+      const networkEnv = resolveNetworkEnvForCompose(this.loaded);
+      const r = await composeRead(
+        this.loaded,
+        ["ps", "--status", "running", "--format", "json"],
+        networkEnv,
       );
-      const running = r.exitCode === 0 && String(r.stdout ?? "").includes("wordpress");
+      const running = r.exitCode === 0 && r.stdout.includes("wordpress");
       reg = touchServiceHeartbeat(
         reg,
         "wordpress",
@@ -150,7 +151,7 @@ export class SupervisorDaemon {
       reg = touchServiceHeartbeat(reg, "wordpress", "unhealthy");
     }
 
-    const ports = await getComposePublishedHostPorts(this.loaded.configDir, this.loaded.config);
+    const ports = await getComposePublishedHostPorts(this.loaded);
     for (const s of reg.services) {
       if (s.port && ports.has(s.port)) {
         reg = touchServiceHeartbeat(reg, s.name, "healthy");

@@ -4,6 +4,7 @@ import { assertDockerReady } from "../utils/docker-prereq.js";
 import { resolveHostIdentity } from "../utils/host-paths.js";
 import { logInfo } from "../utils/logger.js";
 import { posixShellQuote } from "../utils/shell-quote.js";
+import { ensureComposePrerequisites } from "../utils/compose-prerequisites.js";
 
 /**
  * LOCAL DOCKER ONLY.
@@ -160,6 +161,7 @@ async function composeLocalWordpressChown(
   loaded: LoadedConfig,
   uidGid: string,
 ): Promise<void> {
+  ensureComposePrerequisites(loaded);
   await compose(loaded.configDir, loaded.config, [
     "run",
     "--rm",
@@ -232,6 +234,7 @@ async function composeLocalWordpressShell(
   loaded: LoadedConfig,
   shell: string,
 ): Promise<void> {
+  ensureComposePrerequisites(loaded);
   await compose(
     loaded.configDir,
     loaded.config,

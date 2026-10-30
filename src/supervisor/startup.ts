@@ -13,7 +13,7 @@ import {
   setPortInEnvFile,
 } from "../utils/compose-env.js";
 import { getComposePublishedHostPorts } from "../utils/compose-published-ports.js";
-import { logInfo } from "../utils/logger.js";
+import { logInfo, logPathForConfigDir } from "../utils/logger.js";
 import { emitLifecycleEvent } from "./lifecycle-log.js";
 import { findFreePort } from "./port-helpers.js";
 import { formatPortConflicts, validateReservedPorts } from "./port-manager.js";
@@ -57,7 +57,7 @@ function dockerService(
     lastHeartbeat: now,
     restartCount: 0,
     cwd: registry.configDir,
-    logPath: join(registry.configDir, "logs", "wp-dev.log"),
+    logPath: logPathForConfigDir(registry.configDir),
     bindAddress: "127.0.0.1",
   };
 }
@@ -254,7 +254,7 @@ async function composeUp(
     const key = resolveConflictPortKey(conflictPort, ports);
     const nextPort = await findFreePort(
       conflictPort + 1,
-      await getComposePublishedHostPorts(loaded.configDir, loaded.config),
+      await getComposePublishedHostPorts(loaded),
     );
     setPortInEnvFile(envPath, key, nextPort, {
       configDir: loaded.configDir,

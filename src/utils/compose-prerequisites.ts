@@ -1,0 +1,577 @@
+/**
+ * Compose prerequisites: everything that must be ready before ANY compose call.
+ *
+ * Docker Compose creates missing bind-mount sources as directories and creates
+ * networks with fallback subnets from the compose file. This module ensures:
+ * 1. docker/.env exists with all required variables (network, security, paths)
+ * 2. Generated bind-mount files exist as regular files (e.g., remoteip.conf)
+ *
+ * Call ensureComposePrerequisites() before ANY compose invocation:
+ * - up (before autoReconcileOnStartup)
+ * - doctor (before compose run)
+ * - fix-permissions (before compose run)
+ * - reconcile (before compose exec/run)
+ *
+ * This is the SINGLE point of truth for compose prerequisites.
+ */
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, statSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { join } from "node:path";
+import type { LoadedConfig } from "../config/load.js";
+import { dockerComposeProjectId } from "../services/docker-compose.js";
+import {
+  buildRunnerOrigin,
+  DEFAULT_DOCKER_ENV_PORTS,
+  persistEnvContent,
+  readEnvValue,
+  runnerOriginPortMismatch,
+  setEnvValueInContent,
+  writeEnvFile,
+} from "./compose-env.js";
+import {
+  deriveBindLocal,
+  deriveNetworkIps,
+  findAvailableSubnet,
+  generateRemoteIpConf,
+  getDockerNetworkGateway,
+  getDockerNetworkIpRange,
+  getDockerNetworkSubnet,
+  getSubnetPoolPrefix,
+  dockerNetworkExists,
+  normalizeWpBind,
+  savedSubnetOverlapsExisting,
+} from "./network-config.js";
+import {
+  resolveHostHome,
+  resolveHostIdentity,
+  resolveHostProjectRoot,
+} from "./host-paths.js";
+import { logInfo } from "./logger.js";
+import {
+  assertNotSymlink,
+  ensureGeneratedBindMountFiles,
+  getRemoteIpConfPath,
+} from "./generated-bind-mounts.js";
+import {
+  DEFAULT_PHP_VERSION,
+  getWordPressImageWithDigest,
+  getWpCliImageWithDigest,
+} from "./image-digests.js";
+
+function makeToken(bytes = 24): string {
+  return randomBytes(bytes).toString("base64url");
+}
+
+function getComposeEnvPath(loaded: LoadedConfig): string {
+  return join(loaded.configDir, loaded.config.local.path, ".env");
+}
+
+function getComposeEnvExamplePath(loaded: LoadedConfig): string {
+  return join(loaded.configDir, loaded.config.local.path, ".env.example");
+}
+
+/**
+ * Build a POSIX-portable shell command to replace a symlink with a copy of its target.
+ * Works on both GNU/Linux and macOS without requiring GNU coreutils.
+ * Properly quotes paths with spaces.
+ */
+function buildSymlinkCopyCommand(symPath: string): string {
+  const escaped = symPath.replace(/'/g, "'\\''");
+  return `target="$(cd "$(dirname '${escaped}')" && pwd -P)/$(readlink '${escaped}')" && ` +
+    `cp "$target" '${escaped}.tmp' && rm '${escaped}' && mv '${escaped}.tmp' '${escaped}'`;
+}
+
+/**
+ * Assert .env is not a symlink with .env-specific error message.
+ * Tells user to COPY (preserves tokens) not regenerate.
+ */
+function assertNotSymlinkEnvPath(envPath: string): void {
+  try {
+    assertNotSymlink(envPath, "Docker Compose environment file");
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("symlink")) {
+      const cmd = buildSymlinkCopyCommand(envPath);
+      throw new Error(
+        `${envPath} is a symlink. wp-dev cannot write through symlinks. ` +
+          `Replace it with a regular copy of the target file to preserve your tokens:\n  ${cmd}`,
+      );
+    }
+    throw e;
+  }
+}
+
+function ensureComposeEnvExists(loaded: LoadedConfig): string {
+  const envPath = getComposeEnvPath(loaded);
+  const dockerDir = join(loaded.configDir, loaded.config.local.path);
+  mkdirSync(dockerDir, { recursive: true });
+
+  // P1: Never write through a symlinked .env - refuse with .env-specific error
+  assertNotSymlinkEnvPath(envPath);
+
+  if (existsSync(envPath)) return envPath;
+
+  const example = getComposeEnvExamplePath(loaded);
+  if (existsSync(example)) {
+    // Also refuse to copy over a symlink target (but with generic message for .env.example)
+    assertNotSymlink(example, "Docker Compose environment example");
+    copyFileSync(example, envPath);
+    return envPath;
+  }
+
+  writeEnvFile(envPath, `WP_PORT=${DEFAULT_DOCKER_ENV_PORTS.WP_PORT}\n`, {
+    configDir: loaded.configDir,
+    projectId: loaded.config.project,
+  });
+  return envPath;
+}
+
+interface NetworkConfigResult {
+  next: string;
+  changed: boolean;
+  changedKeys: string[];
+  networkInfo: { subnet: string; gateway: string; sslProxyIp: string } | null;
+}
+
+function ensureNetworkConfig(
+  loaded: LoadedConfig,
+  envPath: string,
+  current: string,
+): NetworkConfigResult {
+  let next = current;
+  let changed = false;
+  const changedKeys: string[] = [];
+
+  const projectId = dockerComposeProjectId(loaded.config);
+  const networkName = `${projectId}_wpdev`;
+
+  const savedSubnet = readEnvValue(current, "WPDEV_NETWORK_SUBNET");
+  const savedGateway = readEnvValue(current, "WPDEV_NETWORK_GATEWAY");
+
+  let subnet: string;
+  let gateway: string;
+  let sslProxyIp: string;
+  let ipRange: string;
+
+  if (dockerNetworkExists(networkName)) {
+    const actualSubnet = getDockerNetworkSubnet(networkName);
+    const actualGateway = getDockerNetworkGateway(networkName);
+    if (actualSubnet && actualGateway) {
+      subnet = actualSubnet;
+      gateway = actualGateway;
+      const derived = deriveNetworkIps(subnet);
+      sslProxyIp = derived?.sslProxyIp || "";
+      // G14: keep the network's actual ip_range (empty on pre-reservation stacks).
+      ipRange = getDockerNetworkIpRange(networkName);
+      logInfo(`compose-prereq: using existing network ${networkName} (${subnet}, gateway ${gateway})`);
+    } else {
+      throw new Error(
+        `Network ${networkName} exists but could not read its configuration. ` +
+          `Remove it with: docker network rm ${networkName}`,
+      );
+    }
+  } else if (savedSubnet && savedGateway) {
+    if (savedSubnetOverlapsExisting(savedSubnet, networkName)) {
+      logInfo(`compose-prereq: saved subnet ${savedSubnet} collides with another network, reallocating`);
+      const available = findAvailableSubnet();
+      if (!available) {
+        const poolPrefix = getSubnetPoolPrefix();
+        throw new Error(
+          `Could not find available subnet in ${poolPrefix}.0.0/16 range. ` +
+            `Override with WPDEV_SUBNET_POOL or set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY manually in docker/.env.`,
+        );
+      }
+      const derived = deriveNetworkIps(available);
+      if (!derived) {
+        throw new Error(`Invalid subnet ${available}`);
+      }
+      subnet = derived.subnet;
+      gateway = derived.gateway;
+      sslProxyIp = derived.sslProxyIp;
+      ipRange = derived.ipRange;
+      logInfo(`compose-prereq: reallocated subnet ${subnet} (gateway ${gateway})`);
+    } else {
+      subnet = savedSubnet;
+      gateway = savedGateway;
+      const derived = deriveNetworkIps(subnet);
+      sslProxyIp = readEnvValue(current, "WPDEV_SSL_PROXY_IP") || derived?.sslProxyIp || "";
+      ipRange = readEnvValue(current, "WPDEV_NETWORK_IP_RANGE") || derived?.ipRange || "";
+      logInfo(`compose-prereq: reusing saved subnet ${subnet} (gateway ${gateway})`);
+    }
+  } else {
+    const available = findAvailableSubnet();
+    if (!available) {
+      const poolPrefix = getSubnetPoolPrefix();
+      throw new Error(
+        `Could not find available subnet in ${poolPrefix}.0.0/16 range. ` +
+          `Override with WPDEV_SUBNET_POOL or set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY manually in docker/.env.`,
+      );
+    }
+    const derived = deriveNetworkIps(available);
+    if (!derived) {
+      throw new Error(`Invalid subnet ${available}`);
+    }
+    subnet = derived.subnet;
+    gateway = derived.gateway;
+    sslProxyIp = derived.sslProxyIp;
+    ipRange = derived.ipRange;
+    logInfo(`compose-prereq: allocated new subnet ${subnet} (gateway ${gateway})`);
+  }
+
+  if (readEnvValue(next, "WPDEV_NETWORK_SUBNET") !== subnet) {
+    next = setEnvValueInContent(next, "WPDEV_NETWORK_SUBNET", subnet);
+    changed = true;
+    changedKeys.push("WPDEV_NETWORK_SUBNET");
+  }
+  if (readEnvValue(next, "WPDEV_NETWORK_GATEWAY") !== gateway) {
+    next = setEnvValueInContent(next, "WPDEV_NETWORK_GATEWAY", gateway);
+    changed = true;
+    changedKeys.push("WPDEV_NETWORK_GATEWAY");
+  }
+  if (readEnvValue(next, "WPDEV_SSL_PROXY_IP") !== sslProxyIp) {
+    next = setEnvValueInContent(next, "WPDEV_SSL_PROXY_IP", sslProxyIp);
+    changed = true;
+    changedKeys.push("WPDEV_SSL_PROXY_IP");
+  }
+  if (readEnvValue(next, "WPDEV_ADMIN_TRUSTED_GATEWAY") !== gateway) {
+    next = setEnvValueInContent(next, "WPDEV_ADMIN_TRUSTED_GATEWAY", gateway);
+    changed = true;
+    changedKeys.push("WPDEV_ADMIN_TRUSTED_GATEWAY");
+  }
+  if (readEnvValue(next, "WPDEV_NETWORK_IP_RANGE") !== ipRange) {
+    next = setEnvValueInContent(next, "WPDEV_NETWORK_IP_RANGE", ipRange);
+    changed = true;
+    changedKeys.push("WPDEV_NETWORK_IP_RANGE");
+  }
+
+  return {
+    next,
+    changed,
+    changedKeys,
+    networkInfo: { subnet, gateway, sslProxyIp },
+  };
+}
+
+/**
+ * WP_BIND / WPDEV_WP_BIND_LOCAL: ALWAYS recompute bind-local from WP_BIND on every up.
+ * Do not sticky-keep BIND_LOCAL=0 — that permanently disables admin after a temporary
+ * non-loopback bind even when the user switches back to 127.0.0.1.
+ */
+function ensureBindLocalConfig(
+  current: string,
+): { next: string; changed: boolean; changedKeys: string[] } {
+  let next = current;
+  let changed = false;
+  const changedKeys: string[] = [];
+
+  const rawBind = readEnvValue(current, "WP_BIND");
+
+  const wpBind = normalizeWpBind(rawBind);
+  if (readEnvValue(next, "WP_BIND") !== wpBind) {
+    next = setEnvValueInContent(next, "WP_BIND", wpBind);
+    changed = true;
+    changedKeys.push("WP_BIND");
+    if (rawBind === "localhost") {
+      logInfo("compose-prereq: normalized WP_BIND=localhost to 127.0.0.1 (compose requires IP)");
+    }
+  }
+
+  const isLocal = deriveBindLocal(wpBind);
+  const bindLocal = isLocal ? "1" : "0";
+
+  if (readEnvValue(next, "WPDEV_WP_BIND_LOCAL") !== bindLocal) {
+    next = setEnvValueInContent(next, "WPDEV_WP_BIND_LOCAL", bindLocal);
+    changed = true;
+    changedKeys.push("WPDEV_WP_BIND_LOCAL");
+    if (!isLocal) {
+      logInfo("compose-prereq: WP_BIND is not localhost, setting WPDEV_WP_BIND_LOCAL=0 (admin API gated)");
+    }
+  }
+
+  return { next, changed, changedKeys };
+}
+
+function ensureRemoteIpConf(loaded: LoadedConfig, sslProxyIp: string | null, sslEnabled: boolean): void {
+  const confPath = getRemoteIpConfPath(loaded);
+
+  // Refuse symlinks with a clear error - never write through a symlink
+  assertNotSymlink(confPath, "Apache RemoteIP configuration");
+
+  const trustedProxyIp = sslEnabled ? sslProxyIp : null;
+  const content = generateRemoteIpConf(trustedProxyIp);
+
+  const existing = existsSync(confPath) ? readFileSync(confPath, "utf8") : "";
+  if (existing !== content) {
+    writeFileSync(confPath, content, "utf8");
+    logInfo(`compose-prereq: updated docker/remoteip.conf (ssl=${sslEnabled ? "on" : "off"})`);
+  }
+}
+
+export interface ComposePrerequisitesResult {
+  envPath: string;
+  changed: boolean;
+  changedKeys: string[];
+  networkInfo: { subnet: string; gateway: string; sslProxyIp: string } | null;
+}
+
+/**
+ * Ensure all compose prerequisites are ready.
+ * MUST be called before ANY compose invocation (run/exec/up).
+ *
+ * This function:
+ * 1. Creates docker/.env if missing (from .env.example or with defaults)
+ * 2. Allocates network subnet/gateway (or reads from existing network)
+ * 3. Sets all required security env values (tokens, paths, etc.)
+ * 4. Creates generated bind-mount files (remoteip.conf)
+ *
+ * After this function returns, it is safe to call compose.
+ */
+export function ensureComposePrerequisites(loaded: LoadedConfig): ComposePrerequisitesResult {
+  const envPath = ensureComposeEnvExists(loaded);
+  let current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+  const currentWpPort = readEnvValue(current, "WP_PORT") || String(DEFAULT_DOCKER_ENV_PORTS.WP_PORT);
+
+  let changed = false;
+  const changedKeys: string[] = [];
+  let next = current;
+
+  // 1. Ensure generated bind-mount files exist FIRST (before any .env processing
+  //    that might trigger compose via assertDockerReady or similar)
+  ensureGeneratedBindMountFiles(loaded);
+
+  // 2. Security tokens
+  const adminToken = readEnvValue(current, "WPDEV_ADMIN_SAVE_TOKEN");
+  const runnerToken = readEnvValue(current, "WPDEV_TERMINAL_RUNNER_TOKEN");
+  const terminalAuth = readEnvValue(current, "WPDEV_TERMINAL_AUTH");
+  const runnerOrigin = readEnvValue(current, "WPDEV_TERMINAL_RUNNER_ORIGIN");
+
+  if (!adminToken || adminToken.includes("change-me")) {
+    next = setEnvValueInContent(next, "WPDEV_ADMIN_SAVE_TOKEN", makeToken());
+    changed = true;
+    changedKeys.push("WPDEV_ADMIN_SAVE_TOKEN");
+  }
+  if (!runnerToken || runnerToken.includes("change-me")) {
+    next = setEnvValueInContent(next, "WPDEV_TERMINAL_RUNNER_TOKEN", makeToken());
+    changed = true;
+    changedKeys.push("WPDEV_TERMINAL_RUNNER_TOKEN");
+  }
+  if (!terminalAuth || terminalAuth.includes("change-me") || terminalAuth === "wpdev:wpdev") {
+    next = setEnvValueInContent(next, "WPDEV_TERMINAL_AUTH", `wpdev:${makeToken(12)}`);
+    changed = true;
+    changedKeys.push("WPDEV_TERMINAL_AUTH");
+  }
+
+  const shouldResetOrigin =
+    !runnerOrigin ||
+    runnerOrigin.includes("change-me") ||
+    runnerOriginPortMismatch(runnerOrigin, Number.parseInt(currentWpPort, 10));
+  if (shouldResetOrigin) {
+    const newOrigin = buildRunnerOrigin(loaded.config.local.url, Number.parseInt(currentWpPort, 10));
+    next = setEnvValueInContent(next, "WPDEV_TERMINAL_RUNNER_ORIGIN", newOrigin);
+    changed = true;
+    changedKeys.push("WPDEV_TERMINAL_RUNNER_ORIGIN");
+  }
+
+  const hostRunnerPort = readEnvValue(next, "WPDEV_HOST_RUNNER_PORT");
+  if (!hostRunnerPort || !/^\d+$/.test(hostRunnerPort)) {
+    next = setEnvValueInContent(next, "WPDEV_HOST_RUNNER_PORT", String(DEFAULT_DOCKER_ENV_PORTS.WPDEV_HOST_RUNNER_PORT));
+    changed = true;
+    changedKeys.push("WPDEV_HOST_RUNNER_PORT");
+  }
+
+  // 3. Host paths (for compose from terminal container)
+  const hostRoot = resolveHostProjectRoot(loaded.configDir, envPath);
+  const hostHome = resolveHostHome(envPath);
+  if (readEnvValue(next, "WPDEV_HOST_PROJECT_ROOT") !== hostRoot) {
+    next = setEnvValueInContent(next, "WPDEV_HOST_PROJECT_ROOT", hostRoot);
+    changed = true;
+    changedKeys.push("WPDEV_HOST_PROJECT_ROOT");
+  }
+  if (readEnvValue(next, "WPDEV_HOST_HOME") !== hostHome) {
+    next = setEnvValueInContent(next, "WPDEV_HOST_HOME", hostHome);
+    changed = true;
+    changedKeys.push("WPDEV_HOST_HOME");
+  }
+  const hostId = resolveHostIdentity(loaded.configDir);
+  if (readEnvValue(next, "WPDEV_HOST_UID") !== String(hostId.uid)) {
+    next = setEnvValueInContent(next, "WPDEV_HOST_UID", String(hostId.uid));
+    changed = true;
+    changedKeys.push("WPDEV_HOST_UID");
+  }
+  if (readEnvValue(next, "WPDEV_HOST_GID") !== String(hostId.gid)) {
+    next = setEnvValueInContent(next, "WPDEV_HOST_GID", String(hostId.gid));
+    changed = true;
+    changedKeys.push("WPDEV_HOST_GID");
+  }
+
+  // 4. PHP version → image refs with verified digests when available
+  const phpVersion = readEnvValue(next, "WPDEV_PHP_VERSION") || DEFAULT_PHP_VERSION;
+  const wordpressImage = getWordPressImageWithDigest(loaded.configDir, phpVersion);
+  const wpcliImage = getWpCliImageWithDigest(loaded.configDir, phpVersion);
+  if (readEnvValue(next, "WPDEV_WORDPRESS_IMAGE") !== wordpressImage) {
+    next = setEnvValueInContent(next, "WPDEV_WORDPRESS_IMAGE", wordpressImage);
+    changed = true;
+    changedKeys.push("WPDEV_WORDPRESS_IMAGE");
+  }
+  if (readEnvValue(next, "WPDEV_WPCLI_IMAGE") !== wpcliImage) {
+    next = setEnvValueInContent(next, "WPDEV_WPCLI_IMAGE", wpcliImage);
+    changed = true;
+    changedKeys.push("WPDEV_WPCLI_IMAGE");
+  }
+
+  // 5. Network configuration (subnet, gateway, proxy IP, ip_range)
+  const networkResult = ensureNetworkConfig(loaded, envPath, next);
+  next = networkResult.next;
+  if (networkResult.changed) {
+    changed = true;
+    changedKeys.push(...networkResult.changedKeys);
+  }
+
+  // 6. Bind-local configuration (derived from WP_BIND)
+  const bindResult = ensureBindLocalConfig(next);
+  next = bindResult.next;
+  if (bindResult.changed) {
+    changed = true;
+    changedKeys.push(...bindResult.changedKeys);
+  }
+
+  // 7. Persist .env changes
+  if (changed) {
+    persistEnvContent(envPath, next, loaded);
+  }
+
+  // 8. Generate remoteip.conf with correct content (now that we know SSL status)
+  const sslEnabled = /^(1|true|yes)$/i.test(readEnvValue(next, "WPDEV_LOCAL_HTTPS") || "");
+  ensureRemoteIpConf(loaded, networkResult.networkInfo?.sslProxyIp || null, sslEnabled);
+
+  return {
+    envPath,
+    changed,
+    changedKeys,
+    networkInfo: networkResult.networkInfo,
+  };
+}
+
+/**
+ * Read-only check: are compose prerequisites ready?
+ * Returns an object with `ready: boolean` and `issues: string[]`.
+ *
+ * This does NOT write anything. Use for doctor/diagnostic checks.
+ */
+export function checkComposePrerequisites(loaded: LoadedConfig): {
+  ready: boolean;
+  issues: string[];
+} {
+  const issues: string[] = [];
+  const envPath = getComposeEnvPath(loaded);
+
+  if (!existsSync(envPath)) {
+    issues.push("docker/.env is missing");
+    return { ready: false, issues };
+  }
+
+  const content = readFileSync(envPath, "utf8");
+  if (!readEnvValue(content, "WPDEV_NETWORK_SUBNET")) {
+    issues.push("WPDEV_NETWORK_SUBNET is not set in docker/.env");
+  }
+  if (!readEnvValue(content, "WPDEV_NETWORK_GATEWAY")) {
+    issues.push("WPDEV_NETWORK_GATEWAY is not set in docker/.env");
+  }
+  if (!readEnvValue(content, "WPDEV_HOST_PROJECT_ROOT")) {
+    issues.push("WPDEV_HOST_PROJECT_ROOT is not set in docker/.env");
+  }
+
+  const confPath = getRemoteIpConfPath(loaded);
+  if (!existsSync(confPath)) {
+    issues.push("docker/remoteip.conf is missing");
+  } else {
+    const stat = statSync(confPath);
+    if (!stat.isFile()) {
+      issues.push("docker/remoteip.conf is a directory (should be a file)");
+    }
+  }
+
+  return { ready: issues.length === 0, issues };
+}
+
+/**
+ * Resolve network env vars for compose WITHOUT writing anything.
+ *
+ * Use this for read-only compose operations (down, ps, config) on stacks
+ * with pre-PR#8 .env files that don't have network vars.
+ *
+ * Resolution order:
+ * 1. Existing .env values (if set)
+ * 2. Existing Docker network (if it exists)
+ * 3. Allocate via findAvailableSubnet (same as up path - ONE source of truth)
+ *
+ * Returns env vars to set via compose's env option (not process.env mutation).
+ */
+export function resolveNetworkEnvForCompose(loaded: LoadedConfig): {
+  WPDEV_NETWORK_SUBNET: string;
+  WPDEV_NETWORK_GATEWAY: string;
+  WPDEV_SSL_PROXY_IP: string;
+  WPDEV_ADMIN_TRUSTED_GATEWAY: string;
+  WPDEV_NETWORK_IP_RANGE: string;
+} {
+  const envPath = getComposeEnvPath(loaded);
+  const content = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+
+  const savedSubnet = readEnvValue(content, "WPDEV_NETWORK_SUBNET");
+  const savedGateway = readEnvValue(content, "WPDEV_NETWORK_GATEWAY");
+
+  if (savedSubnet && savedGateway) {
+    const derived = deriveNetworkIps(savedSubnet);
+    const sslProxyIp = readEnvValue(content, "WPDEV_SSL_PROXY_IP") || derived?.sslProxyIp || "";
+    const ipRange = readEnvValue(content, "WPDEV_NETWORK_IP_RANGE") || derived?.ipRange || "";
+    return {
+      WPDEV_NETWORK_SUBNET: savedSubnet,
+      WPDEV_NETWORK_GATEWAY: savedGateway,
+      WPDEV_SSL_PROXY_IP: sslProxyIp,
+      WPDEV_ADMIN_TRUSTED_GATEWAY: savedGateway,
+      WPDEV_NETWORK_IP_RANGE: ipRange,
+    };
+  }
+
+  const projectId = dockerComposeProjectId(loaded.config);
+  const networkName = `${projectId}_wpdev`;
+
+  if (dockerNetworkExists(networkName)) {
+    const actualSubnet = getDockerNetworkSubnet(networkName);
+    const actualGateway = getDockerNetworkGateway(networkName);
+    if (actualSubnet && actualGateway) {
+      const derived = deriveNetworkIps(actualSubnet);
+      return {
+        WPDEV_NETWORK_SUBNET: actualSubnet,
+        WPDEV_NETWORK_GATEWAY: actualGateway,
+        WPDEV_SSL_PROXY_IP: derived?.sslProxyIp || "",
+        WPDEV_ADMIN_TRUSTED_GATEWAY: actualGateway,
+        WPDEV_NETWORK_IP_RANGE: getDockerNetworkIpRange(networkName),
+      };
+    }
+  }
+
+  // Use the SAME allocator as ensureNetworkConfig - ONE source of truth
+  // This prevents subnet conflicts when another project holds .1
+  const available = findAvailableSubnet();
+  if (!available) {
+    const poolPrefix = getSubnetPoolPrefix();
+    throw new Error(
+      `Could not find available subnet in ${poolPrefix}.0.0/16 range for network env resolution. ` +
+        `Run wp-dev up to allocate, or set WPDEV_NETWORK_SUBNET and WPDEV_NETWORK_GATEWAY in docker/.env.`,
+    );
+  }
+  const derived = deriveNetworkIps(available);
+  if (!derived) {
+    throw new Error(`Invalid subnet ${available}`);
+  }
+  return {
+    WPDEV_NETWORK_SUBNET: derived.subnet,
+    WPDEV_NETWORK_GATEWAY: derived.gateway,
+    WPDEV_SSL_PROXY_IP: derived.sslProxyIp,
+    WPDEV_ADMIN_TRUSTED_GATEWAY: derived.gateway,
+    WPDEV_NETWORK_IP_RANGE: derived.ipRange,
+  };
+}
+
+export { getComposeEnvPath };

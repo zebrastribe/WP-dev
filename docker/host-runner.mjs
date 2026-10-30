@@ -5,6 +5,7 @@ import { readFileSync, appendFileSync, mkdirSync, existsSync, chownSync, statSyn
 import { join } from "node:path";
 import { safeArg, wpdevPullPushCommand, wpdevPushThemeCommand } from "./runner-sync-gates.mjs";
 import { stripControlChars, sanitizeArgsForLog } from "./runner-log-utils.mjs";
+import { logPathForWorkdir, logDirForWorkdir, LOG_DIR_NAME, LOG_FILE_NAME } from "./runner-log-constants.mjs";
 
 const PORT = Number(process.env.WPDEV_HOST_RUNNER_PORT || 7683);
 const HOST = process.env.WPDEV_HOST_RUNNER_HOST || "0.0.0.0";
@@ -30,7 +31,8 @@ if (!ALLOWED_ORIGIN) {
   process.exit(1);
 }
 
-const LOG_PATH = join(WORKDIR, "logs", "wp-dev.log");
+// Log path from single source of truth (runner-log-constants.mjs)
+const LOG_PATH = logPathForWorkdir(WORKDIR);
 
 function resolveHostOwnership() {
   const envUid = process.env.WPDEV_HOST_UID ? Number(process.env.WPDEV_HOST_UID) : null;

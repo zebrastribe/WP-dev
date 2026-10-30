@@ -11,6 +11,7 @@ import {
 } from "./runner-sync-gates.mjs";
 import { stripControlChars, sanitizeArgsForLog } from "./runner-log-utils.mjs";
 import { readRemoteEnv, sshOptsShell } from "./runner-remote-env.mjs";
+import { logPathForWorkdir, logDirForWorkdir, LOG_DIR_NAME, LOG_FILE_NAME } from "./runner-log-constants.mjs";
 
 const PORT = Number(process.env.WPDEV_TERMINAL_RUNNER_PORT || 7682);
 const AUTH = process.env.WPDEV_TERMINAL_AUTH || "wpdev:wpdev";
@@ -34,7 +35,8 @@ if (!ALLOWED_ORIGIN) {
   process.exit(1);
 }
 
-const LOG_PATH = join(WORKDIR, "logs", "wp-dev.log");
+// Log path from single source of truth (runner-log-constants.mjs)
+const LOG_PATH = logPathForWorkdir(WORKDIR);
 
 function resolveHostOwnership() {
   const envUid = process.env.WPDEV_HOST_UID ? Number(process.env.WPDEV_HOST_UID) : null;

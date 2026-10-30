@@ -9,18 +9,45 @@ if [ -z "$AUTH" ] || [ "$AUTH" = "wpdev:wpdev" ] || [ "$AUTH" = "change-me-user:
   exit 1
 fi
 
-# Security notes on WPDEV_TERMINAL_AUTH:
-# - Credential is visible in `ps` output; this is acceptable for a local dev tool bound to 127.0.0.1
-# - ttyd only accepts credentials via -c flag (no file/stdin option)
-# - ttyd -d 3 suppresses the base64 banner that would reveal the credential at startup
-# - WPDEV_TERMINAL_AUTH is stripped from ttyd's environment via `env -u` so shells don't inherit it
-# - The service is bound to 127.0.0.1 (via docker-compose ports) so only localhost can connect
-# - The UI masks the input field (type="password")
-# - The admin API never logs credential values
+# G09 FIX: The credential must not appear in any process's argv.
+# Architecture:
+# 1. Auth proxy (Node) listens on the published port (7681), enforces Basic auth
+# 2. ttyd runs on container-internal loopback (127.0.0.1:17681) without -c
+# 3. ttyd uses --auth-header to trust the proxy's header after auth succeeds
+# 4. WPDEV_TERMINAL_AUTH is stripped from ttyd's environment (env -u)
+# 5. Proxy Origin check: same Host as the terminal tab (host-mapped port) OR
+#    WPDEV_TERMINAL_RUNNER_ORIGIN allowlist — NOT admin-only (terminal opens in its own tab)
+#
+# This approach was chosen because ttyd does not support credential files:
+# - Issue #1262: "Support --credential-file" (closed, not planned)
+# - PR #700: "Add file credential option" (closed, not merged)
+# See: https://github.com/tsl0922/ttyd/issues/1262
+#      https://github.com/tsl0922/ttyd/pull/700
+
+# Internal port for ttyd (not published, only accessible within the container)
+TTYD_INTERNAL_PORT="${WPDEV_TTYD_INTERNAL_PORT:-17681}"
+export WPDEV_TTYD_INTERNAL_PORT="$TTYD_INTERNAL_PORT"
 
 # Sync/terminal runners keep root so they can use the mounted docker.sock for pull/push.
 node /workspace/docker/terminal-runner.mjs >>/tmp/terminal-runner.log 2>&1 &
 node /workspace/docker/host-runner.mjs >>/tmp/sync-runner.log 2>&1 &
+
+# Start the auth proxy (handles Basic auth, Origin check, forwards to ttyd)
+# The proxy reads WPDEV_TERMINAL_AUTH from the environment.
+# Run in background and check if it exits - if it does, exit the container so
+# the restart policy can re-create it (the proxy is essential).
+node /workspace/docker/ttyd-auth-proxy.mjs >>/tmp/ttyd-auth-proxy.log 2>&1 &
+PROXY_PID=$!
+
+# Wait a moment for the proxy to start
+sleep 0.5
+
+# Check if proxy started successfully
+if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+  echo "ERROR: Auth proxy failed to start. Check /tmp/ttyd-auth-proxy.log" >&2
+  cat /tmp/ttyd-auth-proxy.log >&2 || true
+  exit 1
+fi
 
 # Interactive ttyd: host developer uid (workspace writes) but NOT root; docker CLI is root-only.
 HOST_UID="${WPDEV_HOST_UID:-}"
@@ -38,7 +65,11 @@ chown root:root /usr/local/bin/docker /usr/local/lib/docker/cli-plugins/docker-c
 chmod 700 /usr/local/bin/docker /usr/bin/docker /usr/bin/docker-compose 2>/dev/null || true
 chmod 700 /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
 
-# -d 3: quieter than default (7); suppresses ttyd's startup banner that prints Basic-auth as base64.
-# -O: check Origin header matches the terminal URL (defense-in-depth against CSRF).
-# Use env -u to strip WPDEV_TERMINAL_AUTH from ttyd's environment so shells don't inherit it.
-exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -O -p 7681 -c "$AUTH" -w "$WD" bash -lc "cd \"$WD\" && exec bash"
+# -d 3: quieter than default (7); suppresses ttyd's startup banner.
+# -i 127.0.0.1: bind to container-internal loopback only (not accessible from outside)
+# -H X-WPDEV-Auth: trust this header from the auth proxy (reverse-proxy auth mode)
+# NO -c flag: credential is NOT on the command line (G09 requirement)
+# env -u: strip WPDEV_TERMINAL_AUTH from ttyd's environment so shells don't inherit it.
+#
+# The auth proxy handles Basic auth and forwards to this internal ttyd instance.
+exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -i 127.0.0.1 -p "$TTYD_INTERNAL_PORT" -H X-WPDEV-Auth -w "$WD" bash -lc "cd \"$WD\" && exec bash"

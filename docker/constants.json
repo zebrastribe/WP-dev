@@ -1,0 +1,13 @@
+{
+  "$comment": "Shared constants between TypeScript CLI and MJS runners. SINGLE SOURCE OF TRUTH.",
+  "log": {
+    "dirName": "logs",
+    "fileName": "wp-dev.log"
+  },
+  "terminal": {
+    "defaultPort": 7681,
+    "defaultInternalPort": 17681,
+    "runnerPort": 7682,
+    "hostRunnerPort": 7683
+  }
+}

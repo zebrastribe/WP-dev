@@ -20,6 +20,7 @@ import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
 import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
 import { logInfo } from "../utils/logger.js";
 import { compose } from "../services/docker-compose.js";
+import { checkComposePrerequisites, resolveNetworkEnvForCompose } from "../utils/compose-prerequisites.js";
 import { getRunningSupervisorInfo } from "../supervisor/recovery.js";
 import { isLockStale, readLockData } from "../supervisor/project-lock.js";
 import { loadRegistry } from "../supervisor/service-registry.js";
@@ -81,6 +82,22 @@ async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fai
   const marker = `wp-dev-doctor-${process.pid}`;
   const script = buildLocalRuntimeWriteProbeShell("/var/www/html", marker);
   const label = `${runtimeWritePathsLabel()}; core (wp-admin/wp-includes); ${hostSharedWritePathsLabel()}`;
+
+  // Read-only check: doctor does NOT write prerequisites, it reports them as FAIL
+  const prereqCheck = checkComposePrerequisites(loaded);
+  if (!prereqCheck.ready) {
+    console.error("Compose prerequisites: FAIL");
+    for (const issue of prereqCheck.issues) {
+      console.error(`  - ${issue}`);
+    }
+    console.error("Fix: run `npm run wp-dev -- up` to configure network and create required files.");
+    return "fail";
+  }
+
+  // Supply network env vars without writing (doctor is read-only)
+  // Pass via compose env option - NO mutation of process.env.
+  const networkEnv = resolveNetworkEnvForCompose(loaded);
+
   try {
     await compose(
       loaded.configDir,
@@ -97,7 +114,7 @@ async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fai
         "-lc",
         script,
       ],
-      { stdio: "pipe" },
+      { stdio: "pipe", env: networkEnv },
     );
     console.error(`Local runtime write: OK (www-data can write ${label})`);
     return "ok";

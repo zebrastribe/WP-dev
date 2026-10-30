@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { execa } from "execa";
 import type { LoadedConfig } from "../config/load.js";
 import { resolveFromConfigDir } from "../config/load.js";
 import { listRecentBackups } from "./backup.js";
@@ -8,7 +7,8 @@ import { isLocalWpInstalled } from "../services/wpcli.js";
 import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
 import { getLocalUrlPortMismatch, getPublishedLocalAccess } from "../utils/published-local-urls.js";
 import { openBrowserCommand } from "../utils/platform-hints.js";
-import { getComposeProjectDir, getDockerComposeLeadArgs } from "../services/docker-compose.js";
+import { composeRead } from "../services/docker-compose.js";
+import { resolveNetworkEnvForCompose } from "../utils/compose-prerequisites.js";
 
 export async function cmdStatus(loaded: LoadedConfig): Promise<void> {
   const { config, configDir } = loaded;
@@ -28,15 +28,12 @@ export async function cmdStatus(loaded: LoadedConfig): Promise<void> {
     );
   }
 
+  // Use resolveNetworkEnvForCompose for network env (works with old .env files)
   let stackRunning = false;
   try {
-    const projectDir = getComposeProjectDir(configDir, config);
-    const r = await execa(
-      "docker",
-      [...getDockerComposeLeadArgs(config), "ps", "--status", "running"],
-      { cwd: projectDir, reject: false },
-    );
-    stackRunning = r.exitCode === 0 && /wordpress|db/.test(String(r.stdout ?? ""));
+    const networkEnv = resolveNetworkEnvForCompose(loaded);
+    const r = await composeRead(loaded, ["ps", "--status", "running"], networkEnv);
+    stackRunning = r.exitCode === 0 && /wordpress|db/.test(r.stdout);
   } catch {
     stackRunning = false;
   }

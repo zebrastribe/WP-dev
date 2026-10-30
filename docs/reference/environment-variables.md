@@ -55,29 +55,43 @@ Auto-configured by `wp-dev up`. Override only if needed for advanced setups.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WP_BIND` | `127.0.0.1` | Bind address for WP port (`127.0.0.1` = localhost only, `0.0.0.0` = all interfaces). `localhost` is normalized to `127.0.0.1`. |
+| `WP_BIND` | `127.0.0.1` | Bind address for WP port (`127.0.0.1` = localhost only, `0.0.0.0` = all interfaces). Case-insensitive `localhost` is normalized to `127.0.0.1`. Quoted values are accepted. |
 | `WPDEV_NETWORK_SUBNET` | (auto) | Docker network subnet (e.g. `172.28.1.0/24`) |
 | `WPDEV_NETWORK_GATEWAY` | (auto) | Docker network gateway (e.g. `172.28.1.1`) |
+| `WPDEV_NETWORK_IP_RANGE` | (auto) | Dynamic IP allocation range (excludes fixed IPs). Derived from subnet. |
 | `WPDEV_SSL_PROXY_IP` | (auto) | Fixed IP for SSL proxy container |
+| `WPDEV_SUBNET_POOL` | `172.28` | Subnet pool prefix for new allocations (e.g. `172.29`). See below. |
 
-**Subnet pool override:** Set `WPDEV_SUBNET_POOL=172.29` in your **shell environment** (not docker/.env) before running `wp-dev up` to use a different prefix. This is shell-only because subnet allocation happens before reading docker/.env.
+**Subnet pool override:** Set `WPDEV_SUBNET_POOL=172.29` in `docker/.env` or your shell environment before running `wp-dev up` to use a different prefix. Shell environment takes precedence over docker/.env. This is useful if `172.28.x.x` conflicts with your VPN or cloud private network.
+
+**Host route awareness:** The subnet allocator also checks host routes (`ip route`) and interface addresses to avoid conflicts with VPNs (Tailscale, WireGuard), cloud private networks (Hetzner vSwitch), and other local networks.
 
 **Two stacks on one host** get unique subnets automatically:
 - `wp-dev up` scans existing Docker networks to find an available /24 subnet
 - If a saved subnet collides with another stack (e.g., stack A saves .1, goes down, stack C takes .1), the next `wp-dev up` detects the collision and reallocates
+- Minimum subnet size is /28 (16 addresses) to accommodate gateway (.1) and SSL proxy (.10) IPs
+- Subnets /29 and smaller are refused with a clear error message
 
-**Compose fallbacks:** The docker-compose.yml has fallback defaults (`172.28.0.0/24`, `172.28.0.1`) for `docker compose down` to work without `wp-dev up`. These are migration-only; normal usage always runs `wp-dev up` first.
+**IP range reservation:** The `WPDEV_NETWORK_IP_RANGE` reserves addresses .0-.15 for fixed IPs (network, gateway, SSL proxy) so dynamic containers (e.g. `compose run --rm wpcli`) start from .16 and cannot take the SSL proxy's address.
+
+**Legacy network cleanup:** After upgrading from an older version, `wp-dev up` automatically removes the unused `<project>_default` network if no containers are attached.
+
+**Compose fallbacks:** The docker-compose.yml has fallback defaults (`172.28.0.0/24`, `172.28.0.1`) for `docker compose down` to work without `wp-dev up`. The `ip_range` has no fallback (derived from subnet by `wp-dev up`). These fallbacks are migration-only; normal usage always runs `wp-dev up` first.
 
 ## Security (Gate 0)
 
-These variables protect the browser admin API from spoofed requests. Auto-configured by `wp-dev up`.
+These variables protect the browser admin API from spoofed requests. **Auto-configured by `wp-dev up` - do not edit manually.**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WPDEV_ADMIN_TRUSTED_GATEWAY` | (gateway) | Docker gateway IP(s) allowed to reach admin API |
-| `WPDEV_WP_BIND_LOCAL` | (derived) | `1` if WP_BIND is localhost, `0` otherwise |
+| `WPDEV_ADMIN_TRUSTED_GATEWAY` | (gateway) | Docker gateway IP(s) allowed to reach admin API. **Auto-synced** by `wp-dev up`. |
+| `WPDEV_WP_BIND_LOCAL` | (derived) | `1` if WP_BIND is localhost, `0` otherwise. **Derived** from WP_BIND. |
+
+**Important:** `WPDEV_ADMIN_TRUSTED_GATEWAY` is automatically synced to the network gateway on every `wp-dev up`. Do not hand-edit this value; it will be overwritten.
 
 **How it works:** The admin API checks `REMOTE_ADDR` against loopback (`127.0.0.1`, `::1`) and the trusted gateway. Header spoofing (Host, Origin, X-Forwarded-For) is blocked because `REMOTE_ADDR` reveals the true caller position. Auto-unlock features also require `WPDEV_WP_BIND_LOCAL=1` to prevent attacks when the port is exposed to LAN.
+
+**Non-loopback WP_BIND:** When `WP_BIND` is set to a non-loopback address (e.g., `0.0.0.0`), the admin API is **completely disabled** (returns 403 for all requests). This fail-closed behavior prevents exposure on LAN or public networks where Docker may relay traffic through the gateway.
 
 ## Browser admin and terminal
 

@@ -7,9 +7,13 @@
 # Network configuration: `wp-dev up` sets WPDEV_NETWORK_SUBNET, WPDEV_NETWORK_GATEWAY, and
 # WPDEV_SSL_PROXY_IP by detecting an available subnet and deriving the gateway. Two stacks
 # on one host get unique subnets automatically.
+#
+# Image pinning: Images are pinned by digest for reproducible builds.
+# Override via WPDEV_*_IMAGE in docker/.env to use different versions.
+# Digests verified 2026-10-30.
 services:
   db:
-    image: mysql:8.0
+    image: ${WPDEV_MYSQL_IMAGE:-mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b}
     command:
       - mysqld
       - --default-authentication-plugin=mysql_native_password
@@ -35,7 +39,9 @@ services:
       start_period: 15s
 
   wordpress:
-    image: wordpress:php${WPDEV_PHP_VERSION:-8.2}-apache
+    # PHP version is configurable via WPDEV_PHP_VERSION. wp-dev up sets WPDEV_WORDPRESS_IMAGE
+    # with the correct digest from docker/image-digests.json. Fallback allows standalone compose.
+    image: ${WPDEV_WORDPRESS_IMAGE:-wordpress:php${WPDEV_PHP_VERSION:-8.2}-apache}
     restart: unless-stopped
     networks:
       - wpdev
@@ -78,7 +84,7 @@ services:
         condition: service_healthy
 
   local_ssl_proxy:
-    image: nginx:1.27-alpine
+    image: ${WPDEV_NGINX_IMAGE:-nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10}
     restart: unless-stopped
     networks:
       wpdev:
@@ -97,7 +103,8 @@ services:
 
   # Official `wordpress` image has no `wp` binary; wp-dev uses this service for WP-CLI.
   wpcli:
-    image: wordpress:cli-php${WPDEV_PHP_VERSION:-8.2}
+    # PHP version matches wordpress service. wp-dev up sets WPDEV_WPCLI_IMAGE with digest.
+    image: ${WPDEV_WPCLI_IMAGE:-wordpress:cli-php${WPDEV_PHP_VERSION:-8.2}}
     user: "33:33"
     networks:
       - wpdev
@@ -133,6 +140,9 @@ services:
       WPDEV_TERMINAL_RUNNER_ORIGIN: ${WPDEV_TERMINAL_RUNNER_ORIGIN:-http://localhost:${WP_PORT:-8888}}
       WPDEV_TERMINAL_WORKDIR: ${WPDEV_TERMINAL_WORKDIR:-/workspace}
       # Fixed container listen ports; host publish ports are in ports: above.
+      # G09: Auth proxy listens on WPDEV_TERMINAL_PORT, ttyd on internal port.
+      WPDEV_TERMINAL_PORT: "7681"
+      WPDEV_TTYD_INTERNAL_PORT: "17681"
       WPDEV_TERMINAL_RUNNER_PORT: "7682"
       WPDEV_HOST_RUNNER_PORT: "7683"
       # Host developer uid/gid so interactive ttyd can write the bind-mounted workspace
@@ -153,13 +163,21 @@ networks:
   # Network name: <compose-project>_wpdev (e.g., mysite_wpdev)
   wpdev:
     driver: bridge
-    # Subnet/gateway set by wp-dev up. Fallback allows `docker compose down` with old .env.
-    # The fallback 172.28.0.0/24 is used ONLY for migration; wp-dev up allocates properly.
+    # Subnet/gateway MUST be set by wp-dev up before any compose call.
+    # Using required variable syntax - compose fails if unset, preventing silent fallback.
+    # Migration: existing .env files from pre-PR#8 have these values set.
     # Override: WPDEV_NETWORK_SUBNET, WPDEV_NETWORK_GATEWAY in docker/.env
+    #
+    # ip_range reserves addresses for fixed IPs (gateway .1, SSL proxy .10).
+    # Dynamic containers get addresses from .16 onwards, preventing them from
+    # taking the SSL proxy's IP before it starts.
+    # WPDEV_NETWORK_IP_RANGE is derived from the subnet by wp-dev up.
+    # Empty ip_range (for small subnets) means no restriction.
     ipam:
       config:
-        - subnet: ${WPDEV_NETWORK_SUBNET:-172.28.0.0/24}
-          gateway: ${WPDEV_NETWORK_GATEWAY:-172.28.0.1}
+        - subnet: ${WPDEV_NETWORK_SUBNET:?Run wp-dev up to configure network}
+          gateway: ${WPDEV_NETWORK_GATEWAY:?Run wp-dev up to configure network}
+          ip_range: ${WPDEV_NETWORK_IP_RANGE:-}
 
 volumes:
   db_data:
