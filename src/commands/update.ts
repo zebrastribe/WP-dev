@@ -66,6 +66,37 @@ async function runShellStep(configDir: string, shell: string): Promise<void> {
   await execa("bash", ["-lc", shell], { cwd: configDir, stdio: "inherit" });
 }
 
+/** Record HEAD before mutating the tool tree (§25 P1.9 / §27 F). */
+export async function readGitHeadSha(configDir: string): Promise<string | null> {
+  if (!existsSync(join(configDir, ".git"))) return null;
+  const r = await execa("git", ["-c", "safe.directory=.", "rev-parse", "HEAD"], {
+    cwd: configDir,
+  });
+  const sha = r.stdout.trim();
+  return sha.length > 0 ? sha : null;
+}
+
+/** Restore tool sources to snapshot SHA and rebuild CLI (never touches site DB/content). */
+export async function rollbackWpDevTool(configDir: string, sha: string): Promise<void> {
+  await execa("git", ["-c", "safe.directory=.", "reset", "--hard", sha], {
+    cwd: configDir,
+    stdio: "inherit",
+  });
+  await execa("bash", ["-lc", "npm install && npm run build"], {
+    cwd: configDir,
+    stdio: "inherit",
+  });
+}
+
+/** Post-update smoke: CLI must start and print help. */
+export async function verifyWpDevCli(configDir: string): Promise<void> {
+  const cli = join(configDir, "dist", "cli.js");
+  if (!existsSync(cli)) {
+    throw new Error(`Update verify failed: missing ${cli}`);
+  }
+  await execa("node", [cli, "--help"], { cwd: configDir });
+}
+
 export async function cmdUpdate(loaded: LoadedConfig, options: UpdateOptions = {}): Promise<void> {
   const { configDir, config } = loaded;
   const preflight = await collectUpdatePreflight(configDir, loaded);
@@ -114,29 +145,71 @@ export async function cmdUpdate(loaded: LoadedConfig, options: UpdateOptions = {
     }
   }
 
-  let syncLock: SyncLockHandle | null = null;
-  try {
-    for (const step of steps) {
-      logInfo(`update: ${step.label}`);
-      console.error(`→ ${step.label}`);
+  const snapshotSha = await readGitHeadSha(configDir);
+  if (snapshotSha) {
+    console.error(`Snapshot: tool HEAD ${snapshotSha} (rollback target if update fails)\n`);
+  } else {
+    console.error(
+      "Warning: no git HEAD snapshot — automatic tool rollback unavailable for this tree.\n",
+    );
+  }
 
-      if (step.shell.startsWith("npm run wp-dev -- down")) {
-        // Serialize with pull/push/restore so stack restart cannot race a sync.
-        syncLock = acquireSyncLock(config.project, "update:restart");
-        try {
-          await cmdDown(loaded);
-          await cmdUp(loaded);
-        } finally {
-          releaseSyncLock(syncLock);
-          syncLock = null;
+  let syncLock: SyncLockHandle | null = null;
+  let failedStep: string | undefined;
+  try {
+    try {
+      for (const step of steps) {
+        failedStep = step.label;
+        logInfo(`update: ${step.label}`);
+        console.error(`→ ${step.label}`);
+
+        if (step.shell.startsWith("npm run wp-dev -- down")) {
+          // Serialize with pull/push/restore so stack restart cannot race a sync.
+          syncLock = acquireSyncLock(config.project, "update:restart");
+          try {
+            await cmdDown(loaded);
+            await cmdUp(loaded);
+          } finally {
+            releaseSyncLock(syncLock);
+            syncLock = null;
+          }
+          continue;
         }
-        continue;
+
+        await runShellStep(configDir, step.shell);
       }
 
-      await runShellStep(configDir, step.shell);
-    }
+      failedStep = "Verify CLI";
+      console.error("→ Verify CLI (--help)");
+      await verifyWpDevCli(configDir);
 
-    console.error("\nwp-dev update finished successfully.\n");
+      console.error("\nwp-dev update finished successfully.\n");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (snapshotSha) {
+        console.error(
+          `\nUpdate failed at: ${failedStep ?? "unknown"}. Rolling back tool to ${snapshotSha}…`,
+        );
+        try {
+          await rollbackWpDevTool(configDir, snapshotSha);
+          console.error(
+            `Rolled back to ${snapshotSha}. WordPress site files and database were not modified.\n` +
+              `Next: fix the failure (${msg}), then re-run: npm run wp-dev -- update`,
+          );
+        } catch (rbErr) {
+          const rb = rbErr instanceof Error ? rbErr.message : String(rbErr);
+          console.error(
+            `Warning: tool rollback also failed (${rb}). Snapshot SHA was ${snapshotSha}. ` +
+              `Site wordpress/ content and DB were still not touched by update.`,
+          );
+        }
+      } else {
+        console.error(
+          `\nUpdate failed at: ${failedStep ?? "unknown"} (${msg}). No git snapshot — manual tool restore required.`,
+        );
+      }
+      throw err;
+    }
   } finally {
     releaseSyncLock(syncLock);
     if (!options.dryRun && !options.preflightOnly) {
