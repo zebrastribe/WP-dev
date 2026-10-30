@@ -60,32 +60,21 @@ export function writeFileAtomic(target: string, content: string, options: Atomic
       closeSync(tmpFd);
     }
     const flags = existsSync(target) ? "w" : "wx";
-    let writeSucceeded = false;
     try {
       const fd = openSync(target, flags, mode);
       try {
         const buf = Buffer.from(content, "utf8");
         writeSync(fd, buf, 0, buf.length, 0);
         fsyncSync(fd);
-        writeSucceeded = true;
       } finally {
         closeSync(fd);
       }
     } catch (writeErr) {
-      logInfo(`fs: inPlace write to ${target} failed, recovering from temp`);
-      copyFileSync(tmp, target);
-      const recoveryFd = openSync(target, "r");
-      try {
-        fsyncSync(recoveryFd);
-      } finally {
-        closeSync(recoveryFd);
-      }
-      writeSucceeded = true;
+      logInfo(`fs: inPlace write to ${target} failed; temp file preserved at ${tmp}`);
+      throw writeErr;
     }
     unlinkSync(tmp);
-    if (writeSucceeded) {
-      logInfo(`fs: inPlace write to ${target} (inode preserved)`);
-    }
+    logInfo(`fs: inPlace write to ${target} (inode preserved)`);
     if (options.configDir && options.projectId) {
       fsAuditLog(options.configDir, options.projectId, "fs.write_inplace", { path: target });
     }

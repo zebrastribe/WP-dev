@@ -45,6 +45,18 @@ describe("fs atomic-write", () => {
     expect(inoAfter).toBe(inoBefore);
     expect(readFileSync(target, "utf8")).toBe('{"v":2}\n');
   });
+
+  it("inPlace write preserves temp file on failure", () => {
+    if (process.getuid?.() === 0) return;
+    const target = join(dir, "readonly.json");
+    writeFileAtomic(target, '{"v":1}\n');
+    const fs = require("node:fs");
+    fs.chmodSync(target, 0o444);
+    expect(() => writeFileAtomic(target, '{"v":2}\n', { inPlace: true })).toThrow(/EACCES|EPERM/);
+    const tmpFiles = fs.readdirSync(dir).filter((f: string) => f.endsWith(".tmp"));
+    expect(tmpFiles.length).toBe(1);
+    fs.chmodSync(target, 0o644);
+  });
 });
 
 describe("fs path-resolver", () => {

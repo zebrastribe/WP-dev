@@ -78,7 +78,7 @@ export function detectPassphraseProtectedKey(keyPath: string): boolean {
       return false;
     }
     const stderr = result.stderr ?? "";
-    if (/incorrect passphrase|bad passphrase|encrypted private|load key.*encrypted/i.test(stderr)) {
+    if (/incorrect passphrase|bad passphrase/i.test(stderr)) {
       return true;
     }
     return false;
@@ -162,18 +162,11 @@ export function checkSshPreflight(remote: RemoteEnvConfig): SshPreflightResult {
   const discovered = discoverIdentityFiles(remote);
   const hasAgent = process.env.SSH_AUTH_SOCK && process.env.SSH_AUTH_SOCK.trim() !== "";
   const configuredKeyMissing = remote.identityFile && !result.keyExists;
-  if (discovered.length === 0 && !hasAgent && !configuredKeyMissing) {
-    if (remote.identityFile) {
-      result.warnings.push(
-        "No SSH keys found and no ssh-agent running. " +
-          `Update staging.identityFile / production.identityFile to point to an existing key.`,
-      );
-    } else {
-      result.warnings.push(
-        "No SSH keys found and no ssh-agent running. " +
-          "Create a key: ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519",
-      );
-    }
+  if (discovered.length === 0 && !hasAgent && !configuredKeyMissing && !result.keyExists) {
+    result.warnings.push(
+      "No SSH keys found and no ssh-agent running. " +
+        "Create a key: ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519",
+    );
   }
 
   return result;

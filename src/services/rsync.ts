@@ -44,9 +44,8 @@ function logRsyncRetry(info: {
 }
 
 function parseDryRunStats(output: string): { fileCount: number; totalBytes: number } | null {
-  const filesMatch = output.match(/Number of (?:regular )?files(?: transferred)?:\s*([\d,]+)/i);
-  const sizeMatch = output.match(/Total (?:transferred )?file size:\s*([\d,]+)/i) ||
-                    output.match(/total size is\s+([\d,]+)/i);
+  const filesMatch = output.match(/Number of regular files transferred:\s*([\d,]+)/i);
+  const sizeMatch = output.match(/Total transferred file size:\s*([\d,]+)/i);
   if (!filesMatch && !sizeMatch) return null;
   const fileCount = filesMatch ? parseInt(filesMatch[1].replace(/,/g, ""), 10) : 0;
   const totalBytes = sizeMatch ? parseInt(sizeMatch[1].replace(/,/g, ""), 10) : 0;
@@ -68,15 +67,24 @@ async function execRsync(
   const finalArgs = options.dryRun ? [...args, "--stats"] : args;
   const result = await runRsyncWithConnectionRetries(
     async () => {
-      const r = await execa("rsync", finalArgs, {
-        reject: false,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      if (r.stdout) {
-        process.stdout.write(r.stdout);
+      if (options.dryRun) {
+        const r = await execa("rsync", finalArgs, {
+          reject: false,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        if (r.stdout) {
+          process.stdout.write(r.stdout);
+        }
+        return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "", stdout: r.stdout ?? "" };
+      } else {
+        const r = await execa("rsync", finalArgs, {
+          reject: false,
+          stdout: "inherit",
+          stderr: "pipe",
+        });
+        return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "", stdout: "" };
       }
-      return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "", stdout: r.stdout ?? "" };
     },
     {
       maxAttempts: options.dryRun ? 2 : 5,
@@ -88,7 +96,7 @@ async function execRsync(
   if (options.dryRun && result.stdout) {
     const summary = parseDryRunStats(result.stdout);
     if (summary && (summary.fileCount > 0 || summary.totalBytes > 0)) {
-      console.error(`\n[dry-run summary] ${summary.fileCount} files, ${formatBytes(summary.totalBytes)} total`);
+      console.error(`\n\n[dry-run summary] ${summary.fileCount} files, ${formatBytes(summary.totalBytes)} total\n`);
     }
   }
   return result;

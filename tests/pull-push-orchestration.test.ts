@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { minimalWpDevConfig } from "./helpers/fixtures.js";
@@ -114,6 +114,10 @@ describe("cmdPull orchestration", () => {
     loaded = makeLoaded(mkdtempSync(join(tmpdir(), "wp-dev-pull-")));
   });
 
+  afterEach(() => {
+    if (loaded?.configDir) rmSync(loaded.configDir, { recursive: true, force: true });
+  });
+
   it("dry-run only calls rsyncPull", async () => {
     const { cmdPull } = await import("../src/commands/pull.js");
     await cmdPull(loaded, "staging", { dryRun: true, backupLocal: true });
@@ -159,6 +163,10 @@ describe("cmdPush orchestration", () => {
     rsyncPushMock.mockResolvedValue(undefined);
     connectSshMock.mockReset().mockResolvedValue(mockSafeSshSession());
     loaded = makeLoaded(mkdtempSync(join(tmpdir(), "wp-dev-push-")));
+  });
+
+  afterEach(() => {
+    if (loaded?.configDir) rmSync(loaded.configDir, { recursive: true, force: true });
   });
 
   it("dry-run only calls rsyncPush", async () => {

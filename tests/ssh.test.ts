@@ -205,42 +205,61 @@ describe("formatSshAuthError", () => {
 
 describe("detectPassphraseProtectedKey", () => {
   let tempDir: string;
-  let hasSshKeygen = true;
+
+  const sshKeygenAvailable = (() => {
+    const check = spawnSync("ssh-keygen", ["-h"], { encoding: "utf8", timeout: 2000 });
+    return check.status !== null;
+  })();
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(os.tmpdir(), "passphrase-detect-"));
-    const check = spawnSync("ssh-keygen", ["-h"], { encoding: "utf8", timeout: 2000 });
-    hasSshKeygen = check.status !== null;
   });
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("detects passphrase-protected key via ssh-keygen", () => {
-    if (!hasSshKeygen) return;
+  it.skipIf(!sshKeygenAvailable)("detects passphrase-protected key via ssh-keygen", (ctx) => {
     const keyPath = join(tempDir, "test-key-protected");
     const result = spawnSync("ssh-keygen", ["-t", "ed25519", "-N", "testpass", "-f", keyPath, "-q"], {
       encoding: "utf8",
       timeout: 10000,
     });
-    if (result.status !== 0) return;
+    if (result.status !== 0) {
+      ctx.skip();
+      return;
+    }
     expect(detectPassphraseProtectedKey(keyPath)).toBe(true);
   });
 
-  it("returns false for unprotected key", () => {
-    if (!hasSshKeygen) return;
+  it.skipIf(!sshKeygenAvailable)("returns false for unprotected key", (ctx) => {
     const keyPath = join(tempDir, "test-key-plain");
     const result = spawnSync("ssh-keygen", ["-t", "ed25519", "-N", "", "-f", keyPath, "-q"], {
       encoding: "utf8",
       timeout: 10000,
     });
-    if (result.status !== 0) return;
+    if (result.status !== 0) {
+      ctx.skip();
+      return;
+    }
     expect(detectPassphraseProtectedKey(keyPath)).toBe(false);
   });
 
   it("returns false for nonexistent file", () => {
     expect(detectPassphraseProtectedKey("/nonexistent/key")).toBe(false);
+  });
+
+  it.skipIf(!sshKeygenAvailable)("does not detect passphrase in filename containing 'encrypted'", (ctx) => {
+    const keyPath = join(tempDir, "my-encrypted-backup.pem");
+    const result = spawnSync("ssh-keygen", ["-t", "ed25519", "-N", "", "-f", keyPath, "-q"], {
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    if (result.status !== 0) {
+      ctx.skip();
+      return;
+    }
+    expect(detectPassphraseProtectedKey(keyPath)).toBe(false);
   });
 });
 

@@ -81,9 +81,9 @@ See [Backups](../guides/backups.md).
 
 ## What is the browser wizard?
 
-`http://localhost:<your-port>/admin/` — setup UI built into WordPress. See [Browser admin](../guides/browser-admin.md).
+`http://localhost:8888/admin/` — setup UI built into WordPress. See [Browser admin](../guides/browser-admin.md).
 
-## My port is busy — what now?
+## Port 8888 is busy — what now?
 
 Change `WP_PORT` in `docker/.env` and `local.url` in config, or run `wp-dev up --relocate-ports`.
 

@@ -121,7 +121,7 @@ function commandForAction(action, args) {
     }
     const sshCmd = `ssh ${sshOpts} ${user}@${host}`;
     return (
-      `echo "Running: ${sshCmd.replace(/'/g, "\\'")} ..."; ` +
+      `echo "Running: ${sshCmd} ..."; ` +
       `${sshCmd} ` +
       `'set -e; P=${path}; ` +
       `test -d "\$P" || { echo "FAIL: path does not exist: \$P"; exit 1; }; ` +
