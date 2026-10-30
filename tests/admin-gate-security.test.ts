@@ -625,9 +625,12 @@ switch ($test) {
     case 'enforce_local_admin_only':
         // This function calls exit(), so we capture output and use register_shutdown_function
         ob_start();
-        $exitCode = 0;
-        register_shutdown_function(function() use (&$exitCode) {
+        register_shutdown_function(function() {
             $output = ob_get_clean();
+            // Handle case where ob_get_clean returns false (buffer already cleaned)
+            if ($output === false) {
+                $output = '';
+            }
             // Parse the JSON output from wpdev_enforce_local_admin_only
             $decoded = json_decode($output, true);
             $httpCode = http_response_code();
