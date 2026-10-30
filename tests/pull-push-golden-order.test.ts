@@ -85,10 +85,14 @@ vi.mock("../src/utils/host-prereq.js", () => ({
   assertHostSyncTools: vi.fn(),
 }));
 
-vi.mock("@wpdev/sync-engine", () => ({
-  acquireSyncLock: vi.fn().mockReturnValue({ path: "mock-lock", release: vi.fn() }),
-  releaseSyncLock: vi.fn(),
-}));
+vi.mock("@wpdev/sync-engine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@wpdev/sync-engine")>();
+  return {
+    ...actual,
+    acquireSyncLock: vi.fn().mockReturnValue({ path: "mock-lock", release: vi.fn() }),
+    releaseSyncLock: vi.fn(),
+  };
+});
 
 vi.mock("../src/services/wpcli.js", () => ({
   wpLocalDbExportToFile: (...args: unknown[]) => wpLocalDbExportToFileMock(...args),

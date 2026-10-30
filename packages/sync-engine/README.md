@@ -4,8 +4,8 @@ Shared sync **policy** for the public CLI and (later) private hosted workers.
 
 ## Phase 1 boundary (§25 P1.2)
 
-- **In package now:** sync lock (`acquireSyncLock` / `releaseSyncLock`).
-- **Still in `src/` (to move next):** rsync, wpcli helpers, sync excludes, SSH host-key pin API.
+- **In package now:** sync lock; SSH host-key pin/verify; URL variants; safe/recommended exclude constants.
+- **Still in `src/` (to move next):** rsync, wpcli helpers, full exclude rule builders (config-aware).
 - **Never here:** control-api AuthZ, credential vault, Docker-per-job launcher.
 
 Commands stay thin wrappers. Do not fork sync behavior in `WP-dev-cloud`.

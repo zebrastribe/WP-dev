@@ -1,9 +1,8 @@
 /**
  * @wpdev/sync-engine — Phase 1 extract (plan §25 P1.2).
  *
- * Seed surface: per-project sync lock (P1.3).
- * Next moves (same package, no policy rewrite): rsync/wpcli helpers, excludes,
- * known-hosts pin API (already in src/utils/ssh-host-key.ts — re-home here).
+ * Shared sync policy for the public CLI and (later) private hosted workers.
+ * Commands stay thin wrappers. No control-api / vault here.
  */
 
 export {
@@ -15,3 +14,20 @@ export {
   type SyncLockHandle,
   type SyncLockPayload,
 } from "./sync-lock.js";
+
+export {
+  assertSshHostPinned,
+  createSshHostVerifier,
+  knownHostSha256Fingerprints,
+  knownHostsTarget,
+  sha256FingerprintBase64,
+  type SshHostRef,
+} from "./ssh-host-key.js";
+
+export { getUrlVariants } from "./url-variants.js";
+
+export {
+  SAFE_SYNC_EXCLUDES,
+  RECOMMENDED_PUSH_EXCLUDES,
+  KNOWN_DEV_PLUGINS,
+} from "./sync-excludes.js";

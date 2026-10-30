@@ -27,7 +27,7 @@ wp-dev CLI (src/cli.ts)
 | Supervisor | `src/supervisor/` | Startup/shutdown state machines, port manager |
 | Filesystem | `src/fs/` | Ownership profiles, atomic writes, recovery |
 | Services | `src/services/` | rsync, ssh, wpcli, backup (CLI wrappers) |
-| Sync engine | `packages/sync-engine/` | Shared sync policy (lock now; rsync/wpcli move next) — Phase 1 |
+| Sync engine | `packages/sync-engine/` | Shared sync policy (lock, host-key pin, URL variants, exclude constants; rsync/wpcli next) — Phase 1 |
 | Shared web UI | `packages/wpdev-web/` | Backup · Setup · Sync pages (local + future hosted) |
 | Docker | `docker/` | Compose stack, terminal image, runners |
 | Admin | `docs/admin/` | React wizard → `wordpress/admin/` |
@@ -52,7 +52,7 @@ Internal RFCs and historical notes live in `purpose/` (not end-user docs).
 ## Lab fixture (Phase 1)
 
 Disposable SSH + WordPress on loopback only: [`infra/README.md`](../../infra/README.md).  
-`npm run lab:up` / `lab:probe` / `lab:down`. No cloud account required.
+`npm run lab:up` / `lab:probe` / `lab:restore-roundtrip` / `lab:down`. No cloud account required.
 
 ## Related
 

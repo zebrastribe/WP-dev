@@ -16,6 +16,21 @@
       "types": "./dist/sync-lock.d.ts",
       "import": "./dist/sync-lock.js",
       "default": "./dist/sync-lock.js"
+    },
+    "./ssh-host-key": {
+      "types": "./dist/ssh-host-key.d.ts",
+      "import": "./dist/ssh-host-key.js",
+      "default": "./dist/ssh-host-key.js"
+    },
+    "./url-variants": {
+      "types": "./dist/url-variants.d.ts",
+      "import": "./dist/url-variants.js",
+      "default": "./dist/url-variants.js"
+    },
+    "./sync-excludes": {
+      "types": "./dist/sync-excludes.d.ts",
+      "import": "./dist/sync-excludes.js",
+      "default": "./dist/sync-excludes.js"
     }
   },
   "files": ["dist", "src", "README.md"],
