@@ -1,4 +1,5 @@
-import { chmodSync, chownSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, copyFileSync, existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import type { LoadedConfig } from "../config/load.js";
 import { writeWpDevConfig } from "../config/load.js";
 import { fsAuditLog } from "../fs/audit-log.js";
@@ -50,6 +51,24 @@ export function writeEnvFile(
   content: string,
   meta?: { configDir: string; projectId: string },
 ): void {
+  // P1: Never write through a symlinked .env - refuse with clear error.
+  // Use lstatSync to detect symlinks (including dangling ones).
+  try {
+    const lstat = lstatSync(path);
+    if (lstat.isSymbolicLink()) {
+      const fileName = basename(path);
+      throw new Error(
+        `${path} is a symlink. wp-dev manages ${fileName} — remove the symlink and let wp-dev generate the file. ` +
+          `(Docker Compose environment file)`,
+      );
+    }
+  } catch (e) {
+    // ENOENT is fine - path doesn't exist yet
+    if (!(e && typeof e === "object" && "code" in e && (e as { code: string }).code === "ENOENT")) {
+      throw e;
+    }
+  }
+
   const normalized = content.endsWith("\n") ? content : `${content}\n`;
   // docker/.env is a Docker *file* bind-mount. Atomic rename replaces the host inode
   // while the container keeps the old one (nlink=0), so never rename-replace here.
@@ -237,13 +256,16 @@ export function maybeUpdateRunnerOriginPort(
 }
 
 export function listSecurityEnvPlaceholderKeys(content: string): string[] {
+  // Detect placeholder runner origin by checking for the default port without customization
+  const defaultRunnerOriginPlaceholder = `localhost:${DEFAULT_DOCKER_ENV_PORTS.WP_PORT}`;
+
   return SECURITY_ENV_KEYS.filter((k) => {
     const v = readEnvValue(content, k);
     if (!v) return true;
     return (
       v.includes("change-me") ||
       v === "wpdev:wpdev" ||
-      (k === "WPDEV_TERMINAL_RUNNER_ORIGIN" && v.includes("localhost:8888"))
+      (k === "WPDEV_TERMINAL_RUNNER_ORIGIN" && v.includes(defaultRunnerOriginPlaceholder))
     );
   });
 }

@@ -508,4 +508,55 @@ describe("mutation tests for compose prerequisites", () => {
     // Subnet should start with DEFAULT_SUBNET_PREFIX
     expect(result.networkInfo?.subnet).toMatch(new RegExp(`^${DEFAULT_SUBNET_PREFIX.replace(/\./g, "\\.")}`));
   });
+
+  it("symlinked .env throws clear error (never write through)", async () => {
+    const dockerDir = join(tmpDir, "docker");
+    mkdirSync(dockerDir, { recursive: true });
+
+    // Create a target .env file and symlink to it
+    const targetPath = join(tmpDir, "real.env");
+    writeFileSync(targetPath, "WP_PORT=9999\n");
+    const linkPath = join(dockerDir, ".env");
+    const { symlinkSync, lstatSync: lstat } = require("node:fs");
+    symlinkSync(targetPath, linkPath);
+
+    // Verify it's a symlink
+    expect(lstat(linkPath).isSymbolicLink()).toBe(true);
+
+    const loaded = makeLoadedConfig(tmpDir);
+    const { ensureComposePrerequisites } = await import("../src/utils/compose-prerequisites.js");
+
+    // Symlinks are refused with a clear error - never write through
+    expect(() => ensureComposePrerequisites(loaded)).toThrow(/symlink/i);
+    expect(() => ensureComposePrerequisites(loaded)).toThrow(/remove the symlink/i);
+
+    // The symlink should still exist (we didn't modify it)
+    expect(lstat(linkPath).isSymbolicLink()).toBe(true);
+
+    // Original target content should be untouched (no write-through)
+    expect(readFileSync(targetPath, "utf8")).toBe("WP_PORT=9999\n");
+  });
+
+  it("dangling symlinked .env throws clear error", async () => {
+    const dockerDir = join(tmpDir, "docker");
+    mkdirSync(dockerDir, { recursive: true });
+
+    // Create a dangling symlink (target doesn't exist)
+    const targetPath = join(tmpDir, "nonexistent.env");
+    const linkPath = join(dockerDir, ".env");
+    const { symlinkSync, lstatSync: lstat } = require("node:fs");
+    symlinkSync(targetPath, linkPath);
+
+    // Verify it's a symlink (even though target doesn't exist)
+    expect(lstat(linkPath).isSymbolicLink()).toBe(true);
+
+    const loaded = makeLoadedConfig(tmpDir);
+    const { ensureComposePrerequisites } = await import("../src/utils/compose-prerequisites.js");
+
+    // Dangling symlinks are also refused
+    expect(() => ensureComposePrerequisites(loaded)).toThrow(/symlink/i);
+
+    // The symlink should still exist
+    expect(lstat(linkPath).isSymbolicLink()).toBe(true);
+  });
 });

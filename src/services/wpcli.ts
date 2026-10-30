@@ -19,7 +19,7 @@ import {
   getDockerComposeLeadArgs,
 } from "./docker-compose.js";
 import { resolveFromConfigDir } from "../config/load.js";
-import { persistEnvContent, setEnvValueInContent, writeEnvFile } from "../utils/compose-env.js";
+import { DEFAULT_DOCKER_ENV_PORTS, persistEnvContent, setEnvValueInContent, writeEnvFile } from "../utils/compose-env.js";
 import { resolveHostIdentity } from "../utils/host-paths.js";
 import { posixShellArg, posixShellQuote } from "../utils/shell-quote.js";
 import { sanitizeCliError } from "../utils/sanitize-cli-error.js";
@@ -401,7 +401,7 @@ function ensureComposeDotenv(configDir: string, config: WpDevConfig): string {
     copyFileSync(example, envPath);
     return envPath;
   }
-  writeEnvFile(envPath, "WP_PORT=8888\n");
+  writeEnvFile(envPath, `WP_PORT=${DEFAULT_DOCKER_ENV_PORTS.WP_PORT}\n`);
   return envPath;
 }
 

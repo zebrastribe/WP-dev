@@ -70,10 +70,15 @@ function ensureComposeEnvExists(loaded: LoadedConfig): string {
   const dockerDir = join(loaded.configDir, loaded.config.local.path);
   mkdirSync(dockerDir, { recursive: true });
 
+  // P1: Never write through a symlinked .env - refuse with clear error
+  assertNotSymlink(envPath, "Docker Compose environment file");
+
   if (existsSync(envPath)) return envPath;
 
   const example = getComposeEnvExamplePath(loaded);
   if (existsSync(example)) {
+    // Also refuse to copy over a symlink target
+    assertNotSymlink(example, "Docker Compose environment example");
     copyFileSync(example, envPath);
     return envPath;
   }
