@@ -34,7 +34,6 @@ import { remoteRmFile } from "../utils/shell-quote.js";
 import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
 import { runLocalWordpressFileMutation } from "../fs/index.js";
 import { registerTempDir, unregisterTempDir } from "../fs/temp-registry.js";
-import { cmdSimplySetupStagingDns } from "./simply.js";
 import { getSimplyApiKey } from "../services/simply.js";
 import { isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
 import { getUrlVariants } from "../utils/url-variants.js";
@@ -49,8 +48,6 @@ export type PullOptions = {
   dryRun: boolean;
   /** When true (default), export local DB before rsync/import if WordPress is installed locally. */
   backupLocal: boolean;
-  /** When true, skip auto simply setup-staging-dns after pull production. Default false. */
-  skipSimplyStagingDns?: boolean;
   /** Skip interactive SSH-host / production confirmation (browser runner, CI). */
   yes?: boolean;
   /** Required with --yes for staging: must equal staging.host */
@@ -221,25 +218,14 @@ export async function cmdPull(
 
   if (
     env === "production" &&
-    !(options.skipSimplyStagingDns ?? false) &&
     config.simply?.account &&
     isStagingRemotePlaceholder(config) &&
     getSimplyApiKey()
   ) {
-    logInfo(
-      `pull ${env}: staging still placeholder — running simply setup-staging-dns (apex from production.url)`,
+    console.error(
+      "\nStaging is still a placeholder. To set up staging DNS and update config:\n" +
+        "  npm run wp-dev -- simply setup-staging-dns\n",
     );
-    try {
-      await cmdSimplySetupStagingDns(loaded, undefined, {});
-      console.error(
-        "Simply: staging DNS + wp-dev.config.json staging hints updated. DNS may take a few minutes to propagate.",
-      );
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(
-        `Simply staging setup did not complete (${msg}). Fix API/DNS conflict, then run: npm run wp-dev -- simply setup-staging-dns`,
-      );
-    }
   }
 
   const backupNote =

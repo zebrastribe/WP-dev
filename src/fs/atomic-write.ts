@@ -18,6 +18,12 @@ export type AtomicWriteOptions = {
   projectId?: string;
   mode?: number;
   backup?: boolean;
+  /**
+   * Write directly to the file instead of rename-replace.
+   * Use for Docker file bind mounts where rename changes the inode
+   * and the container keeps the old file (nlink=0).
+   */
+  inPlace?: boolean;
 };
 
 function tmpPath(target: string): string {
@@ -38,9 +44,13 @@ export function writeFileAtomic(target: string, content: string, options: Atomic
     }
   }
 
-  const tmp = tmpPath(target);
-  writeFileSync(tmp, content, { mode: options.mode ?? 0o644 });
-  renameSync(tmp, target);
+  if (options.inPlace) {
+    writeFileSync(target, content, { mode: options.mode ?? 0o644 });
+  } else {
+    const tmp = tmpPath(target);
+    writeFileSync(tmp, content, { mode: options.mode ?? 0o644 });
+    renameSync(tmp, target);
+  }
 
   if (options.configDir && options.projectId) {
     fsAuditLog(options.configDir, options.projectId, "fs.write_atomic", { path: target });

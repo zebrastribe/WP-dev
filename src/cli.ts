@@ -539,10 +539,6 @@ async function main(): Promise<void> {
         "--no-backup-local",
         "Skip exporting local DB to ~/.wp-dev/backups/<project>/local/ before overwriting it",
       )
-      .option(
-        "--skip-simply-staging-dns",
-        "After pull production, skip auto simply setup-staging-dns when staging is still a placeholder",
-      )
       .option("--yes", "Skip interactive confirmation (used by admin runner / CI)")
       .option(
         "--confirm-host <host>",
@@ -552,21 +548,18 @@ async function main(): Promise<void> {
         async (opts: {
           dryRun?: boolean;
           backupLocal?: boolean;
-          skipSimplyStagingDns?: boolean;
           yes?: boolean;
           confirmHost?: string;
         }) => {
           const dry = Boolean(opts.dryRun);
           const backupLocal = Boolean(opts.backupLocal);
-          const skipSimplyStagingDns = Boolean(opts.skipSimplyStagingDns);
           const yes = Boolean(opts.yes);
           const confirmHost = opts.confirmHost?.trim();
-          const label = `pull ${envName}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${skipSimplyStagingDns ? " --skip-simply-staging-dns" : ""}${yes ? " --yes" : ""}${confirmHost ? ` --confirm-host ${confirmHost}` : ""}`;
+          const label = `pull ${envName}${dry ? " --dry-run" : ""}${backupLocal ? "" : " --no-backup-local"}${yes ? " --yes" : ""}${confirmHost ? ` --confirm-host ${confirmHost}` : ""}`;
           await runWithConfig(label, (loaded) =>
             cmdPull(loaded, envName, {
               dryRun: dry,
               backupLocal,
-              skipSimplyStagingDns,
               yes,
               confirmHost,
             }),

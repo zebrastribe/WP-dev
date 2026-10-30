@@ -8,6 +8,7 @@ import type { LoadedConfig } from "../src/config/load.js";
 const rsyncPullMock = vi.fn();
 const rsyncPushMock = vi.fn();
 const connectSshMock = vi.fn();
+const cmdSimplySetupStagingDnsMock = vi.fn();
 
 vi.mock("../src/services/rsync.js", () => ({
   rsyncPull: (...args: unknown[]) => rsyncPullMock(...args),
@@ -20,6 +21,10 @@ vi.mock("../src/services/ssh.js", () => ({
 
 vi.mock("../src/utils/host-prereq.js", () => ({
   assertHostSyncTools: vi.fn(),
+}));
+
+vi.mock("../src/commands/simply.js", () => ({
+  cmdSimplySetupStagingDns: (...args: unknown[]) => cmdSimplySetupStagingDnsMock(...args),
 }));
 
 function mockSafeSshSession() {
@@ -47,6 +52,7 @@ describe("cmdPull orchestration", () => {
     rsyncPullMock.mockReset();
     rsyncPullMock.mockResolvedValue(undefined);
     connectSshMock.mockReset().mockResolvedValue(mockSafeSshSession());
+    cmdSimplySetupStagingDnsMock.mockReset();
     loaded = makeLoaded(mkdtempSync(join(tmpdir(), "wp-dev-pull-")));
   });
 
@@ -63,6 +69,23 @@ describe("cmdPull orchestration", () => {
     await expect(
       cmdPull(loaded, "production", { dryRun: false, backupLocal: true }),
     ).rejects.toThrow(/Refusing to pull/);
+  });
+
+  it("never invokes DNS setup during pull (sync isolation)", async () => {
+    loaded.config.simply = { account: "S123456" };
+    loaded.config.staging = {
+      ...loaded.config.staging,
+      host: "staging.example.invalid",
+      url: "https://staging.example.invalid",
+    };
+    process.env.WPDEV_SIMPLY_API_KEY = "test-api-key";
+    try {
+      const { cmdPull } = await import("../src/commands/pull.js");
+      await cmdPull(loaded, "production", { dryRun: true, backupLocal: true });
+      expect(cmdSimplySetupStagingDnsMock).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.WPDEV_SIMPLY_API_KEY;
+    }
   });
 });
 
