@@ -17,7 +17,7 @@ import {
   ensureGeneratedFile,
   getRemoteIpConfPath,
 } from "../src/utils/generated-bind-mounts.js";
-import { generateRemoteIpConf } from "../src/utils/network-config.js";
+import { DEFAULT_SUBNET_PREFIX, generateRemoteIpConf } from "../src/utils/network-config.js";
 
 function makeLoadedConfig(configDir: string, localPath = "docker"): LoadedConfig {
   return {
@@ -198,15 +198,20 @@ describe("startup ordering - compose prerequisites", () => {
 
     const envContent = readFileSync(envPath, "utf8");
 
-    if (!envContent.includes("WPDEV_NETWORK_SUBNET=")) {
+    // Network config can be in .env file OR in process.env (set by resolveNetworkEnvForCompose)
+    const hasSubnetInFile = envContent.includes("WPDEV_NETWORK_SUBNET=");
+    const hasSubnetInEnv = !!process.env.WPDEV_NETWORK_SUBNET;
+    if (!hasSubnetInFile && !hasSubnetInEnv) {
       throw new Error(
-        `TEST FAILURE: compose called before WPDEV_NETWORK_SUBNET is set in .env. Args: ${args.join(" ")}`,
+        `TEST FAILURE: compose called before WPDEV_NETWORK_SUBNET is set (neither in .env nor process.env). Args: ${args.join(" ")}`,
       );
     }
 
-    if (!envContent.includes("WPDEV_NETWORK_GATEWAY=")) {
+    const hasGatewayInFile = envContent.includes("WPDEV_NETWORK_GATEWAY=");
+    const hasGatewayInEnv = !!process.env.WPDEV_NETWORK_GATEWAY;
+    if (!hasGatewayInFile && !hasGatewayInEnv) {
       throw new Error(
-        `TEST FAILURE: compose called before WPDEV_NETWORK_GATEWAY is set in .env. Args: ${args.join(" ")}`,
+        `TEST FAILURE: compose called before WPDEV_NETWORK_GATEWAY is set (neither in .env nor process.env). Args: ${args.join(" ")}`,
       );
     }
 
@@ -229,6 +234,9 @@ describe("startup ordering - compose prerequisites", () => {
     mkdirSync(dockerDir, { recursive: true });
     writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
     writeFileSync(join(tmpDir, "wp-dev.config.json"), "{}");
+    // In the real flow, ensureComposePrerequisites creates remoteip.conf before
+    // reconcileSharedConfig is called. Simulate that here.
+    writeFileSync(join(dockerDir, "remoteip.conf"), "# test\n");
 
     const dockerCompose = await import("../src/services/docker-compose.js");
     vi.spyOn(dockerCompose, "compose").mockImplementation(
@@ -246,10 +254,9 @@ describe("startup ordering - compose prerequisites", () => {
 
     expect(composeCalls.length).toBeGreaterThan(0);
 
-    const envContent = readFileSync(join(dockerDir, ".env"), "utf8");
-    expect(envContent).toContain("WPDEV_NETWORK_SUBNET=");
-    expect(envContent).toContain("WPDEV_NETWORK_GATEWAY=");
-
+    // reconcileSharedConfig uses resolveNetworkEnvForCompose which sets process.env
+    // but doesn't write to .env. The compose mock's assertComposePrerequisites
+    // already verified that network vars were available during the call.
     const remoteIpPath = join(dockerDir, "remoteip.conf");
     expect(existsSync(remoteIpPath)).toBe(true);
     expect(statSync(remoteIpPath).isFile()).toBe(true);
@@ -260,6 +267,9 @@ describe("startup ordering - compose prerequisites", () => {
     mkdirSync(dockerDir, { recursive: true });
     writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
     writeFileSync(join(tmpDir, "wp-dev.config.json"), "{}");
+    // In the real flow, ensureComposePrerequisites creates remoteip.conf before
+    // reconcileSharedConfig is called. Simulate that here.
+    writeFileSync(join(dockerDir, "remoteip.conf"), "# test\n");
 
     const dockerCompose = await import("../src/services/docker-compose.js");
     let firstCallFailed = false;
@@ -283,9 +293,7 @@ describe("startup ordering - compose prerequisites", () => {
 
     expect(composeCalls.some((args) => args.includes("run"))).toBe(true);
     expect(firstCallFailed).toBe(true);
-
-    const envContent = readFileSync(join(dockerDir, ".env"), "utf8");
-    expect(envContent).toContain("WPDEV_NETWORK_SUBNET=");
+    // assertComposePrerequisites already verified network vars were available during compose calls
   });
 
   it("ensureComposePrerequisites writes network config and creates remoteip.conf", async () => {
@@ -327,8 +335,12 @@ describe("startup ordering - compose prerequisites", () => {
     const result = ensureComposePrerequisites(loaded);
 
     expect(result.networkInfo).not.toBeNull();
-    expect(result.networkInfo?.subnet).not.toBe("172.28.0.0/24");
-    expect(result.networkInfo?.subnet).toMatch(/^172\.28\.[1-9]\d*\.0\/24$/);
+    // Derive regex from DEFAULT_SUBNET_PREFIX instead of hardcoding
+    const escapedPrefix = DEFAULT_SUBNET_PREFIX.replace(/\./g, "\\.");
+    const forbiddenSubnet = `${DEFAULT_SUBNET_PREFIX}.0.0/24`;
+    const subnetPattern = new RegExp(`^${escapedPrefix}\\.[1-9]\\d*\\.0/24$`);
+    expect(result.networkInfo?.subnet).not.toBe(forbiddenSubnet);
+    expect(result.networkInfo?.subnet).toMatch(subnetPattern);
   });
 });
 
@@ -350,5 +362,142 @@ describe("remoteip.conf content validation", () => {
     expect(content).not.toContain("10.0.0.0/8");
     expect(content).not.toContain("172.16.0.0/12");
     expect(content).not.toContain("192.168.0.0/16");
+  });
+});
+
+describe("mutation tests for compose prerequisites", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "wpdev-mutation-test-"));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("resolveNetworkEnvForCompose provides vars without writing to .env", async () => {
+    const dockerDir = join(tmpDir, "docker");
+    mkdirSync(dockerDir, { recursive: true });
+    // Start with .env that has no network vars (pre-PR#8 state)
+    writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
+    const envBefore = readFileSync(join(dockerDir, ".env"), "utf8");
+
+    const loaded = makeLoadedConfig(tmpDir);
+    const { resolveNetworkEnvForCompose } = await import("../src/utils/compose-prerequisites.js");
+    const result = resolveNetworkEnvForCompose(loaded);
+
+    // Should derive network vars
+    expect(result.WPDEV_NETWORK_SUBNET).toBeTruthy();
+    expect(result.WPDEV_NETWORK_GATEWAY).toBeTruthy();
+    expect(result.WPDEV_NETWORK_SUBNET).toMatch(/^\d+\.\d+\.\d+\.\d+\/\d+$/);
+
+    // .env file should NOT be modified
+    const envAfter = readFileSync(join(dockerDir, ".env"), "utf8");
+    expect(envAfter).toBe(envBefore);
+    expect(envAfter).not.toContain("WPDEV_NETWORK_SUBNET=");
+  });
+
+  it("checkComposePrerequisites is read-only", async () => {
+    const dockerDir = join(tmpDir, "docker");
+    mkdirSync(dockerDir, { recursive: true });
+    writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
+    const envBefore = readFileSync(join(dockerDir, ".env"), "utf8");
+
+    const loaded = makeLoadedConfig(tmpDir);
+    const { checkComposePrerequisites } = await import("../src/utils/compose-prerequisites.js");
+    const result = checkComposePrerequisites(loaded);
+
+    // Should report issues (missing WPDEV_NETWORK_SUBNET, missing remoteip.conf)
+    expect(result.ready).toBe(false);
+    expect(result.issues.length).toBeGreaterThan(0);
+    expect(result.issues.some((i) => i.includes("WPDEV_NETWORK_SUBNET"))).toBe(true);
+
+    // .env file should NOT be modified
+    const envAfter = readFileSync(join(dockerDir, ".env"), "utf8");
+    expect(envAfter).toBe(envBefore);
+  });
+
+  it("symlinked remoteip.conf is preserved", () => {
+    const dockerDir = join(tmpDir, "docker");
+    mkdirSync(dockerDir, { recursive: true });
+
+    // Create a target file and symlink to it
+    const targetPath = join(tmpDir, "custom-remoteip.conf");
+    writeFileSync(targetPath, "# custom remoteip config\n");
+    const linkPath = join(dockerDir, "remoteip.conf");
+    const { symlinkSync, lstatSync: lstat } = require("node:fs");
+    symlinkSync(targetPath, linkPath);
+
+    // Verify it's a symlink
+    expect(lstat(linkPath).isSymbolicLink()).toBe(true);
+
+    const loaded = makeLoadedConfig(tmpDir);
+    const results = ensureGeneratedBindMountFiles(loaded);
+
+    // Should leave symlink unchanged
+    expect(results.some((r) => r.action === "unchanged" && r.path === linkPath)).toBe(true);
+    expect(lstat(linkPath).isSymbolicLink()).toBe(true);
+
+    // Original content should be preserved
+    expect(readFileSync(linkPath, "utf8")).toBe("# custom remoteip config\n");
+  });
+
+  it("empty directory at remoteip.conf path is healed", () => {
+    const dockerDir = join(tmpDir, "docker");
+    const confPath = join(dockerDir, "remoteip.conf");
+    // Docker creates empty directories for missing bind-mount sources
+    mkdirSync(confPath, { recursive: true });
+    expect(statSync(confPath).isDirectory()).toBe(true);
+
+    const loaded = makeLoadedConfig(tmpDir);
+    const results = ensureGeneratedBindMountFiles(loaded);
+
+    // Should heal the empty directory to a file
+    expect(results.some((r) => r.action === "healed")).toBe(true);
+    expect(statSync(confPath).isFile()).toBe(true);
+    expect(readFileSync(confPath, "utf8")).toContain("# wp-dev");
+  });
+
+  it("non-empty directory at remoteip.conf path throws error", () => {
+    const dockerDir = join(tmpDir, "docker");
+    const confPath = join(dockerDir, "remoteip.conf");
+    mkdirSync(confPath, { recursive: true });
+    writeFileSync(join(confPath, "somefile.txt"), "content");
+
+    const loaded = makeLoadedConfig(tmpDir);
+    expect(() => ensureGeneratedBindMountFiles(loaded)).toThrow(/non-empty directory/i);
+  });
+
+  it("DEFAULT_DOCKER_ENV_PORTS values are used as defaults", async () => {
+    const dockerDir = join(tmpDir, "docker");
+    mkdirSync(dockerDir, { recursive: true });
+    // .env with no WP_PORT - should use default
+    writeFileSync(join(dockerDir, ".env"), "");
+
+    const loaded = makeLoadedConfig(tmpDir);
+    const { ensureComposePrerequisites } = await import("../src/utils/compose-prerequisites.js");
+    const { DEFAULT_DOCKER_ENV_PORTS, readEnvValue } = await import("../src/utils/compose-env.js");
+
+    ensureComposePrerequisites(loaded);
+
+    const envContent = readFileSync(join(dockerDir, ".env"), "utf8");
+    // Check that WPDEV_HOST_RUNNER_PORT was written with the default value
+    const hostRunnerPort = readEnvValue(envContent, "WPDEV_HOST_RUNNER_PORT");
+    expect(hostRunnerPort).toBe(String(DEFAULT_DOCKER_ENV_PORTS.WPDEV_HOST_RUNNER_PORT));
+  });
+
+  it("DEFAULT_SUBNET_PREFIX is used for network allocation", async () => {
+    const dockerDir = join(tmpDir, "docker");
+    mkdirSync(dockerDir, { recursive: true });
+    writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
+
+    const loaded = makeLoadedConfig(tmpDir);
+    const { ensureComposePrerequisites } = await import("../src/utils/compose-prerequisites.js");
+    const result = ensureComposePrerequisites(loaded);
+
+    // Subnet should start with DEFAULT_SUBNET_PREFIX
+    expect(result.networkInfo?.subnet).toMatch(new RegExp(`^${DEFAULT_SUBNET_PREFIX.replace(/\./g, "\\.")}`));
   });
 });

@@ -6,6 +6,9 @@ import {
 } from "../utils/compose-published-ports.js";
 import {
   parseDockerEnvPorts,
+  persistEnvContent,
+  readEnvValue,
+  setEnvValueInContent,
   setPortInEnvFile,
   type DockerEnvPortKey,
   type DockerEnvPorts,
@@ -160,6 +163,19 @@ async function relocatePorts(
     });
     next[key] = allocated;
   }
+
+  // P2-6: Update WPDEV_TERMINAL_RUNNER_ORIGIN when WP_PORT or WP_HTTPS_PORT changed.
+  // The origin must match the active local URL port for admin save to work.
+  if (conflictedKeys.has("WP_PORT") || conflictedKeys.has("WP_HTTPS_PORT")) {
+    let envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+    const sslEnabled = /^(1|true|yes)$/i.test(readEnvValue(envContent, "WPDEV_LOCAL_HTTPS") || "");
+    const activePort = sslEnabled ? next.WP_HTTPS_PORT : next.WP_PORT;
+    const protocol = sslEnabled ? "https" : "http";
+    const newOrigin = `${protocol}://localhost:${activePort}`;
+    envContent = setEnvValueInContent(envContent, "WPDEV_TERMINAL_RUNNER_ORIGIN", newOrigin);
+    persistEnvContent(envPath, envContent, loaded);
+  }
+
   return next;
 }
 

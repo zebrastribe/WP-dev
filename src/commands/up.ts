@@ -18,6 +18,7 @@ import {
 import {
   ensureComposePrerequisites,
   getComposeEnvPath,
+  resolveNetworkEnvForCompose,
 } from "../utils/compose-prerequisites.js";
 import { recoverStaleState } from "../supervisor/recovery.js";
 import {
@@ -131,27 +132,6 @@ async function applyRuntimeWritePermissionsWithRetry(
   console.error("Try: npm run wp-dev -- fix-runtime-permissions");
 }
 
-async function ensureDockerEnvWritableBeforeUp(
-  loaded: LoadedConfig,
-  envPath: string,
-): Promise<void> {
-  if (probeWritable(envPath)) return;
-  try {
-    await reconcileSharedConfig(loaded);
-    logInfo("up: restored writable docker/.env via filesystem manager");
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(
-      `docker/.env is not writable (${msg}). Run: npm run wp-dev -- doctor --filesystem`,
-    );
-  }
-  if (!probeWritable(envPath)) {
-    throw new Error(
-      "docker/.env is still not writable after filesystem recovery. Run: npm run wp-dev -- doctor --filesystem",
-    );
-  }
-}
-
 async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
   try {
     await reconcileSharedConfig(loaded);
@@ -168,13 +148,43 @@ async function ensureAdminSaveWriteAccess(loaded: LoadedConfig): Promise<void> {
 export async function cmdUp(loaded: LoadedConfig, options: UpOptions = {}): Promise<void> {
   assertDockerReady();
 
+  // P2-5: Check if already running BEFORE writing anything.
+  // This avoids unnecessary writes when the user just wants to check status.
+  if (isSupervisorAlreadyRunning(loaded)) {
+    console.error(formatDuplicateInstanceMessage(loaded));
+    console.error("Stack may already be running. Showing status URLs:");
+    printStartupSummary(loaded);
+    return;
+  }
+
+  // Get envPath first for writability check
+  const envPath = getComposeEnvPath(loaded);
+
+  // P1-3 FIX: Check and repair .env writability BEFORE writing prerequisites.
+  // This prevents failures when .env exists but is not writable (e.g., wrong permissions).
+  if (!probeWritable(envPath)) {
+    try {
+      await reconcileSharedConfig(loaded);
+      logInfo("up: restored writable docker/.env via filesystem manager");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `docker/.env is not writable (${msg}). Run: npm run wp-dev -- doctor --filesystem`,
+      );
+    }
+    if (!probeWritable(envPath)) {
+      throw new Error(
+        "docker/.env is still not writable after filesystem recovery. Run: npm run wp-dev -- doctor --filesystem",
+      );
+    }
+  }
+
   // CRITICAL: Ensure all compose prerequisites are ready BEFORE any compose call.
   // This allocates the network subnet, writes security env values, and creates
   // generated bind-mount files (remoteip.conf). Without this, compose would:
   // 1. Create the network with fallback subnet from compose file (bypassing allocator)
   // 2. Create bind-mount sources as directories (breaking file writes)
   const prereqResult = ensureComposePrerequisites(loaded);
-  const envPath = prereqResult.envPath;
 
   if (prereqResult.changed && prereqResult.changedKeys.length > 0) {
     console.error(
@@ -187,12 +197,7 @@ export async function cmdUp(loaded: LoadedConfig, options: UpOptions = {}): Prom
   await recoverStaleState(loaded);
   await autoReconcileOnStartup(loaded);
 
-  if (isSupervisorAlreadyRunning(loaded)) {
-    console.error(formatDuplicateInstanceMessage(loaded));
-    console.error("Stack may already be running. Showing status URLs:");
-    printStartupSummary(loaded);
-    return;
-  }
+  // Already-running check was moved to the top of cmdUp (P2-5)
 
   const muPluginOnHost = ensureWordPressSetupAssetsOnHost(loaded);
 
@@ -219,7 +224,9 @@ export async function cmdUp(loaded: LoadedConfig, options: UpOptions = {}): Prom
         // This hook now just warns about placeholders.
         warnIfSecurityEnvPlaceholders(envPath);
       },
-      ensureDockerEnvWritable: () => ensureDockerEnvWritableBeforeUp(loaded, envPath),
+      ensureDockerEnvWritable: async () => {
+        // Already handled at the start of cmdUp (P1-3 fix)
+      },
       ensureComposeEnv: () => {
         // Already handled by ensureComposePrerequisites
       },

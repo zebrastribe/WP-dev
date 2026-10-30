@@ -9,7 +9,7 @@
  * get the list of generated files and their default content.
  */
 
-import { existsSync, rmdirSync, statSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, rmdirSync, statSync, readdirSync, writeFileSync, lstatSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { LoadedConfig } from "../config/load.js";
@@ -49,12 +49,22 @@ export interface EnsureResult {
 
 /**
  * Self-heal: if the path is an empty directory (Docker created it), remove and return true.
- * If it's a non-empty directory, throw. If it doesn't exist or is a file, return false.
+ * If it's a non-empty directory, throw. If it's a symlink, leave it as-is.
+ * If it doesn't exist or is a file, return false.
  */
 function healIfEmptyDirectory(filePath: string): boolean {
   if (!existsSync(filePath)) {
     return false;
   }
+
+  // Use lstat to detect symlinks (stat follows symlinks, lstat doesn't)
+  const lstat = lstatSync(filePath);
+  if (lstat.isSymbolicLink()) {
+    // Leave symlinks alone - they're intentional user configuration
+    logInfo(`up: ${filePath} is a symlink, leaving unchanged`);
+    return false;
+  }
+
   const stat = statSync(filePath);
   if (!stat.isDirectory()) {
     return false;
@@ -105,6 +115,12 @@ export function ensureGeneratedFile(
     writeFileSync(filePath, file.generateDefault(), "utf8");
     logInfo(`up: created ${filePath} (${file.description})`);
     return { path: filePath, action: "created", message: file.description };
+  }
+
+  // Check for symlinks (intentional user configuration) - leave them alone
+  const lstat = lstatSync(filePath);
+  if (lstat.isSymbolicLink()) {
+    return { path: filePath, action: "unchanged" };
   }
 
   const stat = statSync(filePath);

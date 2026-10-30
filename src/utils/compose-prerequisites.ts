@@ -15,12 +15,13 @@
  * This is the SINGLE point of truth for compose prerequisites.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, statSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import type { LoadedConfig } from "../config/load.js";
 import { dockerComposeProjectId } from "../services/docker-compose.js";
 import {
+  DEFAULT_DOCKER_ENV_PORTS,
   persistEnvContent,
   readEnvValue,
   runnerOriginPortMismatch,
@@ -271,7 +272,7 @@ export interface ComposePrerequisitesResult {
 export function ensureComposePrerequisites(loaded: LoadedConfig): ComposePrerequisitesResult {
   const envPath = ensureComposeEnvExists(loaded);
   let current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-  const currentWpPort = readEnvValue(current, "WP_PORT") || "8888";
+  const currentWpPort = readEnvValue(current, "WP_PORT") || String(DEFAULT_DOCKER_ENV_PORTS.WP_PORT);
 
   let changed = false;
   const changedKeys: string[] = [];
@@ -315,7 +316,7 @@ export function ensureComposePrerequisites(loaded: LoadedConfig): ComposePrerequ
 
   const hostRunnerPort = readEnvValue(next, "WPDEV_HOST_RUNNER_PORT");
   if (!hostRunnerPort || !/^\d+$/.test(hostRunnerPort)) {
-    next = setEnvValueInContent(next, "WPDEV_HOST_RUNNER_PORT", "7683");
+    next = setEnvValueInContent(next, "WPDEV_HOST_RUNNER_PORT", String(DEFAULT_DOCKER_ENV_PORTS.WPDEV_HOST_RUNNER_PORT));
     changed = true;
     changedKeys.push("WPDEV_HOST_RUNNER_PORT");
   }
@@ -379,26 +380,108 @@ export function ensureComposePrerequisites(loaded: LoadedConfig): ComposePrerequ
 }
 
 /**
- * Check if compose prerequisites are ready (for defensive checks).
- * Returns true if .env has required network vars and remoteip.conf exists as a file.
+ * Read-only check: are compose prerequisites ready?
+ * Returns an object with `ready: boolean` and `issues: string[]`.
+ *
+ * This does NOT write anything. Use for doctor/diagnostic checks.
  */
-export function areComposePrerequisitesReady(loaded: LoadedConfig): boolean {
+export function checkComposePrerequisites(loaded: LoadedConfig): {
+  ready: boolean;
+  issues: string[];
+} {
+  const issues: string[] = [];
   const envPath = getComposeEnvPath(loaded);
-  if (!existsSync(envPath)) return false;
+
+  if (!existsSync(envPath)) {
+    issues.push("docker/.env is missing");
+    return { ready: false, issues };
+  }
 
   const content = readFileSync(envPath, "utf8");
-  if (!readEnvValue(content, "WPDEV_NETWORK_SUBNET")) return false;
-  if (!readEnvValue(content, "WPDEV_NETWORK_GATEWAY")) return false;
-  if (!readEnvValue(content, "WPDEV_HOST_PROJECT_ROOT")) return false;
+  if (!readEnvValue(content, "WPDEV_NETWORK_SUBNET")) {
+    issues.push("WPDEV_NETWORK_SUBNET is not set in docker/.env");
+  }
+  if (!readEnvValue(content, "WPDEV_NETWORK_GATEWAY")) {
+    issues.push("WPDEV_NETWORK_GATEWAY is not set in docker/.env");
+  }
+  if (!readEnvValue(content, "WPDEV_HOST_PROJECT_ROOT")) {
+    issues.push("WPDEV_HOST_PROJECT_ROOT is not set in docker/.env");
+  }
 
   const confPath = getRemoteIpConfPath(loaded);
-  if (!existsSync(confPath)) return false;
+  if (!existsSync(confPath)) {
+    issues.push("docker/remoteip.conf is missing");
+  } else {
+    const stat = statSync(confPath);
+    if (!stat.isFile()) {
+      issues.push("docker/remoteip.conf is a directory (should be a file)");
+    }
+  }
 
-  const { statSync } = require("node:fs");
-  const stat = statSync(confPath);
-  if (!stat.isFile()) return false;
+  return { ready: issues.length === 0, issues };
+}
 
-  return true;
+/**
+ * Resolve network env vars for compose WITHOUT writing anything.
+ *
+ * Use this for read-only compose operations (down, ps, config) on stacks
+ * with pre-PR#8 .env files that don't have network vars.
+ *
+ * Resolution order:
+ * 1. Existing .env values (if set)
+ * 2. Existing Docker network (if it exists)
+ * 3. Derived defaults from DEFAULT_SUBNET_PREFIX
+ *
+ * Returns env vars to set in process.env before calling compose.
+ */
+export function resolveNetworkEnvForCompose(loaded: LoadedConfig): {
+  WPDEV_NETWORK_SUBNET: string;
+  WPDEV_NETWORK_GATEWAY: string;
+  WPDEV_SSL_PROXY_IP: string;
+  WPDEV_ADMIN_TRUSTED_GATEWAY: string;
+} {
+  const envPath = getComposeEnvPath(loaded);
+  const content = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+
+  const savedSubnet = readEnvValue(content, "WPDEV_NETWORK_SUBNET");
+  const savedGateway = readEnvValue(content, "WPDEV_NETWORK_GATEWAY");
+
+  if (savedSubnet && savedGateway) {
+    const derived = deriveNetworkIps(savedSubnet);
+    const sslProxyIp = readEnvValue(content, "WPDEV_SSL_PROXY_IP") || derived?.sslProxyIp || "";
+    return {
+      WPDEV_NETWORK_SUBNET: savedSubnet,
+      WPDEV_NETWORK_GATEWAY: savedGateway,
+      WPDEV_SSL_PROXY_IP: sslProxyIp,
+      WPDEV_ADMIN_TRUSTED_GATEWAY: savedGateway,
+    };
+  }
+
+  const projectId = dockerComposeProjectId(loaded.config);
+  const networkName = `${projectId}_wpdev`;
+
+  if (dockerNetworkExists(networkName)) {
+    const actualSubnet = getDockerNetworkSubnet(networkName);
+    const actualGateway = getDockerNetworkGateway(networkName);
+    if (actualSubnet && actualGateway) {
+      const derived = deriveNetworkIps(actualSubnet);
+      return {
+        WPDEV_NETWORK_SUBNET: actualSubnet,
+        WPDEV_NETWORK_GATEWAY: actualGateway,
+        WPDEV_SSL_PROXY_IP: derived?.sslProxyIp || "",
+        WPDEV_ADMIN_TRUSTED_GATEWAY: actualGateway,
+      };
+    }
+  }
+
+  const defaultSubnet = `${getSubnetPoolPrefix()}.1.0/24`;
+  const derived = deriveNetworkIps(defaultSubnet);
+  return {
+    WPDEV_NETWORK_SUBNET: defaultSubnet,
+    WPDEV_NETWORK_GATEWAY: derived?.gateway || `${getSubnetPoolPrefix()}.1.1`,
+    WPDEV_SSL_PROXY_IP: derived?.sslProxyIp || "",
+    WPDEV_ADMIN_TRUSTED_GATEWAY: derived?.gateway || `${getSubnetPoolPrefix()}.1.1`,
+  };
 }
 
 export { getComposeEnvPath };

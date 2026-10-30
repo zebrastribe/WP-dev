@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { LoadedConfig } from "../config/load.js";
 import { writeWpDevConfig } from "../config/load.js";
-import { persistEnvContent, setEnvValueInContent } from "../utils/compose-env.js";
+import { DEFAULT_DOCKER_ENV_PORTS, persistEnvContent, setEnvValueInContent } from "../utils/compose-env.js";
 
 function readEnvValue(content: string, key: string): string {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -38,10 +38,12 @@ async function ensureMkcertCertificate(certFile: string, keyFile: string): Promi
 export async function cmdSslEnable(loaded: LoadedConfig): Promise<void> {
   const envPath = composeEnvPath(loaded);
   const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-  const wpPort = Number.parseInt(readEnvValue(current, "WP_PORT") || "8888", 10);
-  const httpsPort = Number.parseInt(readEnvValue(current, "WP_HTTPS_PORT") || "8443", 10);
-  const safeWpPort = Number.isFinite(wpPort) && wpPort > 0 ? wpPort : 8888;
-  const safeHttpsPort = Number.isFinite(httpsPort) && httpsPort > 0 ? httpsPort : 8443;
+  const defaultWpPort = DEFAULT_DOCKER_ENV_PORTS.WP_PORT;
+  const defaultHttpsPort = DEFAULT_DOCKER_ENV_PORTS.WP_HTTPS_PORT;
+  const wpPort = Number.parseInt(readEnvValue(current, "WP_PORT") || String(defaultWpPort), 10);
+  const httpsPort = Number.parseInt(readEnvValue(current, "WP_HTTPS_PORT") || String(defaultHttpsPort), 10);
+  const safeWpPort = Number.isFinite(wpPort) && wpPort > 0 ? wpPort : defaultWpPort;
+  const safeHttpsPort = Number.isFinite(httpsPort) && httpsPort > 0 ? httpsPort : defaultHttpsPort;
 
   const certDir = join(loaded.configDir, loaded.config.local.path, "certs");
   const certFile = join(certDir, "localhost.pem");
@@ -69,8 +71,9 @@ export async function cmdSslEnable(loaded: LoadedConfig): Promise<void> {
 export async function cmdSslDisable(loaded: LoadedConfig): Promise<void> {
   const envPath = composeEnvPath(loaded);
   const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-  const wpPort = Number.parseInt(readEnvValue(current, "WP_PORT") || "8888", 10);
-  const safeWpPort = Number.isFinite(wpPort) && wpPort > 0 ? wpPort : 8888;
+  const defaultWpPort = DEFAULT_DOCKER_ENV_PORTS.WP_PORT;
+  const wpPort = Number.parseInt(readEnvValue(current, "WP_PORT") || String(defaultWpPort), 10);
+  const safeWpPort = Number.isFinite(wpPort) && wpPort > 0 ? wpPort : defaultWpPort;
 
   let next = current;
   next = setEnvValue(next, "WPDEV_LOCAL_HTTPS", "0");

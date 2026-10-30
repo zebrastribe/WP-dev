@@ -2,6 +2,7 @@ import type { LoadedConfig } from "../config/load.js";
 import { compose } from "../services/docker-compose.js";
 import { cleanupLegacyHostRunner } from "../services/host-runner.js";
 import { logInfo } from "../utils/logger.js";
+import { resolveNetworkEnvForCompose } from "../utils/compose-prerequisites.js";
 import { emitLifecycleEvent } from "./lifecycle-log.js";
 import { waitForPortFree } from "./port-probe.js";
 import { ProjectLock, removeStaleLock } from "./project-lock.js";
@@ -54,7 +55,21 @@ export async function runShutdownStateMachine(
     if (phase === "compose_down") {
       const args = ["down", ...(options.removeOrphans ? ["--remove-orphans"] : [])];
       logInfo(`docker compose ${args.join(" ")}`);
-      await compose(configDir, config, args);
+      // Supply network env vars without writing to .env (supports pre-PR#8 .env files)
+      const networkEnv = resolveNetworkEnvForCompose(loaded);
+      const savedEnv = { ...process.env };
+      Object.assign(process.env, networkEnv);
+      try {
+        await compose(configDir, config, args);
+      } finally {
+        for (const key of Object.keys(networkEnv)) {
+          if (savedEnv[key] !== undefined) {
+            process.env[key] = savedEnv[key];
+          } else {
+            delete process.env[key];
+          }
+        }
+      }
     }
 
     if (phase === "release_ports" && registry) {
