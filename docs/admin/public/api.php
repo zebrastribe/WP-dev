@@ -913,6 +913,26 @@ if ($method === 'GET' && $action === 'runner-health') {
     exit;
 }
 
+if ($method === 'GET' && $action === 'runner-active-job') {
+    wpdev_require_admin_token($token, 'GET runner-active-job');
+    $kindRaw = $_GET['kind'] ?? 'terminal';
+    $kind = $kindRaw === 'sync' ? 'sync' : 'terminal';
+    $res = wpdev_runner_active_job($kind, $dockerEnvPath);
+    if ($res['ok'] !== true) {
+        http_response_code(503);
+        echo json_encode(
+            ['ok' => false, 'error' => $res['error'] ?? 'runner_error'],
+            JSON_UNESCAPED_SLASHES
+        );
+        wpdev_admin_api_log('GET runner-active-job 503 ' . ($res['error'] ?? 'runner_error'));
+        exit;
+    }
+    $activeJob = $res['activeJob'];
+    wpdev_admin_api_log('GET runner-active-job 200 kind=' . $kind . ' active=' . ($activeJob !== null ? '1' : '0'));
+    echo json_encode(['ok' => true, 'activeJob' => $activeJob], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 if ($method === 'POST' && $action === 'runner-run') {
     wpdev_require_mutation_token($token, 'runner-run');
     $body = file_get_contents('php://input');
@@ -1119,6 +1139,29 @@ if ($method === 'POST' && $action === 'save') {
         wpdev_admin_api_log('POST save 400 invalid_json');
         exit;
     }
+
+    // Refuse to save over an unparseable existing config file (backup protection).
+    // The user should fix the broken file manually or restore from backup first.
+    if (is_file($configPath) && is_readable($configPath)) {
+        $existingRaw = @file_get_contents($configPath);
+        if ($existingRaw !== false && $existingRaw !== '') {
+            $existingDecoded = @json_decode($existingRaw, true);
+            if (!is_array($existingDecoded)) {
+                http_response_code(409);
+                echo json_encode(
+                    [
+                        'ok' => false,
+                        'error' => 'existing_config_unparseable',
+                        'detail' => 'Existing wp-dev.config.json is corrupt or invalid JSON. Fix it manually, restore from backup, or delete it before saving.',
+                    ],
+                    JSON_UNESCAPED_SLASHES,
+                );
+                wpdev_admin_api_log('POST save 409 existing_config_unparseable');
+                exit;
+            }
+        }
+    }
+
     if (!is_file($schemaPath) || !is_readable($schemaPath)) {
         http_response_code(500);
         echo json_encode(['ok' => false, 'error' => 'schema_unavailable'], JSON_UNESCAPED_SLASHES);

@@ -362,6 +362,17 @@ const server = http.createServer(async (req, res) => {
     json(req, res, 200, { ok: true, runner: "host" });
     return;
   }
+
+  if (req.method === "GET" && url.pathname === "/active-job") {
+    const running = Array.from(jobs.values()).find((j) => j.status === "running");
+    if (!running) {
+      json(req, res, 200, { ok: true, activeJob: null });
+      return;
+    }
+    json(req, res, 200, { ok: true, activeJob: jobPublic(running) });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/run") {
     let body = "";
     req.on("data", (d) => {

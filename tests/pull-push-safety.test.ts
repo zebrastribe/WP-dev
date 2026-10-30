@@ -27,15 +27,21 @@ describe("runner-remote-env.mjs", () => {
 describe("CLI logging", () => {
   it("runWithConfig logs exit code when command aborts without throwing", () => {
     const cli = readFileSync(join(process.cwd(), "src/cli.ts"), "utf8");
-    expect(cli).toContain("finished exit=${process.exitCode}");
-    expect(cli).toMatch(/process\.exitCode && process\.exitCode !== 0/);
+    // The code now uses a unified exitCode variable for logging
+    expect(cli).toContain("finished exit=${exitCode}");
+    // Check for the exit status tracking logic
+    expect(cli).toMatch(/const exitCode = process\.exitCode \?\? 0/);
+    expect(cli).toMatch(/if \(threw \|\| exitCode !== 0\)/);
   });
 
   it("runWithConfig logs finished exit when command throws without rethrowing", () => {
     const cli = readFileSync(join(process.cwd(), "src/cli.ts"), "utf8");
-    expect(cli).toMatch(/logInfo\(`command \$\{label\} finished exit=\$\{code\}`\)/);
+    // The logging is now unified outside the try/catch
+    expect(cli).toMatch(/logInfo\(`command \$\{label\} finished exit=\$\{exitCode\}`\)/);
     expect(cli).toContain("Do not rethrow");
     expect(cli).toContain("expectedRefuse");
+    // The catch block still sets exitCode from process.exitCode
+    expect(cli).toMatch(/process\.exitCode && process\.exitCode !== 0/);
   });
 });
 

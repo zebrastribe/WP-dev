@@ -138,6 +138,7 @@ export function apiPhpUrl(
     | "runner-run"
     | "runner-status"
     | "runner-cancel"
+    | "runner-active-job"
     | "services"
     | "filesystem-health",
 ): string {
@@ -907,6 +908,44 @@ export async function cancelTerminalJob(
       return { ok: false, error: detail ? `${err}: ${detail}` : err };
     }
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+export type ActiveJob = {
+  id: string;
+  status: "running" | "done";
+  command: string;
+  output: string;
+  exitCode: number | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ActiveJobResponse =
+  | { ok: true; activeJob: ActiveJob | null }
+  | { ok: false; error: string };
+
+export async function getRunnerActiveJob(
+  runnerKind: "terminal" | "sync" = "terminal",
+): Promise<ActiveJobResponse> {
+  try {
+    const res = await fetch(
+      `${apiPhpUrl("runner-active-job")}&kind=${encodeURIComponent(runnerKind)}`,
+      {
+        method: "GET",
+        credentials: "same-origin",
+        headers: buildAdminApiHeaders(),
+      },
+    );
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || data.ok !== true) {
+      const err = String(data.error ?? `HTTP ${res.status}`);
+      return { ok: false, error: err };
+    }
+    const activeJob = data.activeJob as TerminalJobStatus & { ok: true } | null;
+    return { ok: true, activeJob: activeJob ?? null };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }

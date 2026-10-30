@@ -12,6 +12,7 @@ RUN apt-get update \
     ca-certificates \
     bash \
     util-linux \
+    tini \
   && ARCH="$(dpkg --print-architecture)" \
   && case "${ARCH}" in \
       amd64) TTYD_ARCH="x86_64"; DOCKER_ARCH="x86_64" ;; \
@@ -34,4 +35,6 @@ RUN apt-get update \
 
 WORKDIR /workspace
 
+# Use tini as init to properly reap zombie child processes
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/workspace/docker/start-terminal-services.sh"]

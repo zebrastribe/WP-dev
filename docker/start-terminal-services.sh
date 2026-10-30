@@ -9,6 +9,14 @@ if [ -z "$AUTH" ] || [ "$AUTH" = "wpdev:wpdev" ] || [ "$AUTH" = "change-me-user:
   exit 1
 fi
 
+# Security notes on WPDEV_TERMINAL_AUTH:
+# - Passed via env var, not logged to stdout/stderr
+# - ttyd -d 3 suppresses the base64 banner that would reveal the credential
+# - ttyd requires -c for auth; the credential appears in `ps` output but the
+#   service is bound to 127.0.0.1 and only accessible locally
+# - The UI masks the input field (type="password")
+# - The admin API never logs credential values
+
 # Sync/terminal runners keep root so they can use the mounted docker.sock for pull/push.
 node /workspace/docker/terminal-runner.mjs >>/tmp/terminal-runner.log 2>&1 &
 node /workspace/docker/host-runner.mjs >>/tmp/sync-runner.log 2>&1 &

@@ -4,11 +4,13 @@ import {
   buildUpdateSteps,
   cmdUpdate,
 } from "../src/commands/update.js";
+import { collectUpdatePreflight } from "../src/services/update-preflight.js";
 import { minimalWpDevConfig } from "./helpers/fixtures.js";
 import type { LoadedConfig } from "../src/config/load.js";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execa } from "execa";
 
 describe("wp-dev update", () => {
   it("documents wordpress safety", () => {
@@ -65,6 +67,87 @@ describe("wp-dev update", () => {
       await expect(cmdUpdate(loaded, { skipPull: false })).rejects.toThrow(/Not a git repository/);
     } finally {
       stderrSpy.mockRestore();
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("buildUpdateSteps uses --autostash which preserves existing stashes", () => {
+    const steps = buildUpdateSteps({});
+    const pullStep = steps.find((s) => s.shell.includes("git"));
+    expect(pullStep).toBeDefined();
+    expect(pullStep!.shell).toContain("--autostash");
+    // Git's --autostash uses a separate mechanism from manual stashes.
+    // It creates a temporary stash before rebase and applies it after,
+    // without affecting the regular stash stack. This test documents
+    // that we use --autostash which is safe with existing stashes.
+  });
+});
+
+describe("update preflight", () => {
+  it("warns that preflight does not fetch from remote", async () => {
+    // Use a temp git repo for testing
+    const configDir = mkdtempSync(join(tmpdir(), "wp-dev-preflight-"));
+    try {
+      // Initialize a git repo with an upstream
+      await execa("git", ["init"], { cwd: configDir });
+      await execa("git", ["config", "user.email", "test@example.com"], { cwd: configDir });
+      await execa("git", ["config", "user.name", "Test"], { cwd: configDir });
+      writeFileSync(join(configDir, "test.txt"), "test");
+      await execa("git", ["add", "."], { cwd: configDir });
+      await execa("git", ["commit", "-m", "initial"], { cwd: configDir });
+      // Create a fake remote tracking branch
+      await execa("git", ["checkout", "-b", "test-upstream"], { cwd: configDir });
+      await execa("git", ["checkout", "-b", "main"], { cwd: configDir });
+      await execa("git", ["branch", "-u", "test-upstream"], { cwd: configDir });
+
+      const preflight = await collectUpdatePreflight(configDir);
+      expect(preflight.isGitRepo).toBe(true);
+      // Should warn about stale fetch
+      expect(preflight.warnings.some((w) => w.includes("preflight does not fetch"))).toBe(true);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("git autostash does not affect existing manual stashes", async () => {
+    // This test verifies git's autostash behavior is safe with existing stashes
+    const configDir = mkdtempSync(join(tmpdir(), "wp-dev-autostash-"));
+    try {
+      // Initialize a git repo
+      await execa("git", ["init"], { cwd: configDir });
+      await execa("git", ["config", "user.email", "test@example.com"], { cwd: configDir });
+      await execa("git", ["config", "user.name", "Test"], { cwd: configDir });
+      writeFileSync(join(configDir, "file1.txt"), "initial");
+      await execa("git", ["add", "."], { cwd: configDir });
+      await execa("git", ["commit", "-m", "initial"], { cwd: configDir });
+
+      // Create an existing manual stash
+      writeFileSync(join(configDir, "file1.txt"), "stashed change 1");
+      await execa("git", ["stash", "push", "-m", "user stash 1"], { cwd: configDir });
+      writeFileSync(join(configDir, "file1.txt"), "stashed change 2");
+      await execa("git", ["stash", "push", "-m", "user stash 2"], { cwd: configDir });
+
+      // Count existing stashes
+      const stashListBefore = await execa("git", ["stash", "list"], { cwd: configDir });
+      const stashCountBefore = stashListBefore.stdout.split("\n").filter(Boolean).length;
+      expect(stashCountBefore).toBe(2);
+
+      // Create local changes that would be autostashed during rebase
+      writeFileSync(join(configDir, "file1.txt"), "local uncommitted change");
+
+      // Simulate what update does: git pull --rebase --autostash
+      // Since there's nothing to pull, this just autostashes and applies
+      await execa("git", ["rebase", "--autostash", "HEAD"], { cwd: configDir });
+
+      // Verify existing stashes are preserved
+      const stashListAfter = await execa("git", ["stash", "list"], { cwd: configDir });
+      const stashCountAfter = stashListAfter.stdout.split("\n").filter(Boolean).length;
+      expect(stashCountAfter).toBe(stashCountBefore);
+
+      // Verify the stash messages are unchanged
+      expect(stashListAfter.stdout).toContain("user stash 1");
+      expect(stashListAfter.stdout).toContain("user stash 2");
+    } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
   });

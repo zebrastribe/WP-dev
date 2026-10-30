@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { getTerminalJobStatus, runTerminalAction } from "./api";
+import { useState, useEffect } from "react";
+import { getTerminalJobStatus, runTerminalAction, loadWpDevConfig } from "./api";
 import { useRunnerSecrets } from "./useRunnerSecrets";
 
 type EnvName = "local" | "staging" | "production";
@@ -11,8 +11,19 @@ export function BackupRestore() {
   const [backupKind, setBackupKind] = useState<BackupKind>("full");
   const [restoreFile, setRestoreFile] = useState("");
   const [productionConfirm, setProductionConfirm] = useState("");
+  const [stagingHost, setStagingHost] = useState("");
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState("");
+
+  useEffect(() => {
+    void loadWpDevConfig().then((cfg) => {
+      if (!cfg) return;
+      const host = (cfg.staging as { host?: string })?.host ?? "";
+      if (host && !host.includes("example.invalid")) {
+        setStagingHost(host);
+      }
+    });
+  }, []);
 
   const runAction = async (action: "backup_create" | "backup_list" | "restore_env", args: Record<string, string>) => {
     if (!canRun) {
@@ -155,6 +166,19 @@ export function BackupRestore() {
             placeholder="e.g. /root/.wp-dev/backups/my-site/local/2026-05-05_13-00-00.sql"
           />
         </label>
+        {env === "staging" && (
+          <label className="mt-2 block">
+            <span className="text-xs text-amber-700 dark:text-amber-300">
+              Staging host (must match config):
+            </span>
+            <input
+              className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm dark:border-amber-700 dark:bg-slate-900"
+              value={stagingHost}
+              onChange={(e) => setStagingHost(e.target.value)}
+              placeholder="staging.example.com"
+            />
+          </label>
+        )}
         {env === "production" && (
           <label className="mt-2 block">
             <span className="text-xs text-amber-700 dark:text-amber-300">
@@ -173,13 +197,19 @@ export function BackupRestore() {
             busy ||
             !canRun ||
             !restoreFile.trim() ||
+            (env === "staging" && !stagingHost.trim()) ||
             (env === "production" && productionConfirm !== "RESTORE_PRODUCTION")
           }
           onClick={() =>
             void runAction("restore_env", {
               env,
               file: restoreFile.trim(),
-              confirm: env === "production" ? productionConfirm.trim() : "",
+              confirm:
+                env === "production"
+                  ? productionConfirm.trim()
+                  : env === "staging"
+                    ? stagingHost.trim()
+                    : "",
             })
           }
           className="mt-2 rounded-lg bg-red-600 px-3 py-1.5 text-xs text-white disabled:opacity-50"

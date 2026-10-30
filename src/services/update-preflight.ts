@@ -96,6 +96,15 @@ export async function collectUpdatePreflight(
     );
   }
 
+  // Note: preflight does not fetch from remote. The behind/ahead counts are
+  // based on the last fetch and may be stale. Run `git fetch` before preflight
+  // for accurate counts, or let the actual update fetch when it runs.
+  if (upstream && (commitsAhead != null || commitsBehind != null)) {
+    warnings.push(
+      "Note: behind/ahead counts are based on last fetch (preflight does not fetch). Run `git fetch origin` for accurate counts.",
+    );
+  }
+
   if (dirtyCount > 0) {
     warnings.push(
       `${dirtyCount} tracked file(s) have local changes. --autostash helps, but forks should commit to a safety branch first.`,

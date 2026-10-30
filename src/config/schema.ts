@@ -8,14 +8,34 @@ const remoteDbSchema = z.object({
   prefix: z.string().min(1).optional(),
 });
 
-/** Hostname / IP — reject spaces and shell metacharacters (dogfood injection canaries). */
+/** Hostname / IP — reject spaces, shell metacharacters, schemes, and paths (dogfood injection canaries). */
 const sshHostSchema = z
   .string()
   .trim()
   .min(1)
-  .regex(
-    /^[a-zA-Z0-9._:-]+$/,
-    "must be a hostname or IP (letters, digits, . _ : - only)",
+  .refine(
+    (s) => !/\s/.test(s),
+    { message: "must not contain whitespace" },
+  )
+  .refine(
+    (s) => !/^https?:\/\//i.test(s),
+    { message: "must be a hostname, not a URL (remove http:// or https://)" },
+  )
+  .refine(
+    (s) => !/[;|&`$(){}[\]<>\\'"!#%^*~?\n\r]/.test(s),
+    { message: "must not contain shell metacharacters" },
+  )
+  .refine(
+    (s) => !s.includes("/"),
+    { message: "must be a hostname only (no path component)" },
+  )
+  .refine(
+    (s) => /^[a-zA-Z0-9]/.test(s) && /[a-zA-Z0-9]$/.test(s),
+    { message: "must start and end with a letter or digit" },
+  )
+  .refine(
+    (s) => /^[a-zA-Z0-9._:-]+$/.test(s),
+    { message: "must be a hostname or IP (letters, digits, . _ : - only)" },
   );
 
 const remoteEnvSchema = z.object({

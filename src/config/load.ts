@@ -26,6 +26,78 @@ export function formatConfigFileError(path: string, err: unknown): Error {
   return new Error(`${path}: ${String(err)}`);
 }
 
+/** Result of attempting to read and parse the config file. */
+export type ConfigReadResult =
+  | { status: "ok"; raw: unknown; path: string }
+  | { status: "not_found"; path: string }
+  | { status: "parse_error"; path: string; error: string }
+  | { status: "validation_error"; path: string; error: string };
+
+/** Read and parse config without throwing - for UI to show specific errors. */
+export function readConfigFile(configDir: string): ConfigReadResult {
+  const path = join(configDir, "wp-dev.config.json");
+  if (!existsSync(path)) {
+    return { status: "not_found", path };
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    const msg = e instanceof SyntaxError ? e.message : String(e);
+    return { status: "parse_error", path, error: `Invalid JSON: ${msg}` };
+  }
+  try {
+    wpDevConfigSchema.parse(raw);
+    return { status: "ok", raw, path };
+  } catch (e) {
+    if (e instanceof ZodError) {
+      const lines = e.issues.map((issue) => {
+        const where = issue.path.length > 0 ? issue.path.join(".") : "(root)";
+        return `${where}: ${issue.message}`;
+      });
+      return { status: "validation_error", path, error: lines.join("; ") };
+    }
+    return { status: "validation_error", path, error: String(e) };
+  }
+}
+
+/** Check if the config file can be parsed as valid JSON. */
+export function isConfigFileReadable(configDir: string): boolean {
+  const path = join(configDir, "wp-dev.config.json");
+  if (!existsSync(path)) return false;
+  try {
+    JSON.parse(readFileSync(path, "utf8"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Known top-level keys in the config schema. */
+const KNOWN_CONFIG_KEYS = new Set([
+  "project",
+  "local",
+  "staging",
+  "production",
+  "simply",
+  "sync",
+  "importWorkspace",
+]);
+
+/** Detect unknown top-level keys (potential typos). */
+export function detectUnknownConfigKeys(raw: unknown): string[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return [];
+  }
+  const unknown: string[] = [];
+  for (const key of Object.keys(raw)) {
+    if (!KNOWN_CONFIG_KEYS.has(key)) {
+      unknown.push(key);
+    }
+  }
+  return unknown;
+}
+
 const CONFIG_NAMES = ["wp-dev.config.json"];
 const EXAMPLE_NAME = "wp-dev.config.example.json";
 

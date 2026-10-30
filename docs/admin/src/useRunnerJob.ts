@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelTerminalJob,
+  getRunnerActiveJob,
   getTerminalJobStatus,
   runTerminalAction,
   type TerminalAction,
@@ -31,11 +32,69 @@ export function useRunnerJob(runnerKind: "sync" | "terminal", canRun: boolean) {
   const outputRef = useRef<HTMLPreElement>(null);
   const activeJobIdRef = useRef<string | null>(null);
   const abortRef = useRef(false);
+  const reattachAttemptedRef = useRef(false);
 
   useEffect(() => {
     const el = outputRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [job.output]);
+
+  useEffect(() => {
+    if (!canRun || reattachAttemptedRef.current) return;
+    reattachAttemptedRef.current = true;
+
+    void (async () => {
+      const res = await getRunnerActiveJob(runnerKind);
+      if (!res.ok || !res.activeJob) return;
+      
+      const activeJob = res.activeJob;
+      if (activeJob.status !== "running") return;
+
+      activeJobIdRef.current = activeJob.id;
+      const startedAt = activeJob.createdAt ?? Date.now();
+      setJob({
+        phase: "running",
+        output: activeJob.output || "Re-attached to running job...\n",
+        exitCode: null,
+        error: null,
+        label: activeJob.command || "(unknown command)",
+        startedAt,
+      });
+
+      for (let i = 0; i < 1800; i += 1) {
+        if (abortRef.current) return;
+
+        const st = await getTerminalJobStatus(activeJob.id, runnerKind);
+        if (!st.ok) {
+          setJob((prev) => ({
+            ...prev,
+            phase: "error",
+            error: st.error,
+          }));
+          activeJobIdRef.current = null;
+          return;
+        }
+
+        setJob((prev) => ({ ...prev, output: st.output || prev.output }));
+
+        if (st.status === "done") {
+          activeJobIdRef.current = null;
+          const ok = st.exitCode === 0;
+          setJob({
+            phase: ok ? "success" : "error",
+            output: st.output || "",
+            exitCode: st.exitCode ?? 1,
+            error: ok ? null : `Command failed (exit ${st.exitCode ?? 1})`,
+            label: st.command || activeJob.command || "",
+            startedAt,
+          });
+          return;
+        }
+
+        await new Promise((r) => window.setTimeout(r, 1000));
+      }
+    })();
+  }, [canRun, runnerKind]);
 
   const reset = useCallback(() => {
     activeJobIdRef.current = null;

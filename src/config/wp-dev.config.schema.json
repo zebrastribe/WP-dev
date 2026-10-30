@@ -57,8 +57,7 @@
           "properties": {
             "host": {
               "type": "string",
-              "minLength": 1,
-              "pattern": "^[a-zA-Z0-9._:-]+$"
+              "minLength": 1
             },
             "user": {
               "type": "string",
@@ -147,8 +146,7 @@
           "properties": {
             "host": {
               "type": "string",
-              "minLength": 1,
-              "pattern": "^[a-zA-Z0-9._:-]+$"
+              "minLength": 1
             },
             "user": {
               "type": "string",
