@@ -1,17 +1,22 @@
 import {
+  closeSync,
   copyFileSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fsAuditLog } from "./audit-log.js";
+import { logInfo } from "../utils/logger.js";
 
 export type AtomicWriteOptions = {
   configDir?: string;
@@ -45,15 +50,36 @@ export function writeFileAtomic(target: string, content: string, options: Atomic
   }
 
   if (options.inPlace) {
-    writeFileSync(target, content, { mode: options.mode ?? 0o644 });
+    const tmp = tmpPath(target);
+    const mode = options.mode ?? 0o644;
+    writeFileSync(tmp, content, { mode });
+    let tmpFd = openSync(tmp, "r");
+    try {
+      fsyncSync(tmpFd);
+    } finally {
+      closeSync(tmpFd);
+    }
+    const flags = existsSync(target) ? "w" : "wx";
+    const fd = openSync(target, flags, mode);
+    try {
+      const buf = Buffer.from(content, "utf8");
+      writeSync(fd, buf, 0, buf.length, 0);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    unlinkSync(tmp);
+    logInfo(`fs: inPlace write to ${target} (inode preserved)`);
+    if (options.configDir && options.projectId) {
+      fsAuditLog(options.configDir, options.projectId, "fs.write_inplace", { path: target });
+    }
   } else {
     const tmp = tmpPath(target);
     writeFileSync(tmp, content, { mode: options.mode ?? 0o644 });
     renameSync(tmp, target);
-  }
-
-  if (options.configDir && options.projectId) {
-    fsAuditLog(options.configDir, options.projectId, "fs.write_atomic", { path: target });
+    if (options.configDir && options.projectId) {
+      fsAuditLog(options.configDir, options.projectId, "fs.write_atomic", { path: target });
+    }
   }
 }
 

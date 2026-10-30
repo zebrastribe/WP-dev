@@ -69,9 +69,9 @@ OpenSSH refuses keys readable by other users.
 
 ## Passphrase-protected key
 
-**Symptoms:** SSH hangs or times out; no visible prompt for passphrase.
+**Symptoms:** Warning `SSH key ~/.ssh/your-key is passphrase-protected. Load it with: ssh-add ~/.ssh/your-key`
 
-**Cause:** Key has a passphrase but no ssh-agent is running (or key not loaded).
+**Cause:** WP-dev detects passphrase-protected keys before connecting and warns you to load them into an agent.
 
 **Fix:**
 
@@ -82,7 +82,7 @@ OpenSSH refuses keys readable by other users.
    ```
 2. Or use a key without a passphrase for automated syncing.
 
-**Note:** The Docker container has no agent forwarding, so passphrase prompts fail silently in the browser terminal.
+**Note:** The Docker container has no agent forwarding, so passphrase prompts fail silently in the browser terminal. Always load keys into an agent first.
 
 **Verify:** `ssh-add -l` should list your key.
 

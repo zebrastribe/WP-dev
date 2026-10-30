@@ -96,9 +96,9 @@ describe("rsync-ssh-env helpers", () => {
   });
 
   it("pushRsyncFailureHint mentions remote path for mkdir errors", () => {
-    expect(
-      pushRsyncFailureHint("mkdir /customers/foo failed: Permission denied", "staging"),
-    ).toContain("staging");
+    const hint = pushRsyncFailureHint("mkdir /customers/foo failed: Permission denied", "/var/www/staging");
+    expect(hint).toContain("Remote path is not writable: /var/www/staging");
+    expect(hint).toContain("staging.path/production.path");
   });
 
   it("buildSshRsyncEnv includes IdentitiesOnly=yes when identity file configured", () => {
@@ -138,13 +138,15 @@ describe("classifyRsyncSshError", () => {
     expect(classifyRsyncSshError("No ED25519 host key is known")).toBe("host_not_pinned");
   });
 
-  it("classifies local permission error", () => {
-    expect(classifyRsyncSshError("mkstemp wordpress/test: Permission denied")).toBe("local_permission");
+  it("classifies local permission error on pull", () => {
+    expect(classifyRsyncSshError("mkstemp wordpress/test: Permission denied", "pull")).toBe("local_permission");
+    expect(classifyRsyncSshError("mkdir /local/path failed: Permission denied", "pull")).toBe("local_permission");
+    expect(classifyRsyncSshError("recv_generator: mkdir failed: Permission denied", "pull")).toBe("local_permission");
   });
 
-  it("classifies remote permission error", () => {
-    expect(classifyRsyncSshError("mkdir /var/www/html failed: Permission denied")).toBe("remote_permission");
-    expect(classifyRsyncSshError("recv_generator: mkdir failed: Permission denied")).toBe("remote_permission");
+  it("classifies remote permission error on push", () => {
+    expect(classifyRsyncSshError("mkdir /var/www/html failed: Permission denied", "push")).toBe("remote_permission");
+    expect(classifyRsyncSshError("recv_generator: mkdir failed: Permission denied", "push")).toBe("remote_permission");
   });
 
   it("returns unknown for unrecognized errors", () => {

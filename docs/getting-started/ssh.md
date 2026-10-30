@@ -85,14 +85,15 @@ Important fields:
 
 Use `~/.ssh/your-key` for identityFile (works on the host and in the browser terminal); avoid absolute paths like `/home/you/.ssh/...`.
 
-## Verify with doctor
+## Verify SSH setup
 
-For first-time setup, verify against **staging** (safer than production):
+For first-time setup, verify against **staging** (no production contact):
 
 ```bash
-npm run wp-dev -- doctor staging
-npm run wp-dev -- doctor staging --rsync
+npm run wp-dev -- validate --remote staging
 ```
+
+This checks SSH connectivity and WordPress path without touching files.
 
 Or use `--local` to check only local settings without SSH:
 
@@ -100,15 +101,14 @@ Or use `--local` to check only local settings without SSH:
 npm run wp-dev -- doctor --local
 ```
 
-Production verification:
+For comprehensive checks including rsync dry-run:
 
 ```bash
-npm run wp-dev -- doctor production
-npm run wp-dev -- doctor production --rsync
+npm run wp-dev -- doctor staging --rsync
 ```
 
-- First command: SSH + WordPress installed check.
-- `--rsync`: dry-run file sync only (no writes).
+- `validate --remote`: SSH + WordPress path check only.
+- `doctor --rsync`: adds dry-run file sync preview (no writes).
 
 ## Key reuse
 

@@ -8,6 +8,7 @@ export type OwnershipProfile =
 export type FsAuditEvent =
   | "fs.write"
   | "fs.write_atomic"
+  | "fs.write_inplace"
   | "fs.read"
   | "fs.delete"
   | "fs.temp_register"

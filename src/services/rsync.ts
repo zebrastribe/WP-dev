@@ -43,6 +43,29 @@ function logRsyncRetry(info: {
   );
 }
 
+function parseDryRunSummary(stdout: string): { fileCount: number; totalBytes: number } {
+  const lines = stdout.split("\n").filter((l) => l.trim() && !l.startsWith("sending ") && !l.startsWith("receiving "));
+  let fileCount = 0;
+  let totalBytes = 0;
+  for (const line of lines) {
+    if (line.startsWith("deleting ") || line.endsWith("/")) continue;
+    fileCount++;
+    const sizeMatch = line.match(/^\s*([\d,]+)\s+/);
+    if (sizeMatch) {
+      const size = parseInt(sizeMatch[1].replace(/,/g, ""), 10);
+      if (!Number.isNaN(size)) totalBytes += size;
+    }
+  }
+  return { fileCount, totalBytes };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 async function execRsync(
   args: string[],
   options: { dryRun: boolean },
@@ -52,19 +75,27 @@ async function execRsync(
     async () => {
       const r = await execa("rsync", args, {
         reject: false,
-        stdout: "inherit",
+        stdout: options.dryRun ? "pipe" : "inherit",
         stderr: "pipe",
       });
-      return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "" };
+      if (options.dryRun && r.stdout) {
+        process.stdout.write(r.stdout);
+      }
+      return { exitCode: r.exitCode ?? null, stderr: r.stderr ?? "", stdout: r.stdout ?? "" };
     },
     {
-      // Dry-run is short; still retry a couple of times for flaky SSH.
       maxAttempts: options.dryRun ? 2 : 5,
       baseDelayMs: Number.isFinite(envBase) && envBase >= 0 ? envBase : 2_000,
       onRetry: logRsyncRetry,
     },
   );
   if (result.stderr) process.stderr.write(result.stderr);
+  if (options.dryRun && result.stdout) {
+    const summary = parseDryRunSummary(result.stdout);
+    if (summary.fileCount > 0) {
+      console.error(`\n[dry-run summary] ${summary.fileCount} files, ${formatBytes(summary.totalBytes)} total`);
+    }
+  }
   return result;
 }
 

@@ -13,9 +13,10 @@ import { assertRestoreBackupPath } from "../src/utils/restore-path.js";
 describe("assertRestoreBackupPath", () => {
   const project = "lock-test-site";
   const env = "staging";
-  const root = join(homedir(), ".wp-dev", "backups", project, env);
+  const getRoot = () => join(homedir(), ".wp-dev", "backups", project, env);
 
   it("accepts a file under ~/.wp-dev/backups/<project>/<env>/", () => {
+    const root = getRoot();
     mkdirSync(root, { recursive: true });
     const file = join(root, "db-allowlisted.sql");
     writeFileSync(file, "-- ok\n");
@@ -46,6 +47,7 @@ describe("assertRestoreBackupPath", () => {
   });
 
   it("refuses an in-tree symlink whose target is outside the backup tree", () => {
+    const root = getRoot();
     mkdirSync(root, { recursive: true });
     const outside = mkdtempSync(join(tmpdir(), "wp-dev-restore-symlink-"));
     const target = join(outside, "outside.sql");
@@ -64,6 +66,7 @@ describe("assertRestoreBackupPath", () => {
   });
 
   it("refuses an empty backup file", () => {
+    const root = getRoot();
     mkdirSync(root, { recursive: true });
     const file = join(root, "db-empty.sql");
     writeFileSync(file, "");

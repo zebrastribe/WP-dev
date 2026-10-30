@@ -6,6 +6,7 @@
 export type RsyncAttemptResult = {
   exitCode: number | null;
   stderr: string;
+  stdout?: string;
 };
 
 /** rsync: 10 socket I/O, 12 protocol, 30 timeout; OpenSSH often exits 255. */

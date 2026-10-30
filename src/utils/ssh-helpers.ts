@@ -21,39 +21,49 @@ export type SshConfigResolution = {
   isAlias: boolean;
 };
 
+const sshConfigCache = new Map<string, SshConfigResolution | null>();
+
 export function resolveSshConfigAlias(host: string): SshConfigResolution | null {
+  if (sshConfigCache.has(host)) {
+    return sshConfigCache.get(host)!;
+  }
+
+  let result: SshConfigResolution | null = null;
   try {
-    const result = spawnSync("ssh", ["-G", host], {
+    const spawnResult = spawnSync("ssh", ["-G", host], {
       encoding: "utf8",
       timeout: 5000,
     });
-    if (result.status !== 0) return null;
-
-    const output = result.stdout ?? "";
-    const lines = output.split("\n");
-    const values: Record<string, string> = {};
-    for (const line of lines) {
-      const [key, ...rest] = line.split(" ");
-      if (key && rest.length > 0) {
-        values[key.toLowerCase()] = rest.join(" ");
+    if (spawnResult.status === 0) {
+      const output = spawnResult.stdout ?? "";
+      const lines = output.split("\n");
+      const values: Record<string, string> = {};
+      for (const line of lines) {
+        const [key, ...rest] = line.split(" ");
+        if (key && rest.length > 0) {
+          values[key.toLowerCase()] = rest.join(" ");
+        }
       }
+
+      const hostname = values.hostname || host;
+      const user = values.user || undefined;
+      const port = values.port ? parseInt(values.port, 10) : undefined;
+      const identityFile = values.identityfile || undefined;
+
+      result = {
+        hostname,
+        user,
+        port: port && port !== 22 ? port : undefined,
+        identityFile,
+        isAlias: hostname.toLowerCase() !== host.toLowerCase(),
+      };
     }
-
-    const hostname = values.hostname || host;
-    const user = values.user || undefined;
-    const port = values.port ? parseInt(values.port, 10) : undefined;
-    const identityFile = values.identityfile || undefined;
-
-    return {
-      hostname,
-      user,
-      port: port && port !== 22 ? port : undefined,
-      identityFile,
-      isAlias: hostname.toLowerCase() !== host.toLowerCase(),
-    };
   } catch {
-    return null;
+    result = null;
   }
+
+  sshConfigCache.set(host, result);
+  return result;
 }
 
 export function detectPassphraseProtectedKey(keyPath: string): boolean {

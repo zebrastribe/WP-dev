@@ -61,8 +61,7 @@ export type RsyncDirection = "pull" | "push";
 
 export function classifyRsyncSshError(
   stderr: string,
-  direction: RsyncDirection,
-  identityFile?: string,
+  direction: RsyncDirection = "pull",
 ): "unprotected_key" | "publickey_denied" | "host_not_pinned" | "local_permission" | "remote_permission" | "unknown" {
   if (/UNPROTECTED PRIVATE KEY FILE|Permissions .* are too open/i.test(stderr)) {
     return "unprotected_key";
@@ -86,6 +85,7 @@ export function formatRsyncSshErrorHint(
   errorType: ReturnType<typeof classifyRsyncSshError>,
   identityFile?: string,
   remote?: RemoteEnvConfig,
+  remotePath?: string,
 ): string {
   const keyPath = identityFile
     ? preferTildePath(resolveIdentityFile(identityFile) ?? identityFile)
@@ -118,11 +118,13 @@ export function formatRsyncSshErrorHint(
         "  npm run wp-dev -- fix-permissions\n" +
         "Then retry."
       );
-    case "remote_permission":
+    case "remote_permission": {
+      const pathInfo = remotePath ? `Remote path is not writable: ${remotePath}\n` : "";
       return (
-        "\n\nRemote path is not writable by the SSH user.\n" +
+        `\n\n${pathInfo}` +
         "Check staging.path/production.path and ensure the SSH user has write access."
       );
+    }
     default:
       return "";
   }
@@ -151,7 +153,7 @@ export function canRetryPushWithRelativePath(remotePath: string, stderr: string)
 }
 
 export function pullRsyncFailureHint(stderr: string, identityFile?: string, remote?: RemoteEnvConfig): string {
-  const errorType = classifyRsyncSshError(stderr, "pull", identityFile);
+  const errorType = classifyRsyncSshError(stderr, "pull");
   const hint = formatRsyncSshErrorHint(errorType, identityFile, remote);
   if (hint) return hint;
 
@@ -168,16 +170,10 @@ export function pullRsyncFailureHint(stderr: string, identityFile?: string, remo
 }
 
 export function pushRsyncFailureHint(stderr: string, remotePath: string, identityFile?: string, remote?: RemoteEnvConfig): string {
-  const errorType = classifyRsyncSshError(stderr, "push", identityFile);
-  const hint = formatRsyncSshErrorHint(errorType, identityFile, remote);
+  const errorType = classifyRsyncSshError(stderr, "push");
+  const hint = formatRsyncSshErrorHint(errorType, identityFile, remote, remotePath);
   if (hint) return hint;
 
-  if (/mkdir .* failed: Permission denied|recv_generator: mkdir .* failed: Permission denied/i.test(stderr)) {
-    return (
-      `\n\nRemote path is not writable: ${remotePath}\n` +
-      "Check staging.path/production.path and ensure the SSH user can create/write files there."
-    );
-  }
   if (/Permission denied|mkstemp|Operation not permitted/i.test(stderr)) {
     return (
       "\n\nRsync hit a permission error during push. Verify remote directory permissions first. " +
@@ -191,10 +187,9 @@ export function pushRsyncFailureHintAbsolutePath(stderr: string, remotePath: str
   const hint = pushRsyncFailureHint(stderr, remotePath, identityFile, remote);
   if (hint) return hint;
 
-  if (/mkdir .* failed: Permission denied|recv_generator: mkdir .* failed: Permission denied/i.test(stderr)) {
+  if (remotePath.startsWith("/") && /Permission denied/i.test(stderr)) {
     return (
       `\n\nRemote path is not writable: ${remotePath}\n` +
-      "Check staging.path/production.path and ensure the SSH user can create/write files there. " +
       "On shared hosting this is often a relative subdomain folder (e.g. /staging) inside your account, not a system root path."
     );
   }
