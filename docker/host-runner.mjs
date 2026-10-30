@@ -31,27 +31,55 @@ if (!ALLOWED_ORIGIN) {
 
 const LOG_PATH = join(WORKDIR, "logs", "wp-dev.log");
 
+function stripControlChars(s) {
+  if (typeof s !== "string") return String(s);
+  return s.replace(/[\x00-\x1f\x7f]/g, "");
+}
+
 function sanitizeArgsForLog(args) {
   if (!args || typeof args !== "object") return "{}";
   const safe = {};
   for (const [k, v] of Object.entries(args)) {
+    const safeKey = stripControlChars(k);
     if (typeof v === "string") {
-      safe[k] = safeArg(v) || `[unsafe:${v.length}chars]`;
+      safe[safeKey] = safeArg(v) || `[unsafe:${v.length}chars]`;
     } else {
-      safe[k] = v;
+      safe[safeKey] = v;
     }
   }
   return JSON.stringify(safe);
 }
 
+const HOST_UID = process.env.WPDEV_HOST_UID ? Number(process.env.WPDEV_HOST_UID) : null;
+const HOST_GID = process.env.WPDEV_HOST_GID ? Number(process.env.WPDEV_HOST_GID) : null;
+
+function ensureLogDirWithOwnership() {
+  const logDir = join(WORKDIR, "logs");
+  const created = !existsSync(logDir);
+  if (created) mkdirSync(logDir, { recursive: true });
+  if (HOST_UID && HOST_GID && HOST_UID > 0 && HOST_GID > 0) {
+    try {
+      const { chownSync } = require("node:fs");
+      if (created) chownSync(logDir, HOST_UID, HOST_GID);
+      if (!existsSync(LOG_PATH)) {
+        appendFileSync(LOG_PATH, "");
+        chownSync(LOG_PATH, HOST_UID, HOST_GID);
+      }
+    } catch {
+      // ignore chown failures
+    }
+  }
+}
+
 function logRefusal(action, args, reason) {
   const timestamp = new Date().toISOString();
+  const sanitizedAction = stripControlChars(safeArg(action) || `[invalid:${typeof action === "string" ? action.length : 0}chars]`);
   const sanitizedArgs = sanitizeArgsForLog(args);
-  const line = `${timestamp} [host-runner] action refused: ${safeArg(action) || action} args=${sanitizedArgs} reason=${reason}\n`;
+  const sanitizedReason = stripControlChars(reason);
+  const line = `${timestamp} [host-runner] action refused: ${sanitizedAction} args=${sanitizedArgs} reason=${sanitizedReason}\n`;
   console.error(line.trim());
   try {
-    const logDir = join(WORKDIR, "logs");
-    if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
+    ensureLogDirWithOwnership();
     appendFileSync(LOG_PATH, line);
   } catch {
     // ignore log write failures
@@ -244,23 +272,29 @@ function commandForAction(action, args) {
 }
 
 function describeRefusal(action, args) {
-  if (action === "wpdev_pull" || action === "wpdev_push") {
-    const env = safeArg(args?.env);
-    const confirm = safeArg(args?.confirm);
-    if (!["staging", "production"].includes(env)) return `invalid env "${args?.env}"`;
-    if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production sync requires SYNC_PRODUCTION confirm token";
-    if (env === "staging" && !confirm) return "staging sync requires --confirm-host";
+  const safeAction = safeArg(action);
+  const env = safeArg(args?.env);
+  const confirm = safeArg(args?.confirm);
+
+  if (safeAction === "wpdev_pull" || safeAction === "wpdev_push") {
+    const kind = safeAction === "wpdev_pull" ? "pull" : "push";
+    if (!wpdevPullPushCommand(kind, env, confirm)) {
+      if (!["staging", "production"].includes(env)) return `invalid env (got ${env.length} safe chars)`;
+      if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production sync requires SYNC_PRODUCTION confirm token";
+      if (env === "staging" && !confirm) return "staging sync requires --confirm-host";
+    }
     return "invalid args";
   }
-  if (action === "wpdev_push_theme") {
-    const env = safeArg(args?.env);
-    const confirm = safeArg(args?.confirm);
-    if (!["staging", "production"].includes(env)) return `invalid env "${args?.env}"`;
-    if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production theme push requires SYNC_PRODUCTION confirm token";
-    if (env === "staging" && !confirm) return "staging theme push requires --confirm-host";
+  if (safeAction === "wpdev_push_theme") {
+    if (!wpdevPushThemeCommand(env, confirm, safeArg(args?.build))) {
+      if (!["staging", "production"].includes(env)) return `invalid env (got ${env.length} safe chars)`;
+      if (env === "production" && confirm !== "SYNC_PRODUCTION") return "production theme push requires SYNC_PRODUCTION confirm token";
+      if (env === "staging" && !confirm) return "staging theme push requires --confirm-host";
+    }
     return "invalid args";
   }
-  return `unknown action "${action}"`;
+  if (!safeAction) return `invalid action (got ${typeof action === "string" ? action.length : 0} chars, none safe)`;
+  return `unknown action ${safeAction}`;
 }
 
 function startJob(command) {

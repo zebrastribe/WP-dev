@@ -24,7 +24,11 @@ function iso(): string {
 
 function appendRaw(line: string): void {
   if (!logFilePath) return;
-  appendFileSync(logFilePath, line, "utf8");
+  try {
+    appendFileSync(logFilePath, line, "utf8");
+  } catch {
+    // Ignore EACCES or other write failures - don't crash CLI
+  }
 }
 
 function write(level: string, message: string, mirrorStderr: boolean): void {

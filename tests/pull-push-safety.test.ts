@@ -40,6 +40,17 @@ describe("CLI logging", () => {
     const cli = readFileSync(join(process.cwd(), "src/cli.ts"), "utf8");
     expect(cli).toContain("finished ok");
   });
+
+  it("runWithConfig does not rethrow to avoid duplicate stack dumps", () => {
+    const cli = readFileSync(join(process.cwd(), "src/cli.ts"), "utf8");
+    expect(cli).toContain("Do not rethrow");
+  });
+
+  it("runWithConfig detects expected refusals and suppresses stack traces", () => {
+    const cli = readFileSync(join(process.cwd(), "src/cli.ts"), "utf8");
+    expect(cli).toContain("expectedRefuse");
+    expect(cli).toMatch(/Restore refused|Path safety FAIL|Refusing to/);
+  });
 });
 
 describe("pull/push safety guards", () => {

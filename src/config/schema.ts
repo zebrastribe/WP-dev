@@ -133,13 +133,18 @@ export type RemoteEnvConfig = z.infer<typeof remoteEnvSchema>;
 export type StagingEnvConfig = z.infer<typeof stagingEnvSchema>;
 export type StagingHttpAuth = z.infer<typeof stagingHttpAuthSchema>;
 
+const syncInnerShape = syncSchema?.unwrap?.()?.shape;
+if (!syncInnerShape || typeof syncInnerShape !== "object") {
+  throw new Error("schema.ts: cannot derive syncInner shape from syncSchema — zod structure changed");
+}
+
 export const schemaShapes = {
   root: wpDevConfigSchema.shape,
   local: localSchema.shape,
   staging: stagingEnvSchema.shape,
   production: remoteEnvSchema.shape,
   simply: simplySchema.shape,
-  syncInner: syncSchema?.unwrap?.()?.shape,
+  syncInner: syncInnerShape,
   importWorkspace: importWorkspaceSchema.shape,
   stagingDb: remoteDbSchema.shape,
   productionDb: remoteDbSchema.shape,

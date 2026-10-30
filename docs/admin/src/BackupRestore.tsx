@@ -45,8 +45,7 @@ export function BackupRestore() {
     if (
       validatedForRef.current &&
       validatedForRef.current.path === pathTrimmed &&
-      validatedForRef.current.env === env &&
-      restorePathStatus === "valid"
+      validatedForRef.current.env === env
     ) {
       return;
     }
@@ -64,6 +63,7 @@ export function BackupRestore() {
           if (!started.ok) {
             setRestorePathStatus("invalid");
             setRestorePathMessage(started.error || "Validation failed");
+            validatedForRef.current = { path: pathTrimmed, env: currentEnv };
             return;
           }
           for (let i = 0; i < 30; i += 1) {
@@ -73,15 +73,14 @@ export function BackupRestore() {
             if (!st.ok) {
               setRestorePathStatus("invalid");
               setRestorePathMessage(st.error || "Validation failed");
+              validatedForRef.current = { path: pathTrimmed, env: currentEnv };
               return;
             }
             if (st.status === "done") {
               const isValid = st.exitCode === 0 && st.output.includes("VALID:");
               setRestorePathStatus(isValid ? "valid" : "invalid");
               setRestorePathMessage(st.output.trim());
-              if (isValid) {
-                validatedForRef.current = { path: pathTrimmed, env: currentEnv };
-              }
+              validatedForRef.current = { path: pathTrimmed, env: currentEnv };
               return;
             }
             await new Promise((r) => window.setTimeout(r, 200));
@@ -89,14 +88,16 @@ export function BackupRestore() {
           if (validateRequestIdRef.current !== requestId) return;
           setRestorePathStatus("invalid");
           setRestorePathMessage("Validation timed out");
+          validatedForRef.current = { path: pathTrimmed, env: currentEnv };
         } catch (e) {
           if (validateRequestIdRef.current !== requestId) return;
           setRestorePathStatus("invalid");
           setRestorePathMessage(e instanceof Error ? e.message : "Validation failed");
+          validatedForRef.current = { path: pathTrimmed, env: currentEnv };
         }
       })();
     }, 500);
-  }, [restoreFile, env, canRun, restorePathStatus]);
+  }, [restoreFile, env, canRun]);
 
   const runAction = async (action: "backup_create" | "backup_list" | "restore_env", args: Record<string, string>) => {
     if (!canRun) {

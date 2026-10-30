@@ -1,12 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { logAdmin } from "./adminLog";
 import { loadWpDevConfig, type TerminalAction } from "./api";
 import { JobProgressPanel } from "./JobProgressPanel";
-import { useRunnerJob } from "./useRunnerJob";
+import { useRunnerJob, type RunnerJobState } from "./useRunnerJob";
 import { toggleButtonClass } from "./uiClasses";
 
 type RemoteEnv = "staging" | "production";
 type SyncDirection = "push" | "pull";
+
+type RunFn = (
+  action: TerminalAction,
+  args: Record<string, string> | undefined,
+  label: string,
+) => Promise<{ ok: boolean; output: string }>;
 
 type SyncDeployPanelProps = {
   canRun: boolean;
@@ -22,6 +28,11 @@ type SyncDeployPanelProps = {
   allowProduction?: boolean;
   hint?: string;
   onBeforeRun?: () => Promise<boolean>;
+  /** Optional shared job state (avoids double-attach when parent already uses useRunnerJob("sync")). */
+  sharedJob?: RunnerJobState;
+  sharedRun?: RunFn;
+  sharedCancel?: () => Promise<void>;
+  sharedOutputRef?: RefObject<HTMLPreElement | null>;
 };
 
 export function SyncDeployPanel({
@@ -34,6 +45,10 @@ export function SyncDeployPanel({
   allowProduction = false,
   hint,
   onBeforeRun,
+  sharedJob,
+  sharedRun,
+  sharedCancel,
+  sharedOutputRef,
 }: SyncDeployPanelProps) {
   const [env, setEnv] = useState<RemoteEnv>(fixedEnv ?? "staging");
   const [direction, setDirection] = useState<SyncDirection>(fixedDirection ?? "push");
@@ -41,7 +56,12 @@ export function SyncDeployPanel({
     staging: "",
     production: "",
   });
-  const { job, run, cancel, outputRef, isRunning } = useRunnerJob("sync", canRun);
+  const ownHook = useRunnerJob("sync", canRun && !sharedJob);
+  const job = sharedJob ?? ownHook.job;
+  const run = sharedRun ?? ownHook.run;
+  const cancel = sharedCancel ?? ownHook.cancel;
+  const outputRef = sharedOutputRef ?? ownHook.outputRef;
+  const isRunning = job.phase === "running";
 
   useEffect(() => {
     let cancelled = false;

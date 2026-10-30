@@ -394,6 +394,7 @@ export function Wizard() {
               "Fix the file on disk (or restore a backup) before saving from Setup — Save would overwrite it.",
           });
         } else if (loadedResult.status === "ok" && typeof loadedResult.config.project === "string") {
+          setSaveBlocked(null);
           const loaded = loadedResult.config;
           setExistingConfig(loaded as Record<string, unknown>);
           const loadedLocalUrl = String((loaded.local as WizardData["local"])?.url ?? defaults().local.url);
@@ -477,6 +478,7 @@ export function Wizard() {
           });
         } else {
           // status is "missing" - try localStorage draft or show defaults
+          setSaveBlocked(null);
           const raw = localStorage.getItem(DRAFT_KEY);
           if (raw) {
             try {
