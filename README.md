@@ -35,17 +35,24 @@ npm run check
 npm run wp-dev -- up
 ```
 
-- Site: `http://localhost:8888`
-- Admin UI: `http://localhost:8888/admin/` — **Backup · Setup · Sync**  
+- Site: `http://localhost:<your-port>` (default 8888, see `WP_PORT` in `docker/.env`)
+- Admin UI: `http://localhost:<your-port>/admin/` — **Backup · Setup · Sync**  
   Unlock with `WPDEV_ADMIN_SAVE_TOKEN` from `docker/.env` if asked.
 
 Configure SSH (keys, not passwords), then pull if you have a live site:
 
 ```bash
-ssh user@your-host          # pin the host key once
+# Create key if needed (mode 600 required):
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519
+chmod 600 ~/.ssh/id_ed25519
+
+# Pin the host key (use -i and -p if needed):
+ssh -i ~/.ssh/id_ed25519 user@your-host
+
+# Configure and verify (staging is safer for first test):
 npm run wp-dev -- init      # or use Setup in /admin/
-npm run wp-dev -- doctor production
-npm run wp-dev -- pull production
+npm run wp-dev -- doctor staging
+npm run wp-dev -- pull staging
 ```
 
 → [First project](docs/getting-started/first-project.md) · [SSH](docs/getting-started/ssh.md)

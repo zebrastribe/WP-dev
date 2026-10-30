@@ -67,13 +67,13 @@ npm run wp-dev -- up
 npm run wp-dev -- doctor staging --http
 ```
 
-## Production pull flow
+## Pull flow
 
 ```bash
 git pull --rebase --autostash &&
 npm run build &&
-npm run wp-dev -- doctor production &&
-npm run wp-dev -- pull production
+npm run wp-dev -- validate --remote staging &&
+npm run wp-dev -- pull staging
 ```
 
 ## Path-specific workflow (edit path)

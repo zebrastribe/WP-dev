@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import type { LoadedConfig } from "../src/config/load.js";
 import {
   dockerComposeEnvPath,
@@ -40,8 +40,16 @@ function loadedFixture(dir: string, localUrl: string): LoadedConfig {
 }
 
 describe("published-local-urls", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const d of tempDirs) rmSync(d, { recursive: true, force: true });
+    tempDirs.length = 0;
+  });
+
   it("reads WP_PORT from docker/.env", () => {
     const dir = mkdtempSync(join(tmpdir(), "wpdev-plu-"));
+    tempDirs.push(dir);
     const env = join(dir, ".env");
     writeFileSync(env, "FOO=1\nWP_PORT=8890\n", "utf8");
     expect(readWpPortFromDockerEnvFile(env)).toBe(8890);
@@ -49,6 +57,7 @@ describe("published-local-urls", () => {
 
   it("reads WP_HTTPS_PORT from docker/.env", () => {
     const dir = mkdtempSync(join(tmpdir(), "wpdev-plu-"));
+    tempDirs.push(dir);
     const env = join(dir, ".env");
     writeFileSync(env, "FOO=1\nWP_HTTPS_PORT=9443\n", "utf8");
     expect(readWpHttpsPortFromDockerEnvFile(env)).toBe(9443);
@@ -56,6 +65,7 @@ describe("published-local-urls", () => {
 
   it("prefers docker WP_PORT over stale localhost port in local.url", () => {
     const dir = mkdtempSync(join(tmpdir(), "wpdev-plu-"));
+    tempDirs.push(dir);
     writeFileSync(join(dir, ".env"), "WP_PORT=8890\n", "utf8");
     const loaded = loadedFixture(dir, "http://localhost:8888/");
     const { site, admin, warnings } = getPublishedLocalAccess(loaded);
@@ -67,6 +77,7 @@ describe("published-local-urls", () => {
 
   it("prefers docker WP_HTTPS_PORT over stale localhost port for https local.url", () => {
     const dir = mkdtempSync(join(tmpdir(), "wpdev-plu-"));
+    tempDirs.push(dir);
     writeFileSync(join(dir, ".env"), "WP_HTTPS_PORT=9443\n", "utf8");
     const loaded = loadedFixture(dir, "https://localhost:443/");
     const { site, admin, warnings } = getPublishedLocalAccess(loaded);
@@ -78,12 +89,14 @@ describe("published-local-urls", () => {
 
   it("dockerComposeEnvPath joins configDir and local.path", () => {
     const dir = mkdtempSync(join(tmpdir(), "wpdev-plu-"));
+    tempDirs.push(dir);
     const loaded = loadedFixture(dir, "http://localhost:8888");
     expect(dockerComposeEnvPath(loaded)).toBe(join(dir, ".", ".env"));
   });
 
   it("reports localhost port mismatch between local.url and WP_PORT", () => {
     const dir = mkdtempSync(join(tmpdir(), "wpdev-plu-"));
+    tempDirs.push(dir);
     writeFileSync(join(dir, ".env"), "WP_PORT=8891\n", "utf8");
     const loaded = loadedFixture(dir, "http://localhost:8888");
     expect(getLocalUrlPortMismatch(loaded)).toEqual({ localUrlPort: 8888, wpPort: 8891 });

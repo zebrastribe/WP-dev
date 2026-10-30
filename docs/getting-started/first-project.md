@@ -67,9 +67,9 @@ Interactive prompts write `wp-dev.config.json` without the browser.
 
 1. Complete steps 1–2.
 2. [Set up SSH](./ssh.md) and add your public key on the server.
-3. `npm run wp-dev -- init` — real SSH host, user, remote path, and production URL.
-4. `npm run wp-dev -- doctor production` — verify connection.
-5. `npm run wp-dev -- pull production --yes` — downloads files and database (production needs `--yes`).
+3. `npm run wp-dev -- init` — real SSH host, user, remote path, and site URL.
+4. `npm run wp-dev -- validate --remote staging` — verify connection (safer than touching production).
+5. `npm run wp-dev -- pull staging` — downloads files and database.
 
 See the [first pull checklist](../guides/syncing.md#first-pull-checklist) for shared hosting tips.
 

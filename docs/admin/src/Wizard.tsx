@@ -806,7 +806,10 @@ export function Wizard() {
     const host = remote.host.trim() || "<ssh-host>";
     const user = remote.user.trim() || "<ssh-user>";
     const path = remote.path.trim() || "<wordpress-path>";
-    return `ssh -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no ${user}@${host} 'P=${path}; test -f "$P/wp-config.php" || test -f "$P/wp-config-sample.php" || { echo FAIL: not a WordPress root; exit 1; }; echo Path OK: $P; ls -la "$P" | head; wp --path="$P" --info'`;
+    const sshOpts: string[] = ["-o BatchMode=yes", "-o ConnectTimeout=10", "-o UpdateHostKeys=no"];
+    if (remote.port != null) sshOpts.push(`-p ${remote.port}`);
+    if (remote.identityFile?.trim()) sshOpts.push(`-i ${remote.identityFile.trim()}`);
+    return `ssh ${sshOpts.join(" ")} ${user}@${host} 'P=${path}; test -f "$P/wp-config.php" || test -f "$P/wp-config-sample.php" || { echo FAIL: not a WordPress root; exit 1; }; echo Path OK: $P; ls -la "$P" | head; wp --path="$P" --info'`;
   };
 
   const buildKeypairCommand = (): string =>
@@ -1406,6 +1409,8 @@ export function Wizard() {
                     user: data.production.user.trim(),
                     host: data.production.host.trim(),
                     path: data.production.path.trim(),
+                    port: data.production.port != null ? String(data.production.port) : "",
+                    identityFile: data.production.identityFile?.trim() ?? "",
                     env: "production",
                   })
                 }
@@ -1417,15 +1422,15 @@ export function Wizard() {
                 type="button"
                 onClick={() =>
                   void runTerminalCommand(
-                    "npm run wp-dev -- doctor production --http",
+                    "npm run wp-dev -- doctor staging --http",
                     "plain",
                     "wpdev_doctor",
-                    { env: "production" },
+                    { env: "staging" },
                   )
                 }
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Full doctor (production)
+                Full doctor (staging)
               </button>
               {pathVerified.production ? (
                 <span className="self-center text-xs font-medium text-emerald-700 dark:text-emerald-300">
@@ -1702,6 +1707,8 @@ export function Wizard() {
                         user: data.staging.user.trim(),
                         host: data.staging.host.trim(),
                         path: data.staging.path.trim(),
+                        port: data.staging.port != null ? String(data.staging.port) : "",
+                        identityFile: data.staging.identityFile?.trim() ?? "",
                         env: "staging",
                       })
                     }

@@ -9,6 +9,7 @@ import {
   wpdevPushThemeCommand,
   restoreEnvConfirmOk,
 } from "./runner-sync-gates.mjs";
+import { readRemoteEnv, sshOptsShell } from "./runner-remote-env.mjs";
 
 const PORT = Number(process.env.WPDEV_TERMINAL_RUNNER_PORT || 7682);
 const AUTH = process.env.WPDEV_TERMINAL_AUTH || "wpdev:wpdev";
@@ -99,6 +100,7 @@ function commandForAction(action, args) {
     return 'test -f ~/.ssh/id_ed25519 || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C "$USER@$(hostname)"; ls -la ~/.ssh/id_ed25519*; echo ""; echo "Public key:"; cat ~/.ssh/id_ed25519.pub';
   }
   if (action === "ssh_test") {
+    const env = safeArg(args?.env);
     const user = safeArg(args?.user);
     const host = safeArg(args?.host);
     const path = safeArg(args?.path);
@@ -106,10 +108,21 @@ function commandForAction(action, args) {
     if (!path) {
       return 'echo "FAIL: WordPress path is required. Set staging.path / production.path to the folder that contains wp-config.php (not a parent of other sites)." >&2; exit 1';
     }
-    // Verify the configured site root before listing — catches mistyped parents early.
-    // Keep $P as a remote shell var (escape $ so Node template literals do not eat it).
+    let sshOpts;
+    let configError = null;
+    try {
+      const remote = readRemoteEnv(env);
+      sshOpts = sshOptsShell(remote) + " -o UpdateHostKeys=no";
+    } catch (e) {
+      configError = e?.message || String(e);
+    }
+    if (configError) {
+      return `echo "FAIL: Could not read SSH config for ${env}: ${configError.replace(/"/g, '\\"')}. Save wp-dev.config.json first." >&2; exit 1`;
+    }
+    const sshCmd = `ssh ${sshOpts} ${user}@${host}`;
     return (
-      `ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=10 -o UpdateHostKeys=no -o UserKnownHostsFile=/root/.ssh/known_hosts ${user}@${host} ` +
+      `echo "Running: ${sshCmd} ..."; ` +
+      `${sshCmd} ` +
       `'set -e; P=${path}; ` +
       `test -d "\$P" || { echo "FAIL: path does not exist: \$P"; exit 1; }; ` +
       `if [ ! -f "\$P/wp-config.php" ] && [ ! -f "\$P/wp-config-sample.php" ]; then ` +

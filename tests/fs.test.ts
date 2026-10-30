@@ -35,6 +35,44 @@ describe("fs atomic-write", () => {
     const n = sweepStaleTmpFiles(dir, 0);
     expect(n).toBeGreaterThanOrEqual(0);
   });
+
+  it("inPlace write preserves inode", () => {
+    const target = join(dir, "bindmount.json");
+    writeFileAtomic(target, '{"v":1}\n');
+    const { ino: inoBefore } = require("node:fs").statSync(target);
+    writeFileAtomic(target, '{"v":2}\n', { inPlace: true });
+    const { ino: inoAfter } = require("node:fs").statSync(target);
+    expect(inoAfter).toBe(inoBefore);
+    expect(readFileSync(target, "utf8")).toBe('{"v":2}\n');
+  });
+
+  it.skipIf(process.getuid?.() === 0)("inPlace write preserves temp file on failure", () => {
+    const target = join(dir, "readonly.json");
+    writeFileAtomic(target, '{"v":1}\n');
+    const fs = require("node:fs");
+    fs.chmodSync(target, 0o444);
+
+    let thrownError: Error | null = null;
+    try {
+      writeFileAtomic(target, '{"v":2}\n', { inPlace: true });
+    } catch (e) {
+      thrownError = e as Error;
+    }
+
+    expect(thrownError).not.toBeNull();
+    expect(thrownError!.message).toMatch(/EACCES|EPERM/);
+    expect(thrownError!.message).toContain(target);
+    const nodeErr = thrownError as NodeJS.ErrnoException;
+    expect(nodeErr.syscall).toBe("open");
+    expect(thrownError!.message).not.toContain("copyfile");
+
+    expect(readFileSync(target, "utf8")).toBe('{"v":1}\n');
+
+    const tmpFiles = fs.readdirSync(dir).filter((f: string) => f.endsWith(".tmp"));
+    expect(tmpFiles.length).toBe(1);
+
+    fs.chmodSync(target, 0o644);
+  });
 });
 
 describe("fs path-resolver", () => {

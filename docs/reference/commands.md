@@ -67,12 +67,12 @@ npm run wp-dev -- restore local ~/.wp-dev/backups/.../complete-….tar.gz
 
 ```bash
 npm run wp-dev -- doctor
-npm run wp-dev -- doctor production --rsync
+npm run wp-dev -- doctor staging --rsync
 npm run wp-dev -- doctor --filesystem
 npm run wp-dev -- doctor --lifecycle
 npm run wp-dev -- doctor --local-http
 npm run wp-dev -- validate
-npm run wp-dev -- validate --remote production
+npm run wp-dev -- validate --remote staging
 ```
 
 ## Service manager
