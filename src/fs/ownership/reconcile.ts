@@ -12,7 +12,7 @@ import { writeJsonAtomic } from "../atomic-write.js";
 import { ownershipManifestPath, projectConfigPath, projectDockerDir, projectDockerEnvPath } from "../path-resolver.js";
 import { detectPlatform } from "../platform/detect.js";
 import { buildOwnershipManifest } from "./profiles.js";
-import { ensureGeneratedBindMountFiles } from "../../utils/generated-bind-mounts.js";
+import { ensureComposePrerequisites } from "../../utils/compose-prerequisites.js";
 
 /**
  * Ensure shared config paths stay writable by host CLI + www-data admin API,
@@ -46,9 +46,11 @@ export function buildSharedConfigReconcileShell(
 export async function reconcileSharedConfig(loaded: LoadedConfig): Promise<void> {
   assertDockerReady();
 
-  // Defensive: ensure generated bind-mount files exist before compose.
-  // Docker creates missing bind-mount sources as directories, which breaks writes.
-  ensureGeneratedBindMountFiles(loaded);
+  // Defensive: ensure compose prerequisites are ready before any compose call.
+  // This writes network config to .env and creates bind-mount files (remoteip.conf).
+  // Without this, compose would create the network with fallback subnet and
+  // bind-mount sources as directories.
+  ensureComposePrerequisites(loaded);
 
   // Prefer host bind ownership — process may be root inside the terminal container.
   const { uid, gid } = resolveHostIdentity(loaded.configDir);

@@ -20,7 +20,7 @@ import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
 import { isPlaceholderRemoteHost } from "../utils/remote-placeholder.js";
 import { logInfo } from "../utils/logger.js";
 import { compose } from "../services/docker-compose.js";
-import { ensureGeneratedBindMountFiles } from "../utils/generated-bind-mounts.js";
+import { ensureComposePrerequisites } from "../utils/compose-prerequisites.js";
 import { getRunningSupervisorInfo } from "../supervisor/recovery.js";
 import { isLockStale, readLockData } from "../supervisor/project-lock.js";
 import { loadRegistry } from "../supervisor/service-registry.js";
@@ -83,7 +83,7 @@ async function checkLocalRuntimeWrite(loaded: LoadedConfig): Promise<"ok" | "fai
   const script = buildLocalRuntimeWriteProbeShell("/var/www/html", marker);
   const label = `${runtimeWritePathsLabel()}; core (wp-admin/wp-includes); ${hostSharedWritePathsLabel()}`;
 
-  ensureGeneratedBindMountFiles(loaded);
+  ensureComposePrerequisites(loaded);
 
   try {
     await compose(

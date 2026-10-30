@@ -171,7 +171,7 @@ describe("generated-bind-mounts", () => {
   });
 });
 
-describe("startup ordering - defensive guards", () => {
+describe("startup ordering - compose prerequisites", () => {
   let tmpDir: string;
   let composeCalls: string[][];
 
@@ -188,7 +188,43 @@ describe("startup ordering - defensive guards", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("reconcileSharedConfig defensive guard ensures remoteip.conf exists before compose", async () => {
+  function assertComposePrerequisites(tmpDir: string, args: string[]): void {
+    const envPath = join(tmpDir, "docker", ".env");
+    const remoteIpPath = join(tmpDir, "docker", "remoteip.conf");
+
+    if (!existsSync(envPath)) {
+      throw new Error(`TEST FAILURE: compose called before .env exists. Args: ${args.join(" ")}`);
+    }
+
+    const envContent = readFileSync(envPath, "utf8");
+
+    if (!envContent.includes("WPDEV_NETWORK_SUBNET=")) {
+      throw new Error(
+        `TEST FAILURE: compose called before WPDEV_NETWORK_SUBNET is set in .env. Args: ${args.join(" ")}`,
+      );
+    }
+
+    if (!envContent.includes("WPDEV_NETWORK_GATEWAY=")) {
+      throw new Error(
+        `TEST FAILURE: compose called before WPDEV_NETWORK_GATEWAY is set in .env. Args: ${args.join(" ")}`,
+      );
+    }
+
+    if (!existsSync(remoteIpPath)) {
+      throw new Error(
+        `TEST FAILURE: compose called before remoteip.conf exists. Args: ${args.join(" ")}`,
+      );
+    }
+
+    const stat = statSync(remoteIpPath);
+    if (stat.isDirectory()) {
+      throw new Error(
+        `TEST FAILURE: remoteip.conf is a directory when compose called. Args: ${args.join(" ")}`,
+      );
+    }
+  }
+
+  it("reconcileSharedConfig ensures WPDEV_NETWORK_SUBNET and remoteip.conf exist before compose", async () => {
     const dockerDir = join(tmpDir, "docker");
     mkdirSync(dockerDir, { recursive: true });
     writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
@@ -198,18 +234,7 @@ describe("startup ordering - defensive guards", () => {
     vi.spyOn(dockerCompose, "compose").mockImplementation(
       async (configDir, config, args) => {
         composeCalls.push(args);
-        const remoteIpPath = join(tmpDir, "docker", "remoteip.conf");
-        if (!existsSync(remoteIpPath)) {
-          throw new Error(
-            `TEST FAILURE: compose called before remoteip.conf exists. Args: ${args.join(" ")}`,
-          );
-        }
-        const stat = statSync(remoteIpPath);
-        if (stat.isDirectory()) {
-          throw new Error(
-            `TEST FAILURE: remoteip.conf is a directory when compose called. Args: ${args.join(" ")}`,
-          );
-        }
+        assertComposePrerequisites(tmpDir, args);
         return { stdout: "", stderr: "", exitCode: 0 };
       },
     );
@@ -220,12 +245,17 @@ describe("startup ordering - defensive guards", () => {
     await reconcileSharedConfig(loaded);
 
     expect(composeCalls.length).toBeGreaterThan(0);
+
+    const envContent = readFileSync(join(dockerDir, ".env"), "utf8");
+    expect(envContent).toContain("WPDEV_NETWORK_SUBNET=");
+    expect(envContent).toContain("WPDEV_NETWORK_GATEWAY=");
+
     const remoteIpPath = join(dockerDir, "remoteip.conf");
     expect(existsSync(remoteIpPath)).toBe(true);
     expect(statSync(remoteIpPath).isFile()).toBe(true);
   });
 
-  it("compose run fallback path also gets file not directory", async () => {
+  it("compose run fallback path also has all prerequisites", async () => {
     const dockerDir = join(tmpDir, "docker");
     mkdirSync(dockerDir, { recursive: true });
     writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
@@ -236,18 +266,7 @@ describe("startup ordering - defensive guards", () => {
 
     vi.spyOn(dockerCompose, "compose").mockImplementation(async (configDir, config, args) => {
       composeCalls.push(args);
-      const remoteIpPath = join(tmpDir, "docker", "remoteip.conf");
-      if (!existsSync(remoteIpPath)) {
-        throw new Error(
-          `TEST FAILURE: compose called before remoteip.conf exists. Args: ${args.join(" ")}`,
-        );
-      }
-      const stat = statSync(remoteIpPath);
-      if (stat.isDirectory()) {
-        throw new Error(
-          `TEST FAILURE: remoteip.conf is a directory when compose called. Args: ${args.join(" ")}`,
-        );
-      }
+      assertComposePrerequisites(tmpDir, args);
 
       if (args.includes("exec") && !firstCallFailed) {
         firstCallFailed = true;
@@ -264,21 +283,52 @@ describe("startup ordering - defensive guards", () => {
 
     expect(composeCalls.some((args) => args.includes("run"))).toBe(true);
     expect(firstCallFailed).toBe(true);
+
+    const envContent = readFileSync(join(dockerDir, ".env"), "utf8");
+    expect(envContent).toContain("WPDEV_NETWORK_SUBNET=");
   });
 
-  it("ensureGeneratedBindMountFiles must be called before compose to prevent directory creation", async () => {
+  it("ensureComposePrerequisites writes network config and creates remoteip.conf", async () => {
     const dockerDir = join(tmpDir, "docker");
     mkdirSync(dockerDir, { recursive: true });
+    writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
 
     const loaded = makeLoadedConfig(tmpDir);
     const remoteIpPath = join(dockerDir, "remoteip.conf");
 
     expect(existsSync(remoteIpPath)).toBe(false);
 
-    ensureGeneratedBindMountFiles(loaded);
+    const envBefore = readFileSync(join(dockerDir, ".env"), "utf8");
+    expect(envBefore).not.toContain("WPDEV_NETWORK_SUBNET=");
+
+    const { ensureComposePrerequisites } = await import("../src/utils/compose-prerequisites.js");
+    const result = ensureComposePrerequisites(loaded);
 
     expect(existsSync(remoteIpPath)).toBe(true);
     expect(statSync(remoteIpPath).isFile()).toBe(true);
+
+    const envAfter = readFileSync(join(dockerDir, ".env"), "utf8");
+    expect(envAfter).toContain("WPDEV_NETWORK_SUBNET=");
+    expect(envAfter).toContain("WPDEV_NETWORK_GATEWAY=");
+    expect(envAfter).toContain("WPDEV_SSL_PROXY_IP=");
+
+    expect(result.changedKeys).toContain("WPDEV_NETWORK_SUBNET");
+    expect(result.changedKeys).toContain("WPDEV_NETWORK_GATEWAY");
+  });
+
+  it("network subnet is allocated from .1.0/24, not .0.0/24", async () => {
+    const dockerDir = join(tmpDir, "docker");
+    mkdirSync(dockerDir, { recursive: true });
+    writeFileSync(join(dockerDir, ".env"), "WP_PORT=8888\n");
+
+    const loaded = makeLoadedConfig(tmpDir);
+
+    const { ensureComposePrerequisites } = await import("../src/utils/compose-prerequisites.js");
+    const result = ensureComposePrerequisites(loaded);
+
+    expect(result.networkInfo).not.toBeNull();
+    expect(result.networkInfo?.subnet).not.toBe("172.28.0.0/24");
+    expect(result.networkInfo?.subnet).toMatch(/^172\.28\.[1-9]\d*\.0\/24$/);
   });
 });
 
