@@ -7,9 +7,13 @@
 # Network configuration: `wp-dev up` sets WPDEV_NETWORK_SUBNET, WPDEV_NETWORK_GATEWAY, and
 # WPDEV_SSL_PROXY_IP by detecting an available subnet and deriving the gateway. Two stacks
 # on one host get unique subnets automatically.
+#
+# Image pinning: Images are pinned by digest for reproducible builds.
+# Override via WPDEV_*_IMAGE in docker/.env to use different versions.
+# Digests verified 2026-10-30.
 services:
   db:
-    image: mysql:8.0
+    image: ${WPDEV_MYSQL_IMAGE:-mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b}
     command:
       - mysqld
       - --default-authentication-plugin=mysql_native_password
@@ -35,7 +39,9 @@ services:
       start_period: 15s
 
   wordpress:
-    image: wordpress:php${WPDEV_PHP_VERSION:-8.2}-apache
+    # PHP version is configurable; digest pinning requires matching the version.
+    # Default digest is for php8.2-apache. Override WPDEV_WORDPRESS_IMAGE for other versions.
+    image: ${WPDEV_WORDPRESS_IMAGE:-wordpress:php8.2-apache@sha256:8ca746c43b29cc29258c2c9e420745daa88417fe5f9232220b69b8b1bbed15a7}
     restart: unless-stopped
     networks:
       - wpdev
@@ -78,7 +84,7 @@ services:
         condition: service_healthy
 
   local_ssl_proxy:
-    image: nginx:1.27-alpine
+    image: ${WPDEV_NGINX_IMAGE:-nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10}
     restart: unless-stopped
     networks:
       wpdev:
@@ -97,7 +103,7 @@ services:
 
   # Official `wordpress` image has no `wp` binary; wp-dev uses this service for WP-CLI.
   wpcli:
-    image: wordpress:cli-php${WPDEV_PHP_VERSION:-8.2}
+    image: ${WPDEV_WPCLI_IMAGE:-wordpress:cli-php8.2@sha256:a8eb972af44dd9600db6e6511b66a0c8d5300eb42bf8d3a2f7d2bbb0a95133fb}
     user: "33:33"
     networks:
       - wpdev
@@ -133,6 +139,9 @@ services:
       WPDEV_TERMINAL_RUNNER_ORIGIN: ${WPDEV_TERMINAL_RUNNER_ORIGIN:-http://localhost:${WP_PORT:-8888}}
       WPDEV_TERMINAL_WORKDIR: ${WPDEV_TERMINAL_WORKDIR:-/workspace}
       # Fixed container listen ports; host publish ports are in ports: above.
+      # G09: Auth proxy listens on WPDEV_TERMINAL_PORT, ttyd on internal port.
+      WPDEV_TERMINAL_PORT: "7681"
+      WPDEV_TTYD_INTERNAL_PORT: "17681"
       WPDEV_TERMINAL_RUNNER_PORT: "7682"
       WPDEV_HOST_RUNNER_PORT: "7683"
       # Host developer uid/gid so interactive ttyd can write the bind-mounted workspace

@@ -133,23 +133,103 @@ exit 1
     expect(script).toMatch(/exec runuser.*env -u WPDEV_TERMINAL_AUTH.*ttyd/);
   });
 
-  it("passes -c to ttyd for basic auth (G09 DISPUTED: credential visible in ps)", () => {
-    const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
-    // G09 DISPUTED: ttyd 1.7.7 only supports -c username:password, not credential files.
-    // The credential is visible in `ps aux`. Mitigations documented in the script.
-    // See: https://github.com/tsl0922/ttyd/issues/1190
-    expect(script).toMatch(/ttyd.*-c "\$AUTH"/);
-  });
-
-  it("documents G09 known limitation in script comments", () => {
-    const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
-    // Must document the known limitation for future maintainers
-    expect(script).toContain("KNOWN LIMITATION (G09)");
-    expect(script).toContain("ttyd does not support reading credentials from a file");
-  });
-
   it("uses -d 3 to suppress ttyd startup banner", () => {
     const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
     expect(script).toContain("ttyd -d 3");
+  });
+
+  // G09 FIX: Credential must not appear in any process's argv
+  describe("G09 - credential not in argv", () => {
+    it("does NOT pass -c to ttyd (credential not on command line)", () => {
+      const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
+      // The ttyd command line must NOT contain -c user:pass or --credential as an actual flag
+      // Note: bash -lc is fine, we're looking for ttyd's -c flag specifically
+      // Note: --credential in comments is fine, we're looking for actual command line usage
+      const execLine = script.split("\n").find((l) => l.trimStart().startsWith("exec"));
+      expect(execLine).toBeDefined();
+      // The exec line should not have -c followed by credential
+      expect(execLine).not.toMatch(/ttyd[^#]*\s-c\s+["'$]/);
+      expect(execLine).not.toMatch(/ttyd[^#]*--credential\s/);
+    });
+
+    it("uses -H/--auth-header for reverse proxy auth instead of -c", () => {
+      const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
+      // ttyd should use -H X-WPDEV-Auth for auth header mode
+      expect(script).toMatch(/ttyd.*-H\s+X-WPDEV-Auth/);
+    });
+
+    it("binds ttyd to container-internal loopback only", () => {
+      const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
+      // ttyd should bind to 127.0.0.1 (internal) not 0.0.0.0
+      expect(script).toMatch(/ttyd.*-i\s+127\.0\.0\.1/);
+    });
+
+    it("starts the auth proxy before ttyd", () => {
+      const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
+      // Auth proxy should be started
+      expect(script).toContain("ttyd-auth-proxy.mjs");
+    });
+
+    it("documents G09 FIX in script comments", () => {
+      const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
+      // Must document the architecture for future maintainers
+      expect(script).toContain("G09 FIX");
+      expect(script).toContain("credential must not appear");
+    });
+
+    it("ttyd command line does not contain credential value", () => {
+      const script = readFileSync(join(process.cwd(), "docker/start-terminal-services.sh"), "utf8");
+      // The exec line should not pass $AUTH as a ttyd argument
+      // Note: "env -u WPDEV_TERMINAL_AUTH" is fine - that's stripping it from the env
+      const execLine = script.split("\n").find((l) => l.startsWith("exec runuser"));
+      expect(execLine).toBeDefined();
+      // Must not pass the credential as a ttyd argument
+      expect(execLine).not.toMatch(/ttyd.*\$AUTH/);
+      expect(execLine).not.toMatch(/ttyd.*\$\{?WPDEV_TERMINAL_AUTH\}?[^=]/);
+    });
+  });
+});
+
+describe("ttyd-auth-proxy.mjs", () => {
+  it("exists and uses constant-time comparison for credentials", () => {
+    const proxy = readFileSync(join(process.cwd(), "docker/ttyd-auth-proxy.mjs"), "utf8");
+    expect(proxy).toContain("timingSafeEqual");
+  });
+
+  it("validates Origin header", () => {
+    const proxy = readFileSync(join(process.cwd(), "docker/ttyd-auth-proxy.mjs"), "utf8");
+    expect(proxy).toContain("validateOrigin");
+  });
+
+  it("strips client-supplied auth header before forwarding", () => {
+    const proxy = readFileSync(join(process.cwd(), "docker/ttyd-auth-proxy.mjs"), "utf8");
+    // Must delete any client-supplied X-WPDEV-Auth header
+    expect(proxy).toMatch(/delete.*headers.*TTYD_AUTH_HEADER/i);
+  });
+
+  it("handles WebSocket upgrades", () => {
+    const proxy = readFileSync(join(process.cwd(), "docker/ttyd-auth-proxy.mjs"), "utf8");
+    expect(proxy).toContain("forwardWebSocketUpgrade");
+    expect(proxy).toContain("on(\"upgrade\"");
+  });
+
+  it("returns 401 for missing or invalid credentials", () => {
+    const proxy = readFileSync(join(process.cwd(), "docker/ttyd-auth-proxy.mjs"), "utf8");
+    expect(proxy).toContain("send401");
+    expect(proxy).toContain("401");
+    expect(proxy).toContain("WWW-Authenticate");
+  });
+
+  it("returns 403 for invalid Origin", () => {
+    const proxy = readFileSync(join(process.cwd(), "docker/ttyd-auth-proxy.mjs"), "utf8");
+    expect(proxy).toContain("send403");
+    expect(proxy).toContain("Origin not allowed");
+  });
+
+  it("does not expose WPDEV_TERMINAL_AUTH in process.argv", () => {
+    // The proxy reads from environment, not command line args
+    const proxy = readFileSync(join(process.cwd(), "docker/ttyd-auth-proxy.mjs"), "utf8");
+    expect(proxy).toContain("process.env.WPDEV_TERMINAL_AUTH");
+    expect(proxy).not.toContain("process.argv");
   });
 });

@@ -84,17 +84,21 @@ export function addIpOffset(ip: string, offset: number): string {
 }
 
 /**
+ * Minimum subnet size that can support all fixed IPs (gateway, SSL proxy).
+ * SSL_PROXY_OFFSET (10) requires at least 16 addresses (/28).
+ */
+export const MIN_SUBNET_SIZE_FOR_PROXY = 28;
+
+/**
  * Derive gateway, proxy IPs, and dynamic ip_range from a subnet.
  * The ip_range starts after the reserved addresses to prevent dynamic containers
  * from taking the SSL proxy's fixed IP.
  *
  * The ip_range is computed dynamically based on subnet size:
- * - For /24: ip_range at .16/28 (16 addresses for dynamic allocation)
- * - For /25: ip_range at .16/28 (same, fits in the /25)
- * - For /26 or smaller: no ip_range (subnet too small to partition meaningfully)
+ * - Subnets /28 and larger: ip_range reserves addresses for fixed IPs
+ * - Subnets smaller than /28: no ip_range (proxy IP would be outside subnet)
  *
- * Small subnets (/27 and below) don't have room for meaningful ip_range partitioning
- * after reserving gateway (.1), SSL proxy (.10), and dynamic start (.16).
+ * Returns null for subnets smaller than /28 (proxy IP at .10 requires at least 16 addresses).
  */
 export function deriveNetworkIps(subnet: string): NetworkInfo | null {
   const network = getNetworkAddress(subnet);
@@ -102,32 +106,38 @@ export function deriveNetworkIps(subnet: string): NetworkInfo | null {
   const parsed = parseSubnet(subnet);
   if (!parsed) return null;
 
+  const subnetSize = 32 - parsed.prefix;
+  const totalAddresses = 1 << subnetSize;
+
+  // Validate subnet can hold all fixed IPs
+  // Gateway at offset 1 and SSL proxy at offset 10 require at least 16 addresses (/28)
+  if (parsed.prefix > MIN_SUBNET_SIZE_FOR_PROXY) {
+    // /29 (8 addresses) and /30 (4 addresses) can't fit proxy at .10
+    return null;
+  }
+
   const gateway = addIpOffset(network, GATEWAY_OFFSET);
   const sslProxyIp = addIpOffset(network, SSL_PROXY_OFFSET);
   const dynamicStart = addIpOffset(network, DYNAMIC_IP_START_OFFSET);
 
   // Calculate ip_range based on subnet size
-  // A /24 has 256 addresses; we reserve .0-.15 (16) and use .16-* for dynamic
   // ip_range tells Docker "only allocate dynamic IPs from this range"
+  // The range must fit within the subnet: (DYNAMIC_IP_START_OFFSET + range_size) <= totalAddresses
   let ipRange = "";
 
-  const subnetSize = 32 - parsed.prefix;
-  const totalAddresses = 1 << subnetSize;
+  // ip_range sizing: use the largest range that fits after the reserved addresses
+  // Reserved: .0 (network), .1 (gateway), .10 (proxy) → dynamic starts at .16
+  // Available for dynamic: totalAddresses - DYNAMIC_IP_START_OFFSET
+  const availableForDynamic = totalAddresses - DYNAMIC_IP_START_OFFSET;
 
-  // Only add ip_range if the subnet is large enough to partition meaningfully
-  // /24 (256 addresses): .16/28 gives 16 dynamic IPs
-  // /25 (128 addresses): .16/28 still fits (offset 16 + 16 = 32, < 128)
-  // /26 (64 addresses): .16/28 still fits (offset 16 + 16 = 32, < 64)
-  // /27 (32 addresses): .16/28 would use 16-31, exactly fits but no margin
-  // /28 and smaller: no room after reserved IPs
   if (totalAddresses >= 64) {
-    // Use /28 (16 addresses) for dynamic allocation starting at offset 16
+    // /24 (256), /25 (128), /26 (64): use /28 (16 addresses)
     ipRange = `${dynamicStart}/28`;
   } else if (totalAddresses >= 32) {
-    // /27 subnet: use /29 (8 addresses) starting at offset 16
+    // /27 (32 addresses): 32-16=16, /28 would fill exactly, use /29 for margin
     ipRange = `${dynamicStart}/29`;
   }
-  // For /28 and smaller: leave ipRange empty (Docker allocates from whole subnet)
+  // /28 (16 addresses): no ip_range - Docker allocates from whole subnet
 
   return { subnet, gateway, sslProxyIp, ipRange };
 }
@@ -136,9 +146,10 @@ export function deriveNetworkIps(subnet: string): NetworkInfo | null {
  * List existing Docker networks and their IPv4 subnets.
  * Returns a map of network name -> array of IPv4 subnets (handles dual-stack).
  *
- * Throws if Docker is unavailable or `docker network ls` fails - do not allocate blind.
+ * Returns null if Docker is unavailable. Use listDockerNetworkSubnetsOrThrow
+ * at allocation points where Docker is required.
  */
-export function listDockerNetworkSubnets(): Map<string, string[]> {
+export function listDockerNetworkSubnets(): Map<string, string[]> | null {
   const result = new Map<string, string[]>();
 
   let output: string;
@@ -148,12 +159,10 @@ export function listDockerNetworkSubnets(): Map<string, string[]> {
       ["network", "ls", "--format", "{{.Name}}"],
       { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
     );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      `Cannot list Docker networks: ${msg}. ` +
-        `Ensure Docker is running and accessible. Subnet allocation requires Docker.`,
-    );
+  } catch {
+    // Docker not available - return null instead of throwing
+    // This allows pure helper functions to work without Docker
+    return null;
   }
 
   const names = output.trim().split("\n").filter(Boolean);
@@ -313,8 +322,14 @@ export function getSubnetPoolPrefix(dockerEnvPath?: string): string {
 export function findAvailableSubnet(prefix?: string, dockerEnvPath?: string): string | null {
   const poolPrefix = prefix ?? getSubnetPoolPrefix(dockerEnvPath);
 
-  // Get Docker network subnets - throws if Docker unavailable
+  // Get Docker network subnets - throw at allocation point where Docker is required
   const existing = listDockerNetworkSubnets();
+  if (existing === null) {
+    throw new Error(
+      `Cannot list Docker networks. ` +
+        `Ensure Docker is running and accessible. Subnet allocation requires Docker.`,
+    );
+  }
 
   // Flatten all Docker network subnets
   const existingSubnets: string[] = [];
@@ -368,6 +383,30 @@ export function getDockerNetworkGateway(networkName: string): string | null {
     return null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Get the actual ip_range of an existing Docker network (IPv4 only).
+ * Returns empty string if the network has no ip_range configured.
+ */
+export function getDockerNetworkIpRange(networkName: string): string {
+  try {
+    const output = execFileSync(
+      "docker",
+      ["network", "inspect", networkName, "--format", "{{json .IPAM.Config}}"],
+      { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const configs = JSON.parse(output.trim()) as Array<{ IPRange?: string; Subnet?: string }>;
+    // Find the first IPv4 config with an ip_range
+    for (const cfg of configs) {
+      if (cfg.IPRange && !cfg.IPRange.includes(":")) {
+        return cfg.IPRange;
+      }
+    }
+    return "";
+  } catch {
+    return "";
   }
 }
 
@@ -427,6 +466,24 @@ export function dockerNetworkHasContainers(networkName: string): boolean {
 }
 
 /**
+ * Get the com.docker.compose.project label from a Docker network.
+ * Returns the project name if the network was created by docker-compose, null otherwise.
+ */
+export function getDockerNetworkComposeProject(networkName: string): string | null {
+  try {
+    const output = execFileSync(
+      "docker",
+      ["network", "inspect", networkName, "--format", "{{index .Labels \"com.docker.compose.project\"}}"],
+      { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const project = output.trim();
+    return project || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Remove a Docker network if it exists and has no containers.
  * Returns true if removed, false if not removed (doesn't exist or has containers).
  */
@@ -452,14 +509,45 @@ export function removeDockerNetworkIfUnused(networkName: string): { removed: boo
 
 /**
  * Clean up the legacy _default network after migration to _wpdev network.
- * Only removes the network if it exists and has no attached containers.
+ * Only removes the network if:
+ * 1. It exists
+ * 2. It has no attached containers
+ * 3. It was created by our compose project (verified by com.docker.compose.project label)
  *
  * @param projectId The compose project ID
  * @returns Result with removed status and optional reason
  */
 export function cleanupLegacyDefaultNetwork(projectId: string): { removed: boolean; reason?: string } {
   const legacyNetworkName = `${projectId}_default`;
-  return removeDockerNetworkIfUnused(legacyNetworkName);
+
+  if (!dockerNetworkExists(legacyNetworkName)) {
+    return { removed: false, reason: "network does not exist" };
+  }
+
+  // G12: Verify ownership via com.docker.compose.project label before removing
+  const composeProject = getDockerNetworkComposeProject(legacyNetworkName);
+  if (composeProject !== projectId) {
+    return {
+      removed: false,
+      reason: composeProject
+        ? `network belongs to different project (${composeProject})`
+        : "network has no compose project label (not owned by us)",
+    };
+  }
+
+  if (dockerNetworkHasContainers(legacyNetworkName)) {
+    return { removed: false, reason: "network has attached containers" };
+  }
+
+  try {
+    execFileSync("docker", ["network", "rm", legacyNetworkName], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return { removed: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { removed: false, reason: `removal failed: ${msg}` };
+  }
 }
 
 /**
@@ -519,9 +607,14 @@ export function deriveBindLocal(wpBind: string | undefined): boolean {
 /**
  * Check if a saved subnet overlaps with any currently existing Docker networks.
  * Used to detect collision when a previously saved subnet has been taken by another stack.
+ * Returns false if Docker is unavailable (can't check, assume no collision).
  */
 export function savedSubnetOverlapsExisting(savedSubnet: string, ownNetworkName: string): boolean {
   const existing = listDockerNetworkSubnets();
+  if (existing === null) {
+    // Docker not available - can't check for collisions, assume none
+    return false;
+  }
 
   for (const [netName, subnets] of existing.entries()) {
     // Skip our own network (it's expected to match)

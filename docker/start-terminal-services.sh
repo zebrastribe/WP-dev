@@ -9,17 +9,34 @@ if [ -z "$AUTH" ] || [ "$AUTH" = "wpdev:wpdev" ] || [ "$AUTH" = "change-me-user:
   exit 1
 fi
 
-# KNOWN LIMITATION (G09): ttyd 1.7.7's -c/--credential flag requires passing credentials
-# on the command line as "user:pass". ttyd does not support reading credentials from a file.
-# On multi-user systems this exposes the credential to `ps aux`. Mitigations:
-# 1. Terminal ports bind to 127.0.0.1 only (not exposed to network)
-# 2. The credential is auto-generated per-stack (unique per project)
-# 3. env -u strips WPDEV_TERMINAL_AUTH from the ttyd environment
-# See: https://github.com/tsl0922/ttyd/issues/1190 for upstream feature request
+# G09 FIX: The credential must not appear in any process's argv.
+# Architecture:
+# 1. Auth proxy (Node) listens on the published port (7681), enforces Basic auth
+# 2. ttyd runs on container-internal loopback (127.0.0.1:17681) without -c
+# 3. ttyd uses --auth-header to trust the proxy's header after auth succeeds
+# 4. WPDEV_TERMINAL_AUTH is stripped from ttyd's environment (env -u)
+#
+# This approach was chosen because ttyd does not support credential files:
+# - Issue #1262: "Support --credential-file" (closed, not planned)
+# - PR #700: "Add file credential option" (closed, not merged)
+# See: https://github.com/tsl0922/ttyd/issues/1262
+#      https://github.com/tsl0922/ttyd/pull/700
+
+# Internal port for ttyd (not published, only accessible within the container)
+TTYD_INTERNAL_PORT="${WPDEV_TTYD_INTERNAL_PORT:-17681}"
+export WPDEV_TTYD_INTERNAL_PORT="$TTYD_INTERNAL_PORT"
 
 # Sync/terminal runners keep root so they can use the mounted docker.sock for pull/push.
 node /workspace/docker/terminal-runner.mjs >>/tmp/terminal-runner.log 2>&1 &
 node /workspace/docker/host-runner.mjs >>/tmp/sync-runner.log 2>&1 &
+
+# Start the auth proxy (handles Basic auth, Origin check, forwards to ttyd)
+# The proxy reads WPDEV_TERMINAL_AUTH from the environment.
+node /workspace/docker/ttyd-auth-proxy.mjs >>/tmp/ttyd-auth-proxy.log 2>&1 &
+PROXY_PID=$!
+
+# Wait a moment for the proxy to start
+sleep 0.5
 
 # Interactive ttyd: host developer uid (workspace writes) but NOT root; docker CLI is root-only.
 HOST_UID="${WPDEV_HOST_UID:-}"
@@ -38,7 +55,10 @@ chmod 700 /usr/local/bin/docker /usr/bin/docker /usr/bin/docker-compose 2>/dev/n
 chmod 700 /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
 
 # -d 3: quieter than default (7); suppresses ttyd's startup banner.
-# -O: check Origin header matches the terminal URL (defense-in-depth against CSRF).
-# -c: basic auth credential (username:password format required by ttyd).
+# -i 127.0.0.1: bind to container-internal loopback only (not accessible from outside)
+# -H X-WPDEV-Auth: trust this header from the auth proxy (reverse-proxy auth mode)
+# NO -c flag: credential is NOT on the command line (G09 requirement)
 # env -u: strip WPDEV_TERMINAL_AUTH from ttyd's environment so shells don't inherit it.
-exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -O -p 7681 -c "$AUTH" -w "$WD" bash -lc "cd \"$WD\" && exec bash"
+#
+# The auth proxy handles Basic auth and forwards to this internal ttyd instance.
+exec runuser -u "$TTY_USER" -- env -u WPDEV_TERMINAL_AUTH ttyd -d 3 -W -i 127.0.0.1 -p "$TTYD_INTERNAL_PORT" -H X-WPDEV-Auth -w "$WD" bash -lc "cd \"$WD\" && exec bash"

@@ -23,6 +23,7 @@ import {
   findAvailableSubnet,
   generateRemoteIpConf,
   getDockerNetworkGateway,
+  getDockerNetworkIpRange,
   getDockerNetworkSubnet,
   getSubnetPoolPrefix,
   dockerNetworkExists,
@@ -113,15 +114,24 @@ function ensureNetworkConfig(
 
   if (dockerNetworkExists(networkName)) {
     // Network exists - read actual values from Docker (authoritative)
+    // G14: For existing networks, read the ACTUAL ip_range, don't derive a new one.
+    // This prevents network recreation on upgrade.
     const actualSubnet = getDockerNetworkSubnet(networkName);
     const actualGateway = getDockerNetworkGateway(networkName);
+    const actualIpRange = getDockerNetworkIpRange(networkName);
     if (actualSubnet && actualGateway) {
       subnet = actualSubnet;
       gateway = actualGateway;
       const derived = deriveNetworkIps(subnet);
       sslProxyIp = derived?.sslProxyIp || "";
-      ipRange = derived?.ipRange || "";
-      logInfo(`up: using existing network ${networkName} (${subnet}, gateway ${gateway})`);
+      // Use the ACTUAL ip_range from the network, not a derived one.
+      // Networks created before ip_range support have none - keep it empty.
+      ipRange = actualIpRange;
+      if (!actualIpRange) {
+        logInfo(`up: using existing network ${networkName} (${subnet}, no ip_range - reservation applies on fresh networks)`);
+      } else {
+        logInfo(`up: using existing network ${networkName} (${subnet}, ip_range ${actualIpRange})`);
+      }
     } else {
       throw new Error(
         `Network ${networkName} exists but could not read its configuration. ` +

@@ -1,12 +1,15 @@
-FROM node:20-bookworm
+# Pin base image by digest for reproducible builds.
+# Override: WPDEV_NODE_IMAGE in docker/.env or pass --build-arg BASE_IMAGE=...
+ARG BASE_IMAGE=node:20-bookworm@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
+FROM ${BASE_IMAGE}
 
 # Build args for version pinning - override via docker-compose build args or CLI.
-# Source of truth: docker/versions.env (for documentation; these must match).
 ARG TTYD_VERSION=1.7.7
 ARG DOCKER_CLI_VERSION=27.5.1
 ARG DOCKER_COMPOSE_VERSION=2.32.4
 
-# SHA-256 checksums for binary verification. Empty = skip verification (dev only).
+# SHA-256 checksums for binary verification.
+# IMPORTANT: Empty checksums FAIL the build (fail-closed security).
 # Generate with: curl -fsSL <url> | sha256sum
 # Checksums verified 2026-10-30 against official releases:
 #   ttyd:    https://github.com/tsl0922/ttyd/releases/download/1.7.7/
@@ -56,14 +59,14 @@ RUN ARCH="$(dpkg --print-architecture)" \
          sleep 5; \
        }; \
      done \
-  && if [ -n "${TTYD_SHA}" ]; then \
-       echo "${TTYD_SHA}  /tmp/ttyd" | sha256sum -c - || { \
-         echo "ERROR: ttyd checksum verification failed. Expected: ${TTYD_SHA}" >&2; \
-         exit 1; \
-       }; \
-     else \
-       echo "WARNING: ttyd checksum not provided, skipping verification" >&2; \
+  && if [ -z "${TTYD_SHA}" ]; then \
+       echo "ERROR: ttyd checksum not provided (TTYD_SHA256_* is empty). Checksums are required." >&2; \
+       exit 1; \
      fi \
+  && echo "${TTYD_SHA}  /tmp/ttyd" | sha256sum -c - || { \
+       echo "ERROR: ttyd checksum verification failed. Expected: ${TTYD_SHA}" >&2; \
+       exit 1; \
+     } \
   && mv /tmp/ttyd /usr/local/bin/ttyd \
   && chmod +x /usr/local/bin/ttyd \
   # Download Docker CLI with retry and checksum verification
@@ -77,12 +80,14 @@ RUN ARCH="$(dpkg --print-architecture)" \
          sleep 5; \
        }; \
      done \
-  && if [ -n "${DOCKER_CLI_SHA}" ]; then \
-       echo "${DOCKER_CLI_SHA}  /tmp/docker.tgz" | sha256sum -c - || { \
-         echo "ERROR: Docker CLI checksum verification failed. Expected: ${DOCKER_CLI_SHA}" >&2; \
-         exit 1; \
-       }; \
+  && if [ -z "${DOCKER_CLI_SHA}" ]; then \
+       echo "ERROR: Docker CLI checksum not provided (DOCKER_CLI_SHA256_* is empty). Checksums are required." >&2; \
+       exit 1; \
      fi \
+  && echo "${DOCKER_CLI_SHA}  /tmp/docker.tgz" | sha256sum -c - || { \
+       echo "ERROR: Docker CLI checksum verification failed. Expected: ${DOCKER_CLI_SHA}" >&2; \
+       exit 1; \
+     } \
   && tar -xzf /tmp/docker.tgz -C /tmp \
   && mv /tmp/docker/docker /usr/local/bin/docker \
   && chmod 755 /usr/local/bin/docker \
@@ -99,12 +104,14 @@ RUN ARCH="$(dpkg --print-architecture)" \
          sleep 5; \
        }; \
      done \
-  && if [ -n "${DOCKER_COMPOSE_SHA}" ]; then \
-       echo "${DOCKER_COMPOSE_SHA}  /usr/local/lib/docker/cli-plugins/docker-compose" | sha256sum -c - || { \
-         echo "ERROR: Docker Compose checksum verification failed. Expected: ${DOCKER_COMPOSE_SHA}" >&2; \
-         exit 1; \
-       }; \
+  && if [ -z "${DOCKER_COMPOSE_SHA}" ]; then \
+       echo "ERROR: Docker Compose checksum not provided (DOCKER_COMPOSE_SHA256_* is empty). Checksums are required." >&2; \
+       exit 1; \
      fi \
+  && echo "${DOCKER_COMPOSE_SHA}  /usr/local/lib/docker/cli-plugins/docker-compose" | sha256sum -c - || { \
+       echo "ERROR: Docker Compose checksum verification failed. Expected: ${DOCKER_COMPOSE_SHA}" >&2; \
+       exit 1; \
+     } \
   && chmod 755 /usr/local/lib/docker/cli-plugins/docker-compose \
   # Create non-root user for ttyd
   && useradd --create-home --uid 10001 --shell /bin/bash wpdev-tty

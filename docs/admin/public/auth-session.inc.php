@@ -193,7 +193,9 @@ function wpdev_check_host_header(): bool
  */
 function wpdev_check_bind_local(): array
 {
-    $bindLocal = trim((string) getenv('WPDEV_WP_BIND_LOCAL'));
+    // Strict match: only exact '1' is accepted (fail-closed).
+    // No trim() - whitespace means the value is wrong.
+    $bindLocal = (string) getenv('WPDEV_WP_BIND_LOCAL');
     if ($bindLocal === '1') {
         return ['ok' => true];
     }
@@ -322,7 +324,9 @@ function wpdev_consume_bootstrap_challenge(): bool
  */
 function wpdev_enforce_local_admin_only(): void
 {
-    $bindLocal = trim((string) getenv('WPDEV_WP_BIND_LOCAL'));
+    // Strict match: only exact '1' is accepted (fail-closed).
+    // No trim() - whitespace means the value is wrong.
+    $bindLocal = (string) getenv('WPDEV_WP_BIND_LOCAL');
 
     if ($bindLocal !== '1') {
         http_response_code(403);

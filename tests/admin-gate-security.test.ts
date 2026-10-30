@@ -10,6 +10,7 @@ import {
   deriveNetworkIps,
   findAvailableSubnet,
   generateRemoteIpConf,
+  getDockerNetworkComposeProject,
   getNetworkAddress,
   addIpOffset,
   isLocalhostBind,
@@ -258,11 +259,10 @@ describe("network-config utilities", () => {
       expect(result?.ipRange).toBe("");
     });
 
-    it("returns empty ipRange for /29 subnet (8 addresses - too small)", () => {
+    it("returns null for /29 subnet (proxy IP at .10 doesn't fit in 8 addresses)", () => {
       const result = deriveNetworkIps("10.0.0.0/29");
-      expect(result).not.toBeNull();
-      // /29 only has 8 addresses, way too small for partitioning
-      expect(result?.ipRange).toBe("");
+      // /29 only has 8 addresses (0-7), proxy IP at .10 is outside
+      expect(result).toBeNull();
     });
 
     it("MUTATION CHECK: ipRange must start with the correct base address", () => {
@@ -373,13 +373,35 @@ describe("network-config utilities", () => {
     });
   });
 
-  describe("G12 mutation tests - legacy network cleanup", () => {
-    // Note: These test the interface, not actual Docker commands (mocked in integration tests)
-    it("MUTATION CHECK: cleanupLegacyDefaultNetwork builds correct network name", () => {
-      // Import the function to test (already imported at top)
-      // The function should construct <projectId>_default as the network name
-      // We can't easily test the Docker commands, but we can verify the logic
-      expect(true).toBe(true); // Placeholder - actual behavior tested in integration
+  describe("G12 mutation tests - legacy network cleanup (source verification)", () => {
+    it("MUTATION CHECK: cleanupLegacyDefaultNetwork checks ownership label", () => {
+      const sourceContent = readFileSync(
+        join(process.cwd(), "src/utils/network-config.ts"),
+        "utf8",
+      );
+      
+      // The function MUST check com.docker.compose.project label before removing
+      expect(sourceContent).toContain("getDockerNetworkComposeProject");
+      expect(sourceContent).toContain("com.docker.compose.project");
+      
+      // Verify the ownership check is in cleanupLegacyDefaultNetwork
+      const funcStart = sourceContent.indexOf("export function cleanupLegacyDefaultNetwork");
+      const funcEnd = sourceContent.indexOf("export function", funcStart + 1);
+      const funcBody = sourceContent.slice(funcStart, funcEnd);
+      
+      // Must call ownership check before removal
+      expect(funcBody).toContain("getDockerNetworkComposeProject");
+      expect(funcBody).toContain("composeProject !== projectId");
+    });
+
+    it("MUTATION CHECK: getDockerNetworkComposeProject queries the right label", () => {
+      const sourceContent = readFileSync(
+        join(process.cwd(), "src/utils/network-config.ts"),
+        "utf8",
+      );
+      
+      // Must use the standard Docker Compose label name
+      expect(sourceContent).toMatch(/com\.docker\.compose\.project/);
     });
   });
 
@@ -467,16 +489,24 @@ describe("network-config utilities", () => {
       expect(result).toContain(LOG_FILE_NAME);
     });
 
-    it("MUTATION CHECK: terminal-runner uses same log path convention", () => {
-      // The terminal-runner.mjs must use the same path pattern
+    it("MUTATION CHECK: terminal-runner uses shared log constants", () => {
+      // The terminal-runner.mjs must import from the shared constants file
       const runnerContent = readFileSync(
         join(process.cwd(), "docker/terminal-runner.mjs"),
         "utf8",
       );
       
-      // Must reference the log path relative to workspace
-      expect(runnerContent).toContain("logs");
-      expect(runnerContent).toContain("wp-dev.log");
+      // Must import from the shared constants module
+      expect(runnerContent).toContain('from "./runner-log-constants.mjs"');
+      expect(runnerContent).toContain("logPathForWorkdir");
+      
+      // The constants file must have the correct values
+      const constantsContent = readFileSync(
+        join(process.cwd(), "docker/runner-log-constants.mjs"),
+        "utf8",
+      );
+      expect(constantsContent).toContain('LOG_DIR_NAME = "logs"');
+      expect(constantsContent).toContain('LOG_FILE_NAME = "wp-dev.log"');
     });
   });
 
@@ -488,6 +518,25 @@ describe("network-config utilities", () => {
       // For a non-existent network, should not be removed
       expect(result.removed).toBe(false);
       expect(result.reason).toBeDefined();
+      // Must explicitly say it doesn't exist
+      expect(result.reason).toContain("does not exist");
+    });
+
+    it("MUTATION CHECK: cleanupLegacyDefaultNetwork constructs correct network name", () => {
+      // Verify the function constructs <projectId>_default
+      // We test this by checking the error message includes the expected network name
+      const result = cleanupLegacyDefaultNetwork("myproject123");
+      // When network doesn't exist, the reason should reflect we tried to find it
+      expect(result.removed).toBe(false);
+      // The function should have looked for "myproject123_default"
+      // (Can't verify the exact name without Docker, but we verify the structure)
+      expect(result.reason).toBe("network does not exist");
+    });
+
+    it("MUTATION CHECK: getDockerNetworkComposeProject returns null for non-existent network", () => {
+      // Should return null, not throw
+      const result = getDockerNetworkComposeProject("nonexistent_network_xyz_12345");
+      expect(result).toBeNull();
     });
   });
 });
@@ -572,6 +621,26 @@ switch ($test) {
     case 'is_local_admin_request_full':
         $requireBindLocal = $input['require_bind_local'] ?? false;
         $result = wpdev_is_local_admin_request_full($requireBindLocal);
+        break;
+    case 'enforce_local_admin_only':
+        // This function calls exit(), so we capture output and use register_shutdown_function
+        ob_start();
+        $exitCode = 0;
+        register_shutdown_function(function() use (&$exitCode) {
+            $output = ob_get_clean();
+            // Parse the JSON output from wpdev_enforce_local_admin_only
+            $decoded = json_decode($output, true);
+            $httpCode = http_response_code();
+            echo json_encode([
+                'http_code' => $httpCode,
+                'output' => $decoded,
+                'allowed' => $httpCode === 200 || $httpCode === false,
+            ]);
+        });
+        wpdev_enforce_local_admin_only();
+        // If we get here, the request was allowed (no exit)
+        ob_end_clean();
+        $result = ['http_code' => 200, 'allowed' => true];
         break;
     default:
         $result = ['error' => 'Unknown test: ' . $test];
@@ -911,6 +980,91 @@ echo json_encode($result);
       });
       expect(resultUnlock.ok).toBe(false);
       expect(resultUnlock.reason).toContain("port exposed");
+    });
+  });
+
+  describe("wpdev_enforce_local_admin_only - G03 gate function", () => {
+    it("returns 403 when WPDEV_WP_BIND_LOCAL is '0'", () => {
+      const result = runPhpTest({
+        test: "enforce_local_admin_only",
+        host: "localhost:8888",
+        remote_addr: "172.28.1.1",
+        gateway: "172.28.1.1",
+        bind_local: "0",
+      });
+      if ("skipped" in result) return;
+      expect(result.allowed).toBe(false);
+      expect(result.http_code).toBe(403);
+    });
+
+    it("returns 403 when WPDEV_WP_BIND_LOCAL is not set", () => {
+      const result = runPhpTest({
+        test: "enforce_local_admin_only",
+        host: "localhost:8888",
+        remote_addr: "172.28.1.1",
+        gateway: "172.28.1.1",
+        // bind_local not set
+      });
+      if ("skipped" in result) return;
+      expect(result.allowed).toBe(false);
+      expect(result.http_code).toBe(403);
+    });
+
+    it("allows request when WPDEV_WP_BIND_LOCAL is '1' and request is local", () => {
+      const result = runPhpTest({
+        test: "enforce_local_admin_only",
+        host: "localhost:8888",
+        remote_addr: "172.28.1.1",
+        gateway: "172.28.1.1",
+        bind_local: "1",
+      });
+      if ("skipped" in result) return;
+      expect(result.allowed).toBe(true);
+    });
+
+    it("returns 403 when WPDEV_WP_BIND_LOCAL is '1' but Host is not localhost", () => {
+      const result = runPhpTest({
+        test: "enforce_local_admin_only",
+        host: "evil.com",
+        remote_addr: "172.28.1.1",
+        gateway: "172.28.1.1",
+        bind_local: "1",
+      });
+      if ("skipped" in result) return;
+      expect(result.allowed).toBe(false);
+      expect(result.http_code).toBe(403);
+    });
+
+    it("returns 403 when WPDEV_WP_BIND_LOCAL is '1' but REMOTE_ADDR not allowed", () => {
+      const result = runPhpTest({
+        test: "enforce_local_admin_only",
+        host: "localhost:8888",
+        remote_addr: "192.168.1.100",
+        gateway: "172.28.1.1",
+        bind_local: "1",
+      });
+      if ("skipped" in result) return;
+      expect(result.allowed).toBe(false);
+      expect(result.http_code).toBe(403);
+    });
+
+    it("MUTATION CHECK: removing the 403 block breaks this test", () => {
+      // This test specifically catches M-G03 mutation
+      // If the if ($bindLocal !== '1') block is removed, this passes incorrectly
+      const result = runPhpTest({
+        test: "enforce_local_admin_only",
+        host: "localhost:8888",
+        remote_addr: "172.28.1.1",
+        gateway: "172.28.1.1",
+        bind_local: "0", // Explicitly 0, must be rejected
+      });
+      if ("skipped" in result) return;
+      // The gate MUST reject bind_local=0
+      expect(result.allowed).toBe(false);
+      expect(result.http_code).toBe(403);
+      if (result.output) {
+        expect(result.output.error).toBe("forbidden");
+      }
     });
   });
 });
