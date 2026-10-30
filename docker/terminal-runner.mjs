@@ -3,38 +3,13 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import {
   safeArg,
   wpdevPullPushCommand,
   wpdevPushThemeCommand,
   restoreEnvConfirmOk,
 } from "./runner-sync-gates.mjs";
-import { resolveIdentityFile } from "../dist/utils/remote-config-helpers.js";
-
-function shellQuote(value) {
-  return `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
-function buildSshTestOpts(port, identityFile) {
-  const knownHosts = `${homedir()}/.ssh/known_hosts`;
-  const parts = [
-    "-F /dev/null",
-    "-o BatchMode=yes",
-    "-o ConnectTimeout=10",
-    "-o StrictHostKeyChecking=yes",
-    `-o UserKnownHostsFile=${shellQuote(knownHosts)}`,
-    "-o UpdateHostKeys=no",
-  ];
-  if (port && /^\d+$/.test(port)) {
-    parts.push(`-p ${port}`);
-  }
-  if (identityFile) {
-    const resolved = resolveIdentityFile(identityFile) ?? identityFile;
-    parts.push(`-i ${shellQuote(resolved)}`);
-  }
-  return parts.join(" ");
-}
+import { readRemoteEnv, sshOptsShell } from "./runner-remote-env.mjs";
 
 const PORT = Number(process.env.WPDEV_TERMINAL_RUNNER_PORT || 7682);
 const AUTH = process.env.WPDEV_TERMINAL_AUTH || "wpdev:wpdev";
@@ -125,16 +100,21 @@ function commandForAction(action, args) {
     return 'test -f ~/.ssh/id_ed25519 || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C "$USER@$(hostname)"; ls -la ~/.ssh/id_ed25519*; echo ""; echo "Public key:"; cat ~/.ssh/id_ed25519.pub';
   }
   if (action === "ssh_test") {
+    const env = safeArg(args?.env);
     const user = safeArg(args?.user);
     const host = safeArg(args?.host);
     const path = safeArg(args?.path);
-    const portArg = safeArg(args?.port);
-    const identityFileArg = safeArg(args?.identityFile);
     if (!user || !host) return null;
     if (!path) {
       return 'echo "FAIL: WordPress path is required. Set staging.path / production.path to the folder that contains wp-config.php (not a parent of other sites)." >&2; exit 1';
     }
-    const sshOpts = buildSshTestOpts(portArg, identityFileArg);
+    let sshOpts;
+    try {
+      const remote = readRemoteEnv(env);
+      sshOpts = sshOptsShell(remote) + " -o UpdateHostKeys=no";
+    } catch {
+      sshOpts = "-F /dev/null -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes -o UpdateHostKeys=no";
+    }
     return (
       `ssh ${sshOpts} ${user}@${host} ` +
       `'set -e; P=${path}; ` +

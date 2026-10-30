@@ -58,11 +58,17 @@ export function resolveSshConfigAlias(host: string): SshConfigResolution | null 
 
 export function detectPassphraseProtectedKey(keyPath: string): boolean {
   try {
-    const content = readFileSync(keyPath, "utf8");
-    if (content.includes("ENCRYPTED")) {
-      return true;
+    if (!existsSync(keyPath)) return false;
+    const result = spawnSync("ssh-keygen", ["-y", "-P", "", "-f", keyPath], {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    if (result.status === 0) {
+      return false;
     }
-    if (content.includes("Proc-Type:") && content.includes("ENCRYPTED")) {
+    const stderr = result.stderr ?? "";
+    if (/incorrect passphrase|bad passphrase|encrypted/i.test(stderr)) {
       return true;
     }
     return false;
@@ -122,11 +128,15 @@ export function checkSshPreflight(remote: RemoteEnvConfig): SshPreflightResult {
         }
       }
     } else {
-      result.errors.push(
-        `Configured SSH key not found: ${preferTildePath(result.keyPath)}. ` +
-          `Create it or update identityFile in wp-dev.config.json.`,
-      );
-      result.ok = false;
+      const hasAgent = process.env.SSH_AUTH_SOCK && process.env.SSH_AUTH_SOCK.trim() !== "";
+      const msg = `Configured SSH key not found: ${preferTildePath(result.keyPath)}. ` +
+        `Create it or update identityFile in wp-dev.config.json.`;
+      if (hasAgent) {
+        result.warnings.push(msg + " Falling back to ssh-agent.");
+      } else {
+        result.errors.push(msg);
+        result.ok = false;
+      }
     }
   }
 

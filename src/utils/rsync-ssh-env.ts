@@ -56,8 +56,11 @@ export function buildSshRsyncEnv(remote: RemoteEnvConfig): string {
   return parts.join(" ");
 }
 
+export type RsyncDirection = "pull" | "push";
+
 export function classifyRsyncSshError(
   stderr: string,
+  direction: RsyncDirection,
   identityFile?: string,
 ): "unprotected_key" | "publickey_denied" | "host_not_pinned" | "local_permission" | "remote_permission" | "unknown" {
   if (/UNPROTECTED PRIVATE KEY FILE|Permissions .* are too open/i.test(stderr)) {
@@ -73,7 +76,7 @@ export function classifyRsyncSshError(
     return "local_permission";
   }
   if (/mkdir.*failed.*Permission denied|recv_generator.*Permission denied/i.test(stderr)) {
-    return "remote_permission";
+    return direction === "pull" ? "local_permission" : "remote_permission";
   }
   return "unknown";
 }
@@ -144,7 +147,7 @@ export function canRetryPushWithRelativePath(remotePath: string, stderr: string)
 }
 
 export function pullRsyncFailureHint(stderr: string, identityFile?: string): string {
-  const errorType = classifyRsyncSshError(stderr, identityFile);
+  const errorType = classifyRsyncSshError(stderr, "pull", identityFile);
   const hint = formatRsyncSshErrorHint(errorType, identityFile);
   if (hint) return hint;
 
@@ -161,7 +164,7 @@ export function pullRsyncFailureHint(stderr: string, identityFile?: string): str
 }
 
 export function pushRsyncFailureHint(stderr: string, remotePath: string, identityFile?: string): string {
-  const errorType = classifyRsyncSshError(stderr, identityFile);
+  const errorType = classifyRsyncSshError(stderr, "push", identityFile);
   const hint = formatRsyncSshErrorHint(errorType, identityFile);
   if (hint) return hint;
 

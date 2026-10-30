@@ -74,7 +74,7 @@ async function runWithConfig(
     const detail = e instanceof Error ? e.stack || e.message : String(e);
     // Expected refusals: message only (no stack in UI/runner panel). Unexpected: keep stack in the log.
     const expectedRefuse =
-      /^(Restore refused|Backup file not found|Path safety FAIL|Refusing to |SSH host |Invalid JSON in |Invalid config in )/i.test(
+      /^(Restore refused|Backup file not found|Path safety FAIL|Refusing to |SSH host |SSH authentication failed|SSH key |Configured SSH key|Invalid JSON in |Invalid config in )/i.test(
         short,
       ) || /user aborted/i.test(short);
     // logError mirrors to stderr once — enough for CLI + runner panel (no extra console.error).
@@ -544,13 +544,20 @@ async function main(): Promise<void> {
         "--confirm-host <host>",
         "With --yes on staging: must equal staging.host from config",
       )
+      .option("--skip-simply-staging-dns", "[deprecated, no-op] DNS setup is no longer automatic")
       .action(
         async (opts: {
           dryRun?: boolean;
           backupLocal?: boolean;
           yes?: boolean;
           confirmHost?: string;
+          skipSimplyStagingDns?: boolean;
         }) => {
+          if (opts.skipSimplyStagingDns) {
+            console.error(
+              "Warning: --skip-simply-staging-dns is deprecated (DNS setup is no longer automatic during pull).",
+            );
+          }
           const dry = Boolean(opts.dryRun);
           const backupLocal = Boolean(opts.backupLocal);
           const yes = Boolean(opts.yes);

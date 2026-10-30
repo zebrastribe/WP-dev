@@ -7,7 +7,7 @@ import {
   formatSshAuthError,
   type SshAttemptError,
 } from "../utils/ssh-helpers.js";
-import { logInfo } from "../utils/logger.js";
+import { logInfo, logWarn } from "../utils/logger.js";
 
 const SSH_READY_TIMEOUT_MS = 20_000;
 /** Keep the control channel alive during short gaps; still dispose before long rsync. */
@@ -27,7 +27,7 @@ export type SshSession = {
 export async function connectSsh(remote: RemoteEnvConfig): Promise<SshSession> {
   const preflight = checkSshPreflight(remote);
   for (const warn of preflight.warnings) {
-    logInfo(`ssh preflight warning: ${warn}`);
+    logWarn(`SSH: ${warn}`);
   }
   if (!preflight.ok) {
     throw new Error(preflight.errors.join("\n"));

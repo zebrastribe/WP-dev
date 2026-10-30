@@ -114,17 +114,41 @@ describe("checkSshPreflight", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("errors when configured identity file missing", () => {
-    const result = checkSshPreflight({
-      host: "example.com",
-      user: "deploy",
-      path: "/var/www",
-      url: "https://example.com",
-      identityFile: "/nonexistent/key.pem",
-    });
-    expect(result.ok).toBe(false);
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0]).toContain("not found");
+  it("errors when configured identity file missing and no agent", () => {
+    const prev = process.env.SSH_AUTH_SOCK;
+    delete process.env.SSH_AUTH_SOCK;
+    try {
+      const result = checkSshPreflight({
+        host: "example.com",
+        user: "deploy",
+        path: "/var/www",
+        url: "https://example.com",
+        identityFile: "/nonexistent/key.pem",
+      });
+      expect(result.ok).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0]).toContain("not found");
+    } finally {
+      process.env.SSH_AUTH_SOCK = prev;
+    }
+  });
+
+  it("warns when configured identity file missing but agent available", () => {
+    const prev = process.env.SSH_AUTH_SOCK;
+    process.env.SSH_AUTH_SOCK = "/tmp/ssh-agent.sock";
+    try {
+      const result = checkSshPreflight({
+        host: "example.com",
+        user: "deploy",
+        path: "/var/www",
+        url: "https://example.com",
+        identityFile: "/nonexistent/key.pem",
+      });
+      expect(result.ok).toBe(true);
+      expect(result.warnings.some((w) => w.includes("not found") && w.includes("ssh-agent"))).toBe(true);
+    } finally {
+      process.env.SSH_AUTH_SOCK = prev;
+    }
   });
 
   it("warns on insecure key permissions", () => {
