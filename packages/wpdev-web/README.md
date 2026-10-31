@@ -26,3 +26,8 @@ Pages import runners and local-only panels from **`@wpdev/web-host`**. Localhost
 - Do not mount Terminal / Services in hosted primary nav (local-only).
 - Staging ↔ Production routes are marked `hostedOnly` until workers exist.
 - Never put SSH private keys or runner tokens in the browser.
+
+## Private cloud consumers
+
+`WP-dev-cloud` vendors **shell only** (`@wpdev/web/shell` / `PRIMARY_TABS`) under its `packages/wpdev-web`.
+Full pages stay here for local admin. Refresh cloud shell via `WP-dev-cloud/scripts/sync-public-packages.sh`.

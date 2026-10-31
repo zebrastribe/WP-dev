@@ -64,7 +64,7 @@ Auto-configured by `wp-dev up`. Override only if needed for advanced setups.
 
 **Subnet pool override:** Set `WPDEV_SUBNET_POOL=172.29` in `docker/.env` or your shell environment before running `wp-dev up` to use a different prefix. Shell environment takes precedence over docker/.env. This is useful if `172.28.x.x` conflicts with your VPN or cloud private network.
 
-**Host route awareness:** The subnet allocator also checks host routes (`ip route`) and interface addresses to avoid conflicts with VPNs (Tailscale, WireGuard), cloud private networks (Hetzner vSwitch), and other local networks.
+**Host route awareness:** The subnet allocator also checks host routes (`ip route`) and interface addresses to avoid conflicts with VPNs (Tailscale, WireGuard), cloud private networks (provider vSwitch / VPC), and other local networks.
 
 **Two stacks on one host** get unique subnets automatically:
 - `wp-dev up` scans existing Docker networks to find an available /24 subnet

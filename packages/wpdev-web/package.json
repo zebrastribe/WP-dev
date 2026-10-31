@@ -3,10 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Shared WP-dev web UI (Backup · Setup · Sync). Localhost admin and future hosted control-web both consume this package.",
+  "description": "Shared WP-dev web UI (Backup \u00b7 Setup \u00b7 Sync). Localhost admin and future hosted control-web both consume this package.",
   "exports": {
     ".": "./src/index.ts",
-    "./adapter": "./src/adapter/types.ts"
+    "./adapter": "./src/adapter/types.ts",
+    "./shell": "./src/shell/primaryTabs.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0",
