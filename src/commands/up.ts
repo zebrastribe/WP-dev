@@ -79,6 +79,7 @@ async function ensureWordPressSetupAssetsViaDocker(loaded: LoadedConfig): Promis
   const src = join(loaded.configDir, "docker/assets/mu-plugins/wp-dev-setup.php");
   if (!existsSync(src)) return;
   try {
+    // Gate 6: wordpress service does not mount docker/assets. Bind only this file for the one-shot run.
     await compose(
       loaded.configDir,
       loaded.config,
@@ -88,13 +89,15 @@ async function ensureWordPressSetupAssetsViaDocker(loaded: LoadedConfig): Promis
         "--no-deps",
         "--user",
         "0",
+        "-v",
+        `${src}:/tmp/wp-dev-setup.php:ro`,
         "--entrypoint",
         "sh",
         "wordpress",
         "-lc",
         [
           "mkdir -p /var/www/html/wp-content/mu-plugins",
-          "cp /wp-dev-repo/docker/assets/mu-plugins/wp-dev-setup.php /var/www/html/wp-content/mu-plugins/wp-dev-setup.php",
+          "cp /tmp/wp-dev-setup.php /var/www/html/wp-content/mu-plugins/wp-dev-setup.php",
           "chown 33:33 /var/www/html/wp-content/mu-plugins/wp-dev-setup.php",
           "chmod 664 /var/www/html/wp-content/mu-plugins/wp-dev-setup.php",
         ].join(" && "),

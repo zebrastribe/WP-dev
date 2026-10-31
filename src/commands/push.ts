@@ -88,13 +88,18 @@ async function sanitizeRemoteGeneratedAssetUrls(
   fromUrl: string,
   toUrl: string,
 ): Promise<void> {
+  // POSIX /bin/sh only — remotes often use dash/ash (no process substitution, no read -d).
+  // Count via tempfile so the pipe's while-subshell can still report changes.
   const cmd = [
     `ROOT_PATH=${posixShellQuote(wpPath)}`,
     `FROM_URL=${posixShellQuote(fromUrl)}`,
     `TO_URL=${posixShellQuote(toUrl)}`,
-    "changed=0",
-    "for d in \"$ROOT_PATH/wp-content/uploads/elementor/css\" \"$ROOT_PATH/wp-content/cache\"; do [ -d \"$d\" ] || continue; while IFS= read -r -d '' f; do if grep -q \"$FROM_URL\" \"$f\"; then sed -i \"s|$FROM_URL|$TO_URL|g\" \"$f\" && changed=$((changed+1)); fi; done < <(find \"$d\" -type f \\( -name '*.css' -o -name '*.js' -o -name '*.json' -o -name '*.txt' -o -name '*.html' -o -name '*.xml' -o -name '*.map' \\) -print0); done",
-    "echo \"asset-url-sanitize changed_files=$changed\"",
+    'countfile="${TMPDIR:-/tmp}/wpdev-asset-sanitize.$$"',
+    ': > "$countfile"',
+    'for d in "$ROOT_PATH/wp-content/uploads/elementor/css" "$ROOT_PATH/wp-content/cache"; do [ -d "$d" ] || continue; find "$d" -type f \\( -name \'*.css\' -o -name \'*.js\' -o -name \'*.json\' -o -name \'*.txt\' -o -name \'*.html\' -o -name \'*.xml\' -o -name \'*.map\' \\) -exec grep -lF "$FROM_URL" {} + 2>/dev/null | while IFS= read -r f; do [ -n "$f" ] || continue; sed -i "s|$FROM_URL|$TO_URL|g" "$f" && echo x >> "$countfile"; done; done',
+    'changed=$(wc -l < "$countfile" | tr -d "[:space:]")',
+    'rm -f "$countfile"',
+    'echo "asset-url-sanitize changed_files=$changed"',
   ].join("; ");
   const r = await sshExec(cmd);
   if (r.code !== 0) {

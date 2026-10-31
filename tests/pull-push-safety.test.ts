@@ -80,6 +80,15 @@ describe("pull/push safety guards", () => {
     expect(src).toContain("verifyRemoteSiteUrls");
   });
 
+  it("push remote asset URL sanitize stays POSIX (no bash process substitution)", () => {
+    const src = readFileSync(join(process.cwd(), "src/commands/push.ts"), "utf8");
+    expect(src).toContain("sanitizeRemoteGeneratedAssetUrls");
+    expect(src).toContain("grep -lF");
+    expect(src).not.toMatch(/<\s*<\s*\(/);
+    expect(src).not.toContain("read -r -d ''");
+    expect(src).not.toContain('read -r -d ""');
+  });
+
   it("restore creates pre-restore backup", () => {
     const src = readFileSync(join(process.cwd(), "src/commands/restore.ts"), "utf8");
     expect(src).toContain("pre-restore");

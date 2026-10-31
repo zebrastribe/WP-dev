@@ -66,6 +66,14 @@ describe("WordPress permissions lifecycle (sync contract)", () => {
     expect(remoteFn).not.toContain("cmdFixPermissions");
   });
 
+  it("up Docker mu-plugin fallback binds the host file (Gate 6: no docker/assets mount)", () => {
+    const up = readFileSync(join(root, "src/commands/up.ts"), "utf8");
+    const fnStart = up.indexOf("async function ensureWordPressSetupAssetsViaDocker");
+    const fn = up.slice(fnStart, fnStart + 1200);
+    expect(fn).toContain("/tmp/wp-dev-setup.php:ro");
+    expect(fn).not.toContain("/wp-dev-repo/docker/assets/mu-plugins/wp-dev-setup.php");
+  });
+
   it("cmdFixRuntimeWritePermissions orders shared tree then runtime", () => {
     const src = readFileSync(join(root, "src/commands/fix-permissions.ts"), "utf8");
     const fnStart = src.indexOf("export async function cmdFixRuntimeWritePermissions");
