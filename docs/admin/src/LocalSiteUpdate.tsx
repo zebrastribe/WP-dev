@@ -44,7 +44,6 @@ export function LocalSiteUpdate() {
   const [message, setMessage] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
-  const [core, setCore] = useState("");
 
   const check = useCallback(async () => {
     if (!canRun) {
@@ -88,7 +87,6 @@ export function LocalSiteUpdate() {
     for (const item of report.themes) {
       next.push({ target: "theme", slug: item.slug, label: item.label || item.slug, version: item.version, available: item.available });
     }
-    setCore(report.core.current);
     setRows(next);
     setPicked({});
     setMessage(next.length === 0 ? `WordPress ${report.core.current}. Nothing to update.` : `WordPress ${report.core.current}. ${next.length} update${next.length === 1 ? "" : "s"} found.`);
