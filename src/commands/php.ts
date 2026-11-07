@@ -62,6 +62,7 @@ export async function cmdPhpShow(
           currentVersion: detect.currentVersion,
           strategy: detect.strategy,
           supported: detect.supported,
+          configured: detect.configured !== false,
           detail: detect.detail,
           allowed: [...SUPPORTED_PHP_VERSIONS],
           rollback: rb

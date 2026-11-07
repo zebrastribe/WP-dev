@@ -669,6 +669,14 @@ if ($method === 'GET' && $action === 'auth-status') {
 }
 
 if ($method === 'POST' && $action === 'auth-bootstrap') {
+    $bodyRaw = file_get_contents('php://input');
+    $bootstrapIn = is_string($bodyRaw) && trim($bodyRaw) !== '' ? json_decode($bodyRaw, true) : null;
+    $explicitUnlock = is_array($bootstrapIn) && !empty($bootstrapIn['explicit']);
+    if (wpdev_admin_explicitly_logged_out() && !$explicitUnlock) {
+        wpdev_json_error(403, 'forbidden', 'Sign in again with Unlock.');
+        wpdev_admin_api_log('POST auth-bootstrap 403 logged_out');
+        exit;
+    }
     // Defense-in-depth: require WPDEV_WP_BIND_LOCAL=1 for auto-unlock (guards against
     // Docker configurations that relay LAN traffic through the gateway).
     $localCheck = wpdev_is_local_admin_request_full(true);
@@ -979,6 +987,61 @@ if ($method === 'POST' && $action === 'runner-run') {
         exit;
     }
     wpdev_admin_api_log('POST runner-run 200 kind=' . $kind . ' action=' . $runnerAction);
+    echo json_encode($proxied['data'], JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+if ($method === 'POST' && $action === 'backup-import') {
+    wpdev_require_mutation_token($token, 'backup-import');
+    $upload = $_FILES['file'] ?? null;
+    if (!is_array($upload)) {
+        wpdev_json_error(400, 'missing_file', 'Choose a .sql or .tar.gz file.');
+        wpdev_admin_api_log('POST backup-import 400 missing_file');
+        exit;
+    }
+    $err = (int) ($upload['error'] ?? UPLOAD_ERR_NO_FILE);
+    if ($err === UPLOAD_ERR_INI_SIZE || $err === UPLOAD_ERR_FORM_SIZE) {
+        wpdev_json_error(413, 'backup_too_large', 'That file is larger than the admin upload limit.');
+        wpdev_admin_api_log('POST backup-import 413 backup_too_large');
+        exit;
+    }
+    if ($err !== UPLOAD_ERR_OK) {
+        wpdev_json_error(400, 'upload_failed', 'The file did not upload.');
+        wpdev_admin_api_log('POST backup-import 400 upload_failed');
+        exit;
+    }
+    $original = is_string($upload['name'] ?? null) ? $upload['name'] : '';
+    $name = basename(str_replace('\\', '/', $original));
+    $validName = preg_match('/^[A-Za-z0-9._-]{1,180}$/', $name) === 1
+        && !str_starts_with($name, '.')
+        && (str_ends_with($name, '.sql') || str_ends_with($name, '.tar.gz'));
+    if (!$validName) {
+        wpdev_json_error(400, 'invalid_backup_name', 'Use a .sql or .tar.gz name made of letters, numbers, dots, and dashes.');
+        wpdev_admin_api_log('POST backup-import 400 invalid_backup_name');
+        exit;
+    }
+    $tmp = is_string($upload['tmp_name'] ?? null) ? $upload['tmp_name'] : '';
+    if ($tmp === '' || !is_uploaded_file($tmp)) {
+        wpdev_json_error(400, 'upload_failed', 'The file did not upload.');
+        wpdev_admin_api_log('POST backup-import 400 not_uploaded');
+        exit;
+    }
+    $proxied = wpdev_runner_proxy_upload($dockerEnvPath, $name, $tmp);
+    if ($proxied['ok'] !== true) {
+        $status = ($proxied['error'] ?? '') === 'backup_too_large' ? 413 : 503;
+        http_response_code($status);
+        echo json_encode(
+            [
+                'ok' => false,
+                'error' => $proxied['error'],
+                'detail' => $proxied['detail'] ?? null,
+            ],
+            JSON_UNESCAPED_SLASHES
+        );
+        wpdev_admin_api_log('POST backup-import ' . $status . ' ' . ($proxied['error'] ?? 'runner_error'));
+        exit;
+    }
+    wpdev_admin_api_log('POST backup-import 200 ' . $name);
     echo json_encode($proxied['data'], JSON_UNESCAPED_SLASHES);
     exit;
 }

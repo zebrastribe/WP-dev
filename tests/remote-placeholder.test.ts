@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { detectPhp } from "../src/services/php-version.js";
 import { wpDevConfigSchema } from "../src/config/schema.js";
 import {
   isPlaceholderRemoteHost,
@@ -55,6 +56,19 @@ describe("isStagingRemotePlaceholder", () => {
       url: "https://staging.real.test",
     });
     expect(isStagingRemotePlaceholder(c)).toBe(true);
+  });
+
+  it("reports placeholder staging without opening SSH", async () => {
+    const config = minimalConfig({
+      host: "staging.example.invalid",
+      path: STAGING_PLACEHOLDER_SSH_PATH,
+      url: "https://staging.example.invalid",
+    });
+    const result = await detectPhp({ config, configDir: "/tmp/wpdev-placeholder" }, "staging");
+    expect(result.configured).toBe(false);
+    expect(result.supported).toBe(false);
+    expect(result.detail).toContain("staging.example.invalid");
+    expect(result.detail).not.toContain("known_hosts");
   });
 
   it("returns false for real staging", () => {

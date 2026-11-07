@@ -18,7 +18,6 @@ import {
 import { useAdminAuth } from "./AdminAuthProvider";
 import { logAdmin } from "./adminLog";
 import { EXAMPLE_WP_DEV_CONFIG } from "./generated/exampleConfig";
-import { TerminalEmbed } from "./TerminalEmbed";
 import { SyncDeployPanel } from "./SyncDeployPanel";
 import { useRunnerSecrets } from "./useRunnerSecrets";
 
@@ -294,8 +293,6 @@ export function Wizard() {
   const { authenticated, authVersion, requestUnlock } = useAdminAuth();
   const {
     terminalAuth,
-    terminalPort,
-    runnerReady: terminalSecretsReady,
     runnerMessage,
     canRun,
   } = useRunnerSecrets("Unlock admin and run npm run wp-dev -- up to enable browser deploy.");
@@ -321,6 +318,13 @@ export function Wizard() {
   const [domainCheckResult, setDomainCheckResult] = useState<DomainCheckResult>(null);
   const [readinessBusy, setReadinessBusy] = useState(false);
   const [dbCheckBusy, setDbCheckBusy] = useState(false);
+  const [stagingChecksBusy, setStagingChecksBusy] = useState(false);
+  const [stagingChecks, setStagingChecks] = useState<null | {
+    path: "ok" | "fail";
+    https: "ok" | "fail" | "skip";
+    domain: "ok" | "fail" | "skip";
+    db: "ok" | "fail" | "skip";
+  }>(null);
   const [dbCheckMessage, setDbCheckMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [dbSaveBusy, setDbSaveBusy] = useState(false);
   const [dbSaveMessage, setDbSaveMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -357,12 +361,18 @@ export function Wizard() {
   }, []);
 
   const goNext = useCallback(() => {
-    setStep((s) => wizardStepAfter(s));
-  }, []);
+    setStep((s) => {
+      if (setupWorkflow === "local-only" && s < 3) return 3;
+      return wizardStepAfter(s);
+    });
+  }, [setupWorkflow]);
 
   const goPrev = useCallback(() => {
-    setStep((s) => wizardStepBefore(s));
-  }, []);
+    setStep((s) => {
+      if (setupWorkflow === "local-only" && (s === 1 || s === 2 || s === 3)) return 0;
+      return wizardStepBefore(s);
+    });
+  }, [setupWorkflow]);
 
   useEffect(() => {
     logAdmin("info", "Wizard: opened");
@@ -698,7 +708,7 @@ export function Wizard() {
               tone: "error",
               text: `Runner status error: ${status.error}\n\nDo not start the same job again until you check the host.`,
             });
-            return;
+            return false;
           }
           setTerminalRun({
             running: status.status === "running",
@@ -745,7 +755,7 @@ export function Wizard() {
                   : `Command failed (exit ${status.exitCode ?? 1}). Fix path/SSH, then re-run Verify path.`) +
                 "\n\nSee output in the command output panel below.",
             });
-            return;
+            return ok;
           }
           await new Promise((resolve) => window.setTimeout(resolve, 1000));
         }
@@ -758,7 +768,7 @@ export function Wizard() {
           tone: "error",
           text: "Timed out waiting for the runner. Check host logs before starting another job.",
         });
-        return;
+        return false;
       }
       // Runner unavailable/auth failed -> fallback to clipboard flow.
       setTerminalRun({
@@ -771,7 +781,7 @@ export function Wizard() {
       copied = true;
       logAdmin("info", "Wizard: prepared terminal command", cmd);
       const openHint =
-        "Command copied. Use the embedded Browser terminal panel below, paste (Ctrl+Shift+V), and press Enter.";
+        "Command copied. Open Advanced → Terminal, paste (Ctrl+Shift+V), and press Enter.";
       if (kind === "pull") {
         logAdmin(
           "info",
@@ -796,14 +806,14 @@ export function Wizard() {
       setTerminalPrep({
         command: cmd,
         copied: true,
-        message: "Prepared and copied. Paste into Browser terminal and press Enter.",
+        message: "Prepared and copied. Open Advanced → Terminal, paste, and press Enter.",
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logAdmin("error", "Wizard: prepare terminal command failed", msg);
       setAlert({
         tone: "error",
-        text: `Clipboard permission failed: ${msg}\n\nCommand is shown below. Copy it manually and run in Browser terminal.`,
+        text: `Clipboard permission failed: ${msg}\n\nCommand is shown below. Copy it manually and run it in Advanced → Terminal.`,
       });
       setTerminalPrep({
         command: cmd,
@@ -811,6 +821,7 @@ export function Wizard() {
         message: "Clipboard failed. Copy command manually from the box below.",
       });
     }
+    return false;
   };
 
   const buildSshTestCommand = (env: "staging" | "production"): string => {
@@ -826,6 +837,67 @@ export function Wizard() {
 
   const buildKeypairCommand = (): string =>
     'test -f ~/.ssh/id_ed25519 || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C "$USER@$(hostname)"; ls -la ~/.ssh/id_ed25519*; echo ""; echo "Public key:"; cat ~/.ssh/id_ed25519.pub';
+
+  const runStagingChecks = async () => {
+    setStagingChecksBusy(true);
+    setAlert(null);
+    const pathOk = await runTerminalCommand(buildSshTestCommand("staging"), "plain", "ssh_test", {
+      user: data.staging.user.trim(),
+      host: data.staging.host.trim(),
+      path: data.staging.path.trim(),
+      port: data.staging.port != null ? String(data.staging.port) : "",
+      identityFile: data.staging.identityFile?.trim() ?? "",
+      env: "staging",
+    });
+    if (!pathOk) {
+      setStagingChecks({ path: "fail", https: "skip", domain: "skip", db: "skip" });
+      setAlert({
+        tone: "error",
+        text: "Staging path check failed. Fix SSH and the WordPress path, then run the check again.",
+      });
+      setStagingChecksBusy(false);
+      return;
+    }
+    let https: "ok" | "fail" | "skip" = "skip";
+    let domain: "ok" | "fail" | "skip" = "skip";
+    let db: "ok" | "fail" | "skip" = "skip";
+    const url = data.staging.url.trim();
+    if (url) {
+      const httpsRes = await checkStagingHttps({ url });
+      https = httpsRes.ok && httpsRes.https.ok ? "ok" : "fail";
+      const domainRes = await checkStagingDomain({ url });
+      domain =
+        domainRes.ok && domainRes.dns.ok && domainRes.https.ok ? "ok" : "fail";
+    }
+    const dbHost = data.staging.db?.host?.trim() || "";
+    const dbName = data.staging.db?.name?.trim() || "";
+    const dbUser = data.staging.db?.user?.trim() || "";
+    const dbPass = data.staging.db?.password || "";
+    if (dbHost && dbName && dbUser && dbPass) {
+      const dbRes = await checkStagingDbConnection({
+        host: dbHost,
+        name: dbName,
+        user: dbUser,
+        password: dbPass,
+        port: 3306,
+      });
+      db = dbRes.ok ? "ok" : "fail";
+    }
+    setStagingChecks({ path: pathOk ? "ok" : "fail", https, domain, db });
+    const failed = [
+      pathOk ? null : "path",
+      https === "fail" ? "HTTPS" : null,
+      domain === "fail" ? "domain" : null,
+      db === "fail" ? "database" : null,
+    ].filter(Boolean);
+    setAlert({
+      tone: failed.length ? "error" : "success",
+      text: failed.length
+        ? `Staging check failed: ${failed.join(", ")}. Open individual checks for the detail.`
+        : "Staging check passed.",
+    });
+    setStagingChecksBusy(false);
+  };
 
   const onSave = async () => {
     setSaving(true);
@@ -1063,19 +1135,12 @@ export function Wizard() {
         </div>
       );
     })();
-  const terminalPanel = (
-    <TerminalEmbed
-      terminalPort={terminalPort}
-      terminalAuth={terminalAuth}
-      secretsReady={terminalSecretsReady}
-      secretsError={runnerMessage}
-    />
-  );
 
   return (
     <div className="w-full space-y-6">
       <div className="flex flex-wrap gap-2 text-xs">
-        {STEP_LABELS.map((label, i) => (
+        {STEP_LABELS.map((label, i) =>
+          workflow === "local-only" && (i === 1 || i === 2) ? null : (
           <button
             key={label}
             type="button"
@@ -1187,7 +1252,7 @@ export function Wizard() {
                 Click <strong>Next</strong>
                 {workflow === "pull"
                   ? " — then Live SSH, then Staging (optional)."
-                  : " (SSH and Staging steps are optional)."}
+                  : " — then First backup. Live SSH and Staging stay off this path."}
               </li>
             </ol>
             <p className="mt-2">
@@ -1318,7 +1383,7 @@ export function Wizard() {
         <div className="space-y-4">
           {workflow === "local-only" && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-              Optional for a local-only site — skip to Save & sync. Add SSH here later when you want to pull from a
+              Local-only skips this step. Use Back to return to Connect, or switch the workflow to pull when you want a
               server.
             </p>
           )}
@@ -1394,7 +1459,9 @@ export function Wizard() {
                 </p>
               )}
           </label>
-          {terminalPanel}
+          <p className="text-xs text-slate-500">
+            Terminal commands run from Advanced → Terminal. Output from buttons on this page shows in the panel above.
+          </p>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
             <p className="font-semibold text-slate-800 dark:text-slate-100">SSH key setup (required)</p>
             <p className="mt-1 font-semibold text-amber-700 dark:text-amber-300">
@@ -1701,10 +1768,56 @@ export function Wizard() {
                   </div>
                 )}
               </div>
-              {terminalPanel}
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
-                <p className="font-semibold text-slate-800 dark:text-slate-100">Test staging SSH access</p>
-                <p className="mt-1 font-semibold text-amber-700 dark:text-amber-300">
+              <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-900/40">
+                <p className="font-semibold text-slate-800 dark:text-slate-100">Staging check</p>
+                <p className="mt-1 text-slate-600 dark:text-slate-300">
+                  Read-only. Checks the WordPress path over SSH, then HTTPS and DNS when a staging URL is set, then the
+                  database when host, name, user, and password are filled. Saving the database and applying HTTP auth
+                  stay on their own buttons.
+                </p>
+                <button
+                  type="button"
+                  disabled={stagingChecksBusy}
+                  className="mt-2 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => void runStagingChecks()}
+                >
+                  {stagingChecksBusy ? "Checking staging..." : "Run staging check"}
+                </button>
+                {stagingChecks && (
+                  <ul className="mt-2 space-y-1 text-slate-700 dark:text-slate-200">
+                    <li>Path: {stagingChecks.path === "ok" ? "passed" : "failed"}</li>
+                    <li>
+                      HTTPS:{" "}
+                      {stagingChecks.https === "skip"
+                        ? "skipped (no URL)"
+                        : stagingChecks.https === "ok"
+                          ? "passed"
+                          : "failed"}
+                    </li>
+                    <li>
+                      Domain:{" "}
+                      {stagingChecks.domain === "skip"
+                        ? "skipped (no URL)"
+                        : stagingChecks.domain === "ok"
+                          ? "passed"
+                          : "failed"}
+                    </li>
+                    <li>
+                      Database:{" "}
+                      {stagingChecks.db === "skip"
+                        ? "skipped (credentials incomplete)"
+                        : stagingChecks.db === "ok"
+                          ? "passed"
+                          : "failed"}
+                    </li>
+                  </ul>
+                )}
+              </div>
+              <details className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
+                <summary className="cursor-pointer font-semibold text-slate-800 dark:text-slate-100">
+                  Individual checks
+                </summary>
+                <p className="mt-2 font-semibold text-amber-700 dark:text-amber-300">
                   Required: ensure this key is uploaded on the staging host too (or shared host account) before pull/push.
                 </p>
                 <p className="mt-1">
@@ -1887,7 +2000,7 @@ export function Wizard() {
                   SSL checklist: DNS for staging hostname resolves, hosting/vhost serves the hostname, cert is issued,
                   and HTTP redirects to HTTPS.
                 </p>
-              </div>
+              </details>
               <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
                 <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
                   Required for push staging: staging.db settings
@@ -2123,11 +2236,12 @@ export function Wizard() {
         </div>
       )}
 
-      {step === 99 && (
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600 dark:text-slate-400">
-            This step is optional. Skip it unless you need provider API integration.
-          </p>
+      {step === 0 && (
+        <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+          <summary className="cursor-pointer text-sm font-medium text-slate-800 dark:text-slate-100">
+            DNS provider (Simply.com) — optional
+          </summary>
+          <div className="mt-3 space-y-4">
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -2276,7 +2390,8 @@ export function Wizard() {
               )}
             </div>
           )}
-        </div>
+          </div>
+        </details>
       )}
 
       {step === 3 && (

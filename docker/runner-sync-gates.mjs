@@ -26,6 +26,17 @@ export function wpdevPullPushCommand(kind, env, confirm) {
  * Restore confirm gate used by terminal-runner restore_env.
  * Production requires RESTORE_PRODUCTION; staging requires a host token; local always ok.
  */
+/** Basename of a backup the admin may upload. .sql or .tar.gz only. */
+export function safeBackupImportName(name) {
+  if (typeof name !== "string") return "";
+  const base = name.split(/[/\\]/).pop() ?? "";
+  if (base !== name) return "";
+  if (!/^[A-Za-z0-9._-]{1,180}$/.test(base)) return "";
+  if (base.startsWith(".")) return "";
+  if (base.endsWith(".sql") || base.endsWith(".tar.gz")) return base;
+  return "";
+}
+
 export function restoreEnvConfirmOk(env, confirm) {
   const e = safeArg(env);
   const c = safeArg(confirm);

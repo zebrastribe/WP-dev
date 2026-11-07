@@ -5,7 +5,7 @@
 export { ActivityLog } from "./ActivityLog";
 export { useAdminAuth } from "./AdminAuthProvider";
 export { logAdmin } from "./adminLog";
-export { loadLocalStatus, loadWpDevConfig } from "./api";
+export { importLocalBackup, loadLocalStatus, loadWpDevConfig } from "./api";
 // loadWpDevConfig also used by SyncPage for theme slug display
 export { BackupRestore } from "./BackupRestore";
 export { ConfigAssistant } from "./ConfigAssistant";

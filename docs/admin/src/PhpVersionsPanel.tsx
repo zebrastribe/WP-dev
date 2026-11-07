@@ -15,6 +15,7 @@ type PhpShowJson = {
   currentVersion: string | null;
   strategy: string;
   supported: boolean;
+  configured?: boolean;
   detail: string;
   allowed: string[];
   rollback: { previousVersion: string | null; at: string; strategy: string } | null;
@@ -196,14 +197,17 @@ export function PhpVersionsPanel() {
           const st = envs[env]!;
           const busy = busyEnv === env || st.loading;
           const changeable = canChangePhp(env, st.status);
-          const detected = st.status !== null;
+          const unconfigured = st.status?.configured === false;
+          const detected = st.status !== null && !unconfigured;
           const versionLabel = st.loading
             ? "…"
-            : st.status?.currentVersion
-              ? st.status.currentVersion
-              : detected
-                ? "unknown"
-                : "not detected yet";
+            : unconfigured
+              ? "not configured"
+              : st.status?.currentVersion
+                ? st.status.currentVersion
+                : detected
+                  ? "unknown"
+                  : "not detected yet";
 
           return (
             <div
@@ -229,7 +233,7 @@ export function PhpVersionsPanel() {
                 <span className="font-medium text-slate-800 dark:text-slate-200">{versionLabel}</span>
               </p>
 
-              {!detected && !st.loading ? (
+              {!detected && !st.loading && !unconfigured ? (
                 <p className="text-[11px] leading-snug text-slate-500 dark:text-slate-400">
                   {env === "local"
                     ? "Click Detect to read local Docker PHP."
@@ -243,7 +247,7 @@ export function PhpVersionsPanel() {
                 </p>
               ) : null}
 
-              {detected && !changeable ? (
+              {detected && !changeable && !unconfigured ? (
                 <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
                   Change PHP in the <strong>hosting panel</strong>, then Detect again to confirm.
                   WP-dev will not offer Apply here.

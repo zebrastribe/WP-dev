@@ -10,7 +10,7 @@ The detailed hosted / multi-tenant plan lives only in the **private** repository
 - Do **not** publish hosted design, providers, costs, or control-plane internals here.
 - Day-to-day use: [README.md](../../README.md), [project-structure.md](./project-structure.md), [architecture.md](./architecture.md).
 
-## Status snapshot (2026-10-31)
+## Status snapshot (2026-11-01)
 
 | Item | Status |
 |------|--------|
@@ -19,7 +19,7 @@ The detailed hosted / multi-tenant plan lives only in the **private** repository
 | SaaS / hosted build hold | **OFF** — G2 lifted 2026-10-31 |
 | Phase 1 (sync-engine / lab) | **COMPLETE** on this public repo (P1.1–P1.9; no SaaS) |
 | Phase 3 lab → Model B deploy gate | **READY** in private repo (lab complete; hosted profile scaffolded; deploy before real keys) |
-| Dual-repo packaging | Cloud vendors public package snapshots; each repo installs alone |
+| Dual-repo packaging | One product. Shared `sync-engine` and web UI stay in this public repo. The private app consumes them on localhost and in the cloud and does not keep a second copy |
 | Product launch | **Not ready** — no hosted control plane in this repo |
 
 Gate 0 still applies: never publish today’s local admin API or runners. Hosted control-plane apps (when built) live in the private repo only. Follow the private plan for Phase 1+ details.

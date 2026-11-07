@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   restoreEnvConfirmOk,
   safeArg,
+  safeBackupImportName,
   wpdevPullPushCommand,
   wpdevPushThemeCommand,
 } from "../docker/runner-sync-gates.mjs";
@@ -43,6 +44,17 @@ describe("runner-sync-gates", () => {
     expect(restoreEnvConfirmOk("production", "RESTORE_PRODUCTION")).toBe(true);
     expect(restoreEnvConfirmOk("production", "SYNC_PRODUCTION")).toBe(false);
     expect(restoreEnvConfirmOk("production", "")).toBe(false);
+  });
+
+  it("safeBackupImportName accepts a cloud local-setup archive and refuses paths", () => {
+    expect(safeBackupImportName("wp-dev-local-setup-production-2026-11-05.tar.gz")).toBe(
+      "wp-dev-local-setup-production-2026-11-05.tar.gz",
+    );
+    expect(safeBackupImportName("db-2026-11-05.sql")).toBe("db-2026-11-05.sql");
+    expect(safeBackupImportName("../db.sql")).toBe("");
+    expect(safeBackupImportName("backup.sql.gz")).toBe("");
+    expect(safeBackupImportName(".env.sql")).toBe("");
+    expect(safeBackupImportName("notes.txt")).toBe("");
   });
 
   it("wpdevPushThemeCommand requires SYNC_PRODUCTION for production", () => {

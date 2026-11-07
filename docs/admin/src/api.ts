@@ -54,7 +54,7 @@ export async function fetchAdminAuthStatus(): Promise<AdminAuthStatusResponse> {
   }
 }
 
-export async function bootstrapLocalAdminSession(): Promise<
+export async function bootstrapLocalAdminSession(explicit = false): Promise<
   { ok: true } | { ok: false; error: string }
 > {
   try {
@@ -62,7 +62,7 @@ export async function bootstrapLocalAdminSession(): Promise<
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify(explicit ? { explicit: true } : {}),
     });
     const data = (await res.json()) as Record<string, unknown>;
     if (!res.ok || data.ok !== true) {
@@ -140,7 +140,8 @@ export function apiPhpUrl(
     | "runner-cancel"
     | "runner-active-job"
     | "services"
-    | "filesystem-health",
+    | "filesystem-health"
+    | "backup-import",
 ): string {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return `${origin}/admin/api.php?action=${action}`;
@@ -783,6 +784,8 @@ export type TerminalAction =
   | "wpdev_sync_scan"
   | "wpdev_update"
   | "wpdev_update_preflight"
+  | "wpdev_site_check"
+  | "wpdev_site_apply"
   | "wpdev_php_show"
   | "wpdev_php_set"
   | "wpdev_php_rollback"
@@ -792,6 +795,7 @@ export type TerminalAction =
   | "backup_list"
   | "validate_restore_path"
   | "restore_env"
+  | "setup_from_backup"
   | "git_status"
   | "git_log"
   | "git_show"
@@ -856,6 +860,31 @@ export async function runTerminalAction(
       jobId: String(data.jobId ?? ""),
       command: String(data.command ?? ""),
     };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network_error" };
+  }
+}
+
+/** Upload a .sql or .tar.gz into this project's local backup folder. Does not restore it. */
+export async function importLocalBackup(
+  file: File,
+): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  try {
+    const body = new FormData();
+    body.append("file", file, file.name);
+    const res = await fetch(apiPhpUrl("backup-import"), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: buildAdminApiHeaders(),
+      body,
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || data.ok !== true || typeof data.path !== "string" || data.path === "") {
+      const detail = typeof data.detail === "string" ? data.detail : "";
+      const err = String(data.error ?? `HTTP ${res.status}`);
+      return { ok: false, error: detail ? `${err}: ${detail}` : err };
+    }
+    return { ok: true, path: data.path };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }

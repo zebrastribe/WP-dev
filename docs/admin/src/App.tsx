@@ -8,6 +8,7 @@ import {
   type PrimaryTab,
 } from "@wpdev/web";
 import { AdminAuthBar } from "./AdminAuthBar";
+import { LocalSiteUpdate } from "./LocalSiteUpdate";
 import { ActivityLog } from "./ActivityLog";
 import { logAdmin } from "./adminLog";
 
@@ -28,7 +29,7 @@ export default function App() {
       <header className="border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
         <div className="mx-auto flex max-w-5xl flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm font-bold tracking-tight text-slate-900">wp-dev</p>
+            <p className="text-sm font-bold tracking-tight text-slate-900">WP-dev Local</p>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -45,31 +46,24 @@ export default function App() {
             </div>
           </div>
 
-          <nav className="grid grid-cols-3 gap-2" aria-label="Primary">
-            {PRIMARY_TABS.map((item) => {
-              const active = tab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setTab(item.id)}
-                  className={`rounded-xl border px-3 py-3 text-left transition ${
-                    active
-                      ? "border-brand-600 bg-brand-50 shadow-sm"
-                      : "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white"
-                  }`}
-                >
-                  <span
-                    className={`block text-sm font-semibold ${
-                      active ? "text-brand-700" : "text-slate-800"
+          <nav className="flex justify-center" aria-label="Primary">
+            <div className="inline-flex flex-wrap justify-center gap-1 rounded-full bg-slate-100 p-1">
+              {PRIMARY_TABS.map((item) => {
+                const active = tab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setTab(item.id)}
+                    className={`rounded-full px-4 py-1.5 text-sm font-semibold ${
+                      active ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
                     }`}
                   >
                     {item.label}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-slate-500">{item.hint}</span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
           </nav>
         </div>
       </header>
@@ -80,6 +74,7 @@ export default function App() {
             {tab === "backup" && <BackupPage />}
             {tab === "setup" && <SetupStagingPage />}
             {tab === "sync" && <SyncPage />}
+            {tab === "update" && <LocalSiteUpdate />}
             {tab === "advanced" && <AdvancedPage />}
             {tab !== "advanced" && (
               <details className="mt-8 rounded-xl border border-slate-200">

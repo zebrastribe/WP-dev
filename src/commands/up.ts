@@ -33,6 +33,7 @@ import {
   runStartupStateMachine,
 } from "../supervisor/startup.js";
 import { saveRegistry } from "../supervisor/service-registry.js";
+import { publishLocalCompanion } from "../companion/beacon.js";
 
 export type UpOptions = {
   relocatePorts?: boolean;
@@ -157,6 +158,7 @@ export async function cmdUp(loaded: LoadedConfig, options: UpOptions = {}): Prom
     console.error(formatDuplicateInstanceMessage(loaded));
     console.error("Stack may already be running. Showing status URLs:");
     printStartupSummary(loaded);
+    await publishLocalCompanion(loaded);
     return;
   }
 
@@ -260,4 +262,5 @@ export async function cmdUp(loaded: LoadedConfig, options: UpOptions = {}): Prom
   }
 
   printStartupSummary(loaded, wpInstalled);
+  await publishLocalCompanion(loaded);
 }

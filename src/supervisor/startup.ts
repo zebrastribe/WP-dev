@@ -29,6 +29,7 @@ import type { ManagedService, ServiceRegistry } from "./types.js";
 import { isLocalWpInstalled, waitForLocalMysqlReady } from "../services/wpcli.js";
 import { syncLocalWordPressUrls } from "../utils/sync-local-urls.js";
 import { getPublishedLocalAccess } from "../utils/published-local-urls.js";
+import { COMPANION_BEACON_PORT } from "../companion/beacon.js";
 import { openBrowserCommand } from "../utils/platform-hints.js";
 
 export type StartupOptions = {
@@ -200,7 +201,10 @@ export function printStartupSummary(loaded: LoadedConfig, wpInstalled?: boolean)
   const openCmd = openBrowserCommand(wpInstalled === false ? admin : admin);
   if (openCmd) console.error(`Open in browser: ${openCmd}`);
   console.error(`\nTo stop: npm run wp-dev -- down`);
-  console.error(`Service registry: logs/service-registry.json\n`);
+  console.error(`Service registry: logs/service-registry.json`);
+  console.error(
+    `Cloud finds this project through the companion beacon at http://127.0.0.1:${COMPANION_BEACON_PORT}/ (WordPress stays on its own port).\n`,
+  );
 }
 
 export function createInitialRegistry(

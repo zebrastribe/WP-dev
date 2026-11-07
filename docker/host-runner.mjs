@@ -215,6 +215,21 @@ function commandForAction(action, args) {
   if (action === "wpdev_update_preflight") {
     return `npm run wp-dev -- update --preflight --json`;
   }
+  if (action === "wpdev_site_check") {
+    return `npm run wp-dev -- site-update check`;
+  }
+  if (action === "wpdev_site_apply") {
+    const target = safeArg(args?.target);
+    const slug = safeArg(args?.slug);
+    if (target === "core") return `npm run wp-dev -- site-update apply --target core`;
+    if (
+      (target === "plugin" || target === "theme") &&
+      /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(slug)
+    ) {
+      return `npm run wp-dev -- site-update apply --target ${target} --slug ${slug}`;
+    }
+    return null;
+  }
   if (action === "wpdev_php_show") {
     const env = safeArg(args?.env) || "local";
     if (!["local", "staging", "production"].includes(env)) return null;

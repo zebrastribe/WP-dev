@@ -2,9 +2,31 @@
  * Safe remote env reader for terminal-runner shell commands (no eval).
  * Validates SSH-related fields against a strict allowlist before quoting.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolveIdentityFile } from "../dist/utils/remote-config-helpers.js";
+import { join, resolve } from "node:path";
+
+/** Expand a key path without requiring the site folder to contain the WP-dev build. */
+function resolveIdentityFile(input) {
+  if (!input?.trim()) return undefined;
+  const raw = input.trim();
+  const expanded =
+    raw === "~" ? homedir() : raw.startsWith("~/") ? resolve(homedir(), raw.slice(2)) : resolve(raw);
+  const isFile = (path) => {
+    try {
+      return existsSync(path) && statSync(path).isFile();
+    } catch {
+      return false;
+    }
+  };
+  if (isFile(expanded)) return expanded;
+  const base = expanded.match(/\/\.ssh\/([^/]+)$/)?.[1];
+  if (base) {
+    const local = join(homedir(), ".ssh", base);
+    if (isFile(local)) return local;
+  }
+  return expanded;
+}
 
 const SAFE = /^[a-zA-Z0-9._:@~/-]+$/;
 

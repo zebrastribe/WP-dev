@@ -13,6 +13,7 @@ import {
 } from "./service-registry.js";
 import type { DockerEnvPortKey } from "../utils/compose-env.js";
 import { cleanupSupervisorPidFile } from "./recovery.js";
+import { withdrawLocalCompanion } from "../companion/beacon.js";
 
 export type ShutdownOptions = {
   removeOrphans?: boolean;
@@ -87,6 +88,7 @@ export async function runShutdownStateMachine(
   }
 
   cleanupSupervisorPidFile(configDir);
+  withdrawLocalCompanion(config.project);
   if (registry) {
     registry = setShutdownPhase(registry, "complete");
     saveRegistry(configDir, registry);

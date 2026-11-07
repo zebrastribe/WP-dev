@@ -111,15 +111,20 @@ export class SupervisorDaemon {
 
     if (url.pathname === "/shutdown" && req.method === "POST") {
       if (this.shuttingDown) {
-        json(409, { ok: false, error: "already_shutting_down" });
+        json(200, { ok: true, already: true });
         return;
       }
       this.shuttingDown = true;
       const removeOrphans = url.searchParams.get("removeOrphans") === "1";
-      await runShutdownStateMachine(this.loaded, { removeOrphans });
-      await this.stop();
       json(200, { ok: true });
-      process.exit(0);
+      void runShutdownStateMachine(this.loaded, { removeOrphans })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          logInfo(`shutdown failed after ack: ${msg}`);
+        })
+        .finally(() => {
+          void this.stop().finally(() => process.exit(0));
+        });
       return;
     }
 

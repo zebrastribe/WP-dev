@@ -9,6 +9,8 @@ import { cmdPull } from "./commands/pull.js";
 import { cmdPush } from "./commands/push.js";
 import { cmdBackup, type BackupTarget } from "./commands/backup.js";
 import { cmdRestore, type RestoreTarget } from "./commands/restore.js";
+import { cmdSetupFromBackup } from "./commands/setup-from-backup.js";
+import { COMPANION_BEACON_PORT, startCompanionBeacon } from "./companion/beacon.js";
 import { cmdLogs } from "./commands/logs.js";
 import { cmdInit } from "./commands/init.js";
 import { cmdStatus } from "./commands/status.js";
@@ -25,6 +27,7 @@ import { cmdSupervisorRun, cmdSupervisorStatus } from "./commands/supervisor.js"
 import { cmdServices } from "./commands/services.js";
 import { cmdSyncPreview, cmdSyncRules, cmdSyncScan } from "./commands/sync-preview.js";
 import { cmdUpdate } from "./commands/update.js";
+import { cmdSiteUpdateApply, cmdSiteUpdateCheck } from "./commands/site-update.js";
 import { cmdSslDisable, cmdSslEnable } from "./commands/ssl.js";
 import { cmdPhpRollback, cmdPhpSet, cmdPhpShow, cmdPhpValidate } from "./commands/php.js";
 import { cmdImportBuild } from "./commands/import/build.js";
@@ -491,6 +494,32 @@ async function main(): Promise<void> {
     );
 
   program
+    .command("site-update")
+    .description("Check or apply WordPress, plugin, and theme updates on the local site")
+    .argument("<action>", "check or apply")
+    .option("--target <target>", "core, plugin, or theme (apply)")
+    .option("--slug <slug>", "plugin or theme slug (apply)")
+    .action(async (action: string, opts: { target?: string; slug?: string }) => {
+      await runWithConfig(`site-update ${action}`, async (loaded) => {
+        if (action === "check") {
+          await cmdSiteUpdateCheck(loaded);
+          return;
+        }
+        if (action !== "apply") throw new Error("Use site-update check or site-update apply.");
+        const target = opts.target;
+        if (target === "core") {
+          await cmdSiteUpdateApply(loaded, { target: "core" });
+          return;
+        }
+        if ((target === "plugin" || target === "theme") && opts.slug) {
+          await cmdSiteUpdateApply(loaded, { target, slug: opts.slug });
+          return;
+        }
+        throw new Error("Apply needs --target core, or --target plugin|theme and --slug.");
+      });
+    });
+
+  program
     .command("quickstart")
     .description("First run helper (Linux, macOS, Windows/WSL2): check tools, start Docker, open setup wizard")
     .action(async () => {
@@ -689,6 +718,27 @@ async function main(): Promise<void> {
           complete: Boolean(opts.complete),
         }),
       );
+    });
+
+  program
+    .command("setup-from-backup")
+    .description(
+      "Start this project's local site on its own port and load a backup archive (db.sql + wp-content or site)",
+    )
+    .argument("<file>", "Path to a .tar.gz with db.sql and wp-content/ or site/")
+    .action(async (file: string) => {
+      await runWithConfig("setup-from-backup", (loaded) => cmdSetupFromBackup(loaded, file));
+    });
+
+  program
+    .command("companion")
+    .description("Loopback beacon that advertises each running project's real WordPress URL")
+    .command("serve")
+    .action(async () => {
+      const server = await startCompanionBeacon();
+      const address = server.address();
+      const port = address && typeof address === "object" ? address.port : COMPANION_BEACON_PORT;
+      console.error(`Companion beacon listening on 127.0.0.1:${port}`);
     });
 
   program

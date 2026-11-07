@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
+  importLocalBackup,
   JobProgressPanel,
   useRunnerJob,
   useRunnerSecrets,
@@ -26,6 +27,9 @@ export function BackupPage() {
   const [env, setEnv] = useState<RunnerEnv>("local");
   const [kind, setKind] = useState<BackupKind>("complete");
   const [showRestore, setShowRestore] = useState(false);
+  const [importName, setImportName] = useState("");
+  const [importError, setImportError] = useState("");
+  const importRef = useRef<HTMLInputElement>(null);
 
   const backupNow = async () => {
     await run(
@@ -49,6 +53,31 @@ export function BackupPage() {
       { env, file, confirm },
       `Restore ${RUNNER_ENV_LABEL[env]}`,
     );
+  };
+
+  const importDownloaded = async () => {
+    const file = importRef.current?.files?.[0];
+    if (!file) return;
+    const cloudSetup = file.name.startsWith("wp-dev-local-setup") && file.name.endsWith(".tar.gz");
+    const message = cloudSetup
+      ? `Import ${file.name} onto Local?\n\nThis replaces the local database and wp-content, then points the site URL at this computer.`
+      : `Import ${file.name} onto Local?\n\nThis replaces the current Local site state.`;
+    if (!window.confirm(message)) return;
+    setImportError("");
+    const uploaded = await importLocalBackup(file);
+    if (!uploaded.ok) {
+      setImportError(uploaded.error);
+      return;
+    }
+    if (cloudSetup) {
+      await run("setup_from_backup", { file: uploaded.path }, `Import ${file.name} into Local`);
+    } else {
+      await run(
+        "restore_env",
+        { env: "local", file: uploaded.path, confirm: "" },
+        `Import ${file.name} into Local`,
+      );
+    }
   };
 
   const busy = job.phase === "running";
@@ -146,6 +175,45 @@ export function BackupPage() {
             </button>
           ) : null}
         </div>
+
+        <fieldset className="mt-6 space-y-2 rounded-lg border border-slate-200 p-4 dark:border-slate-700">
+          <legend className="px-1 text-xs font-bold uppercase tracking-wide text-brand-600 dark:text-brand-400">
+            Import a downloaded file
+          </legend>
+          {env === "local" ? (
+            <>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Choose the compressed backup you downloaded from WP-dev Cloud, or any .sql / .tar.gz backup.
+                Import saves it into this project and loads it onto Local.
+              </p>
+              <input
+                ref={importRef}
+                type="file"
+                accept=".sql,.tar.gz,application/gzip,application/x-gzip"
+                className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-brand-700"
+                onChange={(e) => {
+                  setImportName(e.target.files?.[0]?.name ?? "");
+                  setImportError("");
+                }}
+              />
+              {importError ? (
+                <p className="text-sm text-amber-800 dark:text-amber-200">{importError}</p>
+              ) : null}
+              <button
+                type="button"
+                disabled={!canRun || busy || importName === ""}
+                className={`${secondaryAccentButtonClass} rounded-lg px-5 py-2.5 text-sm disabled:opacity-50`}
+                onClick={() => void importDownloaded()}
+              >
+                Import into Local
+              </button>
+            </>
+          ) : (
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Switch the environment to Local to import a downloaded file onto this computer.
+            </p>
+          )}
+        </fieldset>
 
         <details
           className="mt-6 rounded-lg border border-slate-200 p-3 dark:border-slate-700"

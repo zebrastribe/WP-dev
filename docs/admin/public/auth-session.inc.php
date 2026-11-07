@@ -46,8 +46,43 @@ function wpdev_admin_session_valid(): bool
     return (time() - (int) $at) < WPDEV_ADMIN_SESSION_TTL;
 }
 
+const WPDEV_ADMIN_LOGGED_OUT_COOKIE = 'WPDEV_ADMIN_LOGGED_OUT';
+
+function wpdev_admin_cookie_secure(): bool
+{
+    return !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+}
+
+function wpdev_admin_explicitly_logged_out(): bool
+{
+    return ($_COOKIE[WPDEV_ADMIN_LOGGED_OUT_COOKIE] ?? '') === '1';
+}
+
+function wpdev_admin_mark_logged_out(): void
+{
+    setcookie(WPDEV_ADMIN_LOGGED_OUT_COOKIE, '1', [
+        'expires' => time() + 60 * 60 * 24 * 30,
+        'path' => '/admin/',
+        'secure' => wpdev_admin_cookie_secure(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
+function wpdev_admin_clear_logged_out(): void
+{
+    setcookie(WPDEV_ADMIN_LOGGED_OUT_COOKIE, '', [
+        'expires' => time() - 42000,
+        'path' => '/admin/',
+        'secure' => wpdev_admin_cookie_secure(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
 function wpdev_admin_session_establish(): string
 {
+    wpdev_admin_clear_logged_out();
     wpdev_session_start();
     $nonce = bin2hex(random_bytes(16));
     $_SESSION[WPDEV_ADMIN_SESSION_KEY] = [
@@ -73,6 +108,7 @@ function wpdev_admin_session_nonce(): ?string
 
 function wpdev_admin_session_destroy(): void
 {
+    wpdev_admin_mark_logged_out();
     wpdev_session_start();
     unset($_SESSION[WPDEV_ADMIN_SESSION_KEY]);
     if (session_status() !== PHP_SESSION_ACTIVE) {

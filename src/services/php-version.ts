@@ -1,12 +1,87 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { execa } from "execa";
 import type { LoadedConfig } from "../config/load.js";
 import type { RemoteEnvName } from "../config/schema.js";
 import { getRemoteEnv } from "../config/schema.js";
 import { connectSsh, type SshSession } from "./ssh.js";
+import { assertRemotePathSafe } from "./remote-path-safety.js";
+import { dockerComposeProjectId, getComposeProjectDir } from "./docker-compose.js";
 import { posixShellQuote } from "../utils/shell-quote.js";
 import { persistEnvContent, setEnvValueInContent } from "../utils/compose-env.js";
+import {
+  isPlaceholderRemoteHost,
+  isStagingRemotePlaceholder,
+} from "../utils/remote-placeholder.js";
+
+export type ComposeProjectPeer = { configDir: string; projectId: string };
+
+/** Another clone with the same Compose project id shares volumes and container names. */
+export function foreignComposeProjectPeer(
+  self: ComposeProjectPeer,
+  peers: ComposeProjectPeer[],
+): ComposeProjectPeer | null {
+  const selfDir = resolve(self.configDir);
+  for (const peer of peers) {
+    if (resolve(peer.configDir) === selfDir) continue;
+    if (peer.projectId === self.projectId) return peer;
+  }
+  return null;
+}
+
+export function assertComposeProjectsDoNotCollide(
+  self: ComposeProjectPeer,
+  peers: ComposeProjectPeer[],
+): void {
+  const hit = foreignComposeProjectPeer(self, peers);
+  if (!hit) return;
+  throw new Error(
+    `Refusing PHP change: Compose project "${self.projectId}" is also used by ${hit.configDir}. ` +
+      `Two clones with the same project id share one stack. Set a unique project id or local.composeProjectName.`,
+  );
+}
+
+/** Compose working dirs that belong to this clone (config root and docker/ directory). */
+export function composeDirsForClone(loaded: LoadedConfig): string[] {
+  return [resolve(loaded.configDir), resolve(getComposeProjectDir(loaded.configDir, loaded.config))];
+}
+
+/** A Docker volume working dir for this project id that is not this clone. */
+export function foreignComposeWorkingDir(selfDirs: string[], foundDirs: string[]): string | null {
+  const self = new Set(selfDirs.map((d) => resolve(d)));
+  for (const dir of foundDirs) {
+    const resolved = resolve(dir);
+    if (!self.has(resolved)) return dir;
+  }
+  return null;
+}
+
+async function discoverComposeWorkingDirs(projectId: string): Promise<string[]> {
+  let listed = "";
+  try {
+    const r = await execa(
+      "docker",
+      ["volume", "ls", "-q", "--filter", `label=com.docker.compose.project=${projectId}`],
+      { stdio: "pipe" },
+    );
+    listed = r.stdout ?? "";
+  } catch {
+    return [];
+  }
+  const names = listed.split("\n").map((s) => s.trim()).filter(Boolean);
+  const dirs: string[] = [];
+  for (const name of names) {
+    try {
+      const inspected = await execa("docker", ["volume", "inspect", name], { stdio: "pipe" });
+      const parsed = JSON.parse(inspected.stdout) as Array<{ Labels?: Record<string, string> }>;
+      const dir = parsed[0]?.Labels?.["com.docker.compose.project.working_dir"];
+      if (dir) dirs.push(dir);
+    } catch {
+      /* volume gone or unreadable */
+    }
+  }
+  return dirs;
+}
 
 /** Local Docker + remote selector allow-list. Track https://www.php.net/supported-versions.php and Docker Hub wordpress:php*-apache tags. */
 export const SUPPORTED_PHP_VERSIONS = [
@@ -30,6 +105,8 @@ export type PhpDetectResult = {
   strategy: PhpStrategy;
   detail: string;
   supported: boolean;
+  /** False when the environment is still a template host, not a real server. */
+  configured?: boolean;
 };
 
 export type PhpRollbackState = {
@@ -198,6 +275,20 @@ export async function detectRemotePhp(
   env: RemoteEnvName,
 ): Promise<PhpDetectResult> {
   const remote = getRemoteEnv(loaded.config, env);
+  const placeholder =
+    isPlaceholderRemoteHost(remote.host) ||
+    (env === "staging" && isStagingRemotePlaceholder(loaded.config));
+  if (placeholder) {
+    const label = env === "production" ? "Production" : "Staging";
+    return {
+      env,
+      currentVersion: null,
+      strategy: "unsupported",
+      supported: false,
+      configured: false,
+      detail: `${label} is not configured. The host is still ${remote.host}. Set the real server in Setup, then Detect again.`,
+    };
+  }
   const ssh = await connectSsh(remote);
   try {
     const wpPath = remote.path.replace(/\/$/, "");
@@ -274,12 +365,61 @@ export async function detectPhp(
   return detectRemotePhp(loaded, env);
 }
 
+type LocalPhpChangeOptions = {
+  restart?: boolean;
+  /** Tests pass known clones. The CLI leaves this unset and uses Docker volume labels. */
+  peerProjects?: ComposeProjectPeer[];
+  /** Tests pass [] to skip Docker. The CLI leaves this unset. */
+  composeWorkingDirs?: string[];
+  /** Tests skip registry lookups. The CLI must leave this unset. */
+  skipImageLookup?: boolean;
+};
+
+/** Refuse a shared Compose project before this clone’s docker/.env is changed. */
+async function assertLocalPhpChangeIsolated(
+  loaded: LoadedConfig,
+  version: SupportedPhpVersion,
+  options: LocalPhpChangeOptions,
+): Promise<void> {
+  const projectId = dockerComposeProjectId(loaded.config);
+  const peers = options.peerProjects ?? [];
+  assertComposeProjectsDoNotCollide({ configDir: loaded.configDir, projectId }, peers);
+  const foundDirs =
+    options.composeWorkingDirs ?? (await discoverComposeWorkingDirs(projectId));
+  const foreignDir = foreignComposeWorkingDir(composeDirsForClone(loaded), foundDirs);
+  if (foreignDir) {
+    throw new Error(
+      `Refusing PHP change: Compose project "${projectId}" already has a stack at ${foreignDir}. ` +
+        `That is a different clone. Set a unique project id or local.composeProjectName.`,
+    );
+  }
+  if (!options.skipImageLookup) await assertLocalDockerTags(version);
+}
+
+/**
+ * Sync warns on nested installs. A PHP selector write must not land on a tree
+ * that also contains other WordPress roots.
+ */
+async function assertPhpRemoteTarget(
+  ssh: SshSession,
+  wpPath: string,
+  env: string,
+): Promise<void> {
+  const report = await assertRemotePathSafe(ssh, wpPath, env);
+  if (report.issues.some((issue) => issue.code === "nested_wp_installs")) {
+    throw new Error(
+      `Refusing ${env} PHP change: ${wpPath} contains nested WordPress installs. ` +
+        `Point path at this site’s WordPress root only.`,
+    );
+  }
+}
+
 export async function setLocalPhpVersion(
   loaded: LoadedConfig,
   version: SupportedPhpVersion,
-  options: { restart?: boolean } = {},
+  options: LocalPhpChangeOptions = {},
 ): Promise<void> {
-  await assertLocalDockerTags(version);
+  await assertLocalPhpChangeIsolated(loaded, version, options);
   const envPath = composeEnvPath(loaded);
   const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   const previous = readEnvValue(current, "WPDEV_PHP_VERSION") || "8.2";
@@ -326,53 +466,75 @@ export async function setRemotePhpVersion(
   const ssh = await connectSsh(remote);
   try {
     const wpPath = remote.path.replace(/\/$/, "");
-    const files: Record<string, string | null> = {};
-
-    if (detect.strategy === "dot_php_version") {
-      const path = `${wpPath}/.php-version`;
-      files[".php-version"] = await remoteReadFile(ssh, path);
-      writePhpRollback(loaded.configDir, {
-        env,
-        previousVersion: detect.currentVersion,
-        strategy: detect.strategy,
-        files,
-        at: new Date().toISOString(),
-      });
-      await remoteWriteFile(ssh, path, `${version}\n`);
-    } else if (detect.strategy === "htaccess_addhandler") {
-      const path = `${wpPath}/.htaccess`;
-      const prev = (await remoteReadFile(ssh, path)) ?? "";
-      files[".htaccess"] = prev;
-      writePhpRollback(loaded.configDir, {
-        env,
-        previousVersion: detect.currentVersion,
-        strategy: detect.strategy,
-        files,
-        at: new Date().toISOString(),
-      });
-      await remoteWriteFile(ssh, path, applyWpDevHtaccessBlock(prev, version));
-    }
-
-    const after = await remotePhpVersion(ssh, wpPath);
-    console.error(
-      `Applied PHP ${version} on ${env} via ${detect.strategy} (CLI reports ${after ?? "unknown"}).`,
-    );
-    if (after && !after.startsWith(version)) {
-      console.error(
-        `Warning: host still reports ${after}. Selector may need panel enablement — run: wp-dev php rollback --env ${env}`,
-      );
-    } else {
-      console.error(`Rollback available: npm run wp-dev -- php rollback --env ${env}`);
-    }
+    await commitRemotePhpChange({
+      ssh,
+      configDir: loaded.configDir,
+      env,
+      wpPath,
+      version,
+      strategy: detect.strategy === "htaccess_addhandler" ? "htaccess_addhandler" : "dot_php_version",
+      previousVersion: detect.currentVersion,
+    });
   } finally {
     ssh.dispose();
+  }
+}
+
+export async function commitRemotePhpChange(input: {
+  ssh: SshSession;
+  configDir: string;
+  env: RemoteEnvName;
+  wpPath: string;
+  version: SupportedPhpVersion;
+  strategy: "dot_php_version" | "htaccess_addhandler";
+  previousVersion: string | null;
+}): Promise<void> {
+  const { ssh, configDir, env, wpPath, version, strategy, previousVersion } = input;
+  await assertPhpRemoteTarget(ssh, wpPath, env);
+  const files: Record<string, string | null> = {};
+
+  if (strategy === "dot_php_version") {
+    const path = `${wpPath}/.php-version`;
+    files[".php-version"] = await remoteReadFile(ssh, path);
+    writePhpRollback(configDir, {
+      env,
+      previousVersion,
+      strategy,
+      files,
+      at: new Date().toISOString(),
+    });
+    await remoteWriteFile(ssh, path, `${version}\n`);
+  } else {
+    const path = `${wpPath}/.htaccess`;
+    const prev = (await remoteReadFile(ssh, path)) ?? "";
+    files[".htaccess"] = prev;
+    writePhpRollback(configDir, {
+      env,
+      previousVersion,
+      strategy,
+      files,
+      at: new Date().toISOString(),
+    });
+    await remoteWriteFile(ssh, path, applyWpDevHtaccessBlock(prev, version));
+  }
+
+  const after = await remotePhpVersion(ssh, wpPath);
+  console.error(
+    `Applied PHP ${version} on ${env} via ${strategy} (CLI reports ${after ?? "unknown"}).`,
+  );
+  if (after && !after.startsWith(version)) {
+    console.error(
+      `Warning: host still reports ${after}. Selector may need panel enablement — run: wp-dev php rollback --env ${env}`,
+    );
+  } else {
+    console.error(`Rollback available: npm run wp-dev -- php rollback --env ${env}`);
   }
 }
 
 export async function rollbackPhpVersion(
   loaded: LoadedConfig,
   env: PhpEnvTarget,
-  options: { restart?: boolean } = {},
+  options: LocalPhpChangeOptions = {},
 ): Promise<void> {
   const state = readPhpRollback(loaded.configDir, env);
   if (!state || (!state.previousVersion && Object.keys(state.files).length === 0 && !state.dockerEnvPrevious)) {
@@ -382,7 +544,7 @@ export async function rollbackPhpVersion(
   if (env === "local") {
     const prev = state.dockerEnvPrevious || state.previousVersion || "8.2";
     assertSupportedPhpVersion(prev);
-    await assertLocalDockerTags(prev);
+    await assertLocalPhpChangeIsolated(loaded, prev, options);
     const envPath = composeEnvPath(loaded);
     const current = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
     const next = setEnvValueInContent(current, "WPDEV_PHP_VERSION", prev);
@@ -408,6 +570,7 @@ export async function rollbackPhpVersion(
   const ssh = await connectSsh(remote);
   try {
     const wpPath = remote.path.replace(/\/$/, "");
+    await assertPhpRemoteTarget(ssh, wpPath, env);
     for (const [rel, content] of Object.entries(state.files)) {
       const path = `${wpPath}/${rel}`;
       if (content === null) {

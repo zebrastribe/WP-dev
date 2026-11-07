@@ -1,13 +1,14 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync, appendFileSync, mkdirSync, existsSync, chownSync, statSync } from "node:fs";
+import { readFileSync, appendFileSync, mkdirSync, existsSync, chownSync, statSync, createWriteStream, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
   safeArg,
   wpdevPullPushCommand,
   wpdevPushThemeCommand,
   restoreEnvConfirmOk,
+  safeBackupImportName,
 } from "./runner-sync-gates.mjs";
 import { stripControlChars, sanitizeArgsForLog } from "./runner-log-utils.mjs";
 import { readRemoteEnv, sshOptsShell } from "./runner-remote-env.mjs";
@@ -19,6 +20,7 @@ const RUNNER_TOKEN = process.env.WPDEV_TERMINAL_RUNNER_TOKEN || "";
 const ALLOWED_ORIGIN = process.env.WPDEV_TERMINAL_RUNNER_ORIGIN || "";
 const WORKDIR = process.env.WPDEV_TERMINAL_WORKDIR || "/workspace";
 const MAX_OUTPUT = 64_000;
+const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
 const JOB_TTL_MS = 35 * 60 * 1000;
 const JOB_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -255,6 +257,21 @@ function commandForAction(action, args) {
   if (action === "wpdev_update_preflight") {
     return `npm run wp-dev -- update --preflight --json`;
   }
+  if (action === "wpdev_site_check") {
+    return `npm run wp-dev -- site-update check`;
+  }
+  if (action === "wpdev_site_apply") {
+    const target = safeArg(args?.target);
+    const slug = safeArg(args?.slug);
+    if (target === "core") return `npm run wp-dev -- site-update apply --target core`;
+    if (
+      (target === "plugin" || target === "theme") &&
+      /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(slug)
+    ) {
+      return `npm run wp-dev -- site-update apply --target ${target} --slug ${slug}`;
+    }
+    return null;
+  }
   if (action === "wpdev_php_show") {
     const env = safeArg(args?.env) || "local";
     if (!["local", "staging", "production"].includes(env)) return null;
@@ -353,6 +370,17 @@ function commandForAction(action, args) {
     }
     return `${backupGuard}; npm run wp-dev -- restore production "$FILE_REAL" --yes`;
   }
+  if (action === "setup_from_backup") {
+    const file = safeArg(args?.file);
+    const project = readProjectId();
+    if (!file || !project || file.includes("..")) return null;
+    const backupGuard = [
+      `FILE_REAL="$(realpath -e ${file} 2>/dev/null || true)"`,
+      'test -n "$FILE_REAL" || { echo "Backup file not found or unreadable."; exit 1; }',
+      `case "$FILE_REAL" in "$HOME"/.wp-dev/backups/${project}/local/*) ;; *) echo "Import refused: file must be under ~/.wp-dev/backups/${project}/local/"; exit 1;; esac`,
+    ].join("; ");
+    return `${backupGuard}; npm run wp-dev -- setup-from-backup "$FILE_REAL"`;
+  }
   if (action === "git_status") {
     return "git -c safe.directory=/workspace status --short";
   }
@@ -407,6 +435,12 @@ function describeRefusal(action, args) {
       if (env === "production" && confirm !== "RESTORE_PRODUCTION") return "production restore requires RESTORE_PRODUCTION confirm token";
       if (env === "staging" && !confirm) return "staging restore requires confirm host token";
     }
+    if (!file) return "missing backup file";
+    if (file.includes("..")) return "backup path contains ..";
+    return "invalid args";
+  }
+  if (safeAction === "setup_from_backup") {
+    const file = safeArg(args?.file);
     if (!file) return "missing backup file";
     if (file.includes("..")) return "backup path contains ..";
     return "invalid args";
@@ -623,6 +657,60 @@ const server = http.createServer(async (req, res) => {
     }
     const job = jobs.get(id);
     json(req, res, 200, { ok: true, ...(job ? jobPublic(job) : {}) });
+    return;
+  }
+
+  if ((req.method === "POST" || req.method === "PUT") && url.pathname === "/import-backup") {
+    const name = safeBackupImportName(url.searchParams.get("name") || "");
+    const project = readProjectId();
+    const home = process.env.HOME || "/root";
+    if (!name || !project) {
+      json(req, res, 400, { ok: false, error: "invalid_backup_name" });
+      return;
+    }
+    const declared = Number(req.headers["content-length"] || "0");
+    if (!Number.isFinite(declared) || declared <= 0 || declared > MAX_IMPORT_BYTES) {
+      json(req, res, 413, { ok: false, error: "backup_too_large" });
+      return;
+    }
+    const dir = join(home, ".wp-dev", "backups", project, "local");
+    mkdirSync(dir, { recursive: true });
+    const dest = join(dir, name);
+    if (dest !== `${dir}/${name}`) {
+      json(req, res, 400, { ok: false, error: "invalid_backup_name" });
+      return;
+    }
+    const ws = createWriteStream(dest, { flags: "w", mode: 0o600 });
+    let received = 0;
+    let responded = false;
+    const fail = (status, error) => {
+      if (responded) return;
+      responded = true;
+      json(req, res, status, { ok: false, error });
+      ws.destroy();
+      req.destroy();
+      try {
+        unlinkSync(dest);
+      } catch {
+        /* already gone */
+      }
+    };
+    req.on("data", (chunk) => {
+      received += chunk.length;
+      if (received > declared) fail(400, "incomplete_upload");
+    });
+    req.on("error", () => fail(400, "incomplete_upload"));
+    ws.on("error", () => fail(500, "backup_write_failed"));
+    ws.on("finish", () => {
+      if (responded) return;
+      if (received !== declared) {
+        fail(400, "incomplete_upload");
+        return;
+      }
+      responded = true;
+      json(req, res, 200, { ok: true, path: dest, bytes: received });
+    });
+    req.pipe(ws);
     return;
   }
 

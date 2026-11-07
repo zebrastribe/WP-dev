@@ -1,10 +1,8 @@
 # WP-dev
 
-**WordPress on your computer** (Docker) plus **pull / push** to staging or production over SSH.
+**WP-dev Local** is WordPress on your computer (Docker) plus pull / push to staging or production over SSH. It does not host your live servers.
 
-WP-dev does **not** host your live servers — it syncs with hosts you already control.
-
-This repo is the **localhost CLI** (+ optional `/admin/` UI). Hosted / multi-tenant work is out of scope here — see [project structure](docs/developer/project-structure.md).
+This public repository is not “the local edition” as opposed to the cloud edition. It holds WP-dev Local (CLI, Docker, local admin) and the shared modules both editions use (`packages/sync-engine`, `packages/wpdev-web`). **WP-dev Cloud** (accounts, sites, jobs, vault, workers) lives in the private repository and consumes those modules. It does not live here.
 
 ---
 

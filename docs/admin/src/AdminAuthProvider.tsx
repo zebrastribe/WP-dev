@@ -31,8 +31,9 @@ type AdminAuthContextValue = {
 
 const AdminAuthContext = createContext<AdminAuthContextValue | null>(null);
 
-async function tryAutoUnlock(): Promise<boolean> {
-  const boot = await bootstrapLocalAdminSession();
+async function tryAutoUnlock(explicit = false): Promise<boolean> {
+  if (explicit) await fetchAdminAuthStatus();
+  const boot = await bootstrapLocalAdminSession(explicit);
   if (boot.ok) return true;
 
   const legacy = readStoredAdminSaveToken();
@@ -115,19 +116,12 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     await logoutAdminSession();
     setAuthenticated(false);
     setAuthVersion((v) => v + 1);
-    const autoOk = await tryAutoUnlock();
-    if (autoOk) {
-      setAuthenticated(true);
-      setAuthVersion((v) => v + 1);
-      setShowUnlockModal(false);
-    } else {
-      setShowUnlockModal(true);
-    }
+    setShowUnlockModal(false);
   }, []);
 
   const requestUnlock = useCallback(() => {
     void (async () => {
-      const autoOk = await tryAutoUnlock();
+      const autoOk = await tryAutoUnlock(true);
       if (autoOk) {
         setAuthenticated(true);
         setAuthVersion((v) => v + 1);

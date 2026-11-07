@@ -2,7 +2,7 @@ import { Wizard } from "@wpdev/web-host";
 import { LockedGate } from "../LockedGate";
 
 /**
- * Primary Setup — live SSH → optional staging → first backup → ready.
+ * Primary Setup — pull walks Live SSH and optional Staging; local-only jumps to First backup.
  */
 export function SetupStagingPage() {
   return (
@@ -12,8 +12,8 @@ export function SetupStagingPage() {
           Setup
         </h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Steps: Connect → Live SSH → <strong>Staging</strong> (optional host/URL/HTTP auth) → First
-          backup → Ready. Use the Staging pill in the wizard to jump straight to staging config.
+          Pull from a server: Connect, Live SSH, Staging (optional), First backup, Ready. A new
+          local site skips Live SSH and Staging. DNS provider settings sit under Connect.
         </p>
       </div>
       <LockedGate message="Unlock admin to configure remote servers.">

@@ -151,3 +151,69 @@ function wpdev_runner_active_job(string $kind, string $dockerEnvPath): array
     $activeJob = $data['activeJob'] ?? null;
     return ['ok' => true, 'activeJob' => is_array($activeJob) ? $activeJob : null];
 }
+
+/**
+ * Stream an uploaded backup into the terminal runner's local backup folder.
+ *
+ * @return array{ok: true, data: array<string, mixed>}|array{ok: false, error: string, detail?: string}
+ */
+function wpdev_runner_proxy_upload(string $dockerEnvPath, string $filename, string $tmpPath): array
+{
+    $upstream = wpdev_runner_upstream('terminal', $dockerEnvPath);
+    if ($upstream === null) {
+        return ['ok' => false, 'error' => 'runner_secrets_unavailable'];
+    }
+    if (!is_file($tmpPath)) {
+        return ['ok' => false, 'error' => 'upload_failed'];
+    }
+    $size = filesize($tmpPath);
+    if ($size === false || $size <= 0) {
+        return ['ok' => false, 'error' => 'upload_failed'];
+    }
+    $fh = fopen($tmpPath, 'rb');
+    if ($fh === false) {
+        return ['ok' => false, 'error' => 'upload_failed'];
+    }
+    $basic = base64_encode($upstream['auth']);
+    $url = rtrim($upstream['base'], '/') . '/import-backup?name=' . rawurlencode($filename);
+    $ch = curl_init($url);
+    if ($ch === false) {
+        fclose($fh);
+        return ['ok' => false, 'error' => 'curl_init_failed'];
+    }
+    curl_setopt_array($ch, [
+        CURLOPT_UPLOAD => true,
+        CURLOPT_INFILE => $fh,
+        CURLOPT_INFILESIZE => $size,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'Accept: application/json',
+            'Content-Type: application/octet-stream',
+            'Authorization: Basic ' . $basic,
+            'X-WP-DEV-Terminal-Token: ' . $upstream['token'],
+            'Origin: ' . $upstream['origin'],
+        ],
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT => 600,
+    ]);
+    $responseBody = curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+    fclose($fh);
+    if ($responseBody === false) {
+        return ['ok' => false, 'error' => 'runner_unreachable', 'detail' => $err !== '' ? $err : 'curl_failed'];
+    }
+    $decoded = json_decode((string) $responseBody, true);
+    if (!is_array($decoded)) {
+        return ['ok' => false, 'error' => 'runner_invalid_response', 'detail' => 'HTTP ' . $status];
+    }
+    if ($status < 200 || $status >= 300) {
+        return [
+            'ok' => false,
+            'error' => is_string($decoded['error'] ?? null) ? (string) $decoded['error'] : 'runner_http_error',
+            'detail' => 'HTTP ' . $status,
+        ];
+    }
+    return ['ok' => true, 'data' => $decoded];
+}
