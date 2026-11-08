@@ -10,9 +10,15 @@ This list is maintained in WP-dev (not editable in the UI). It tracks [PHP suppo
 
 ## Admin UI
 
-**Services** tab → **PHP versions**: Detect shows the running PHP version. A version dropdown + Apply appears **only** when WP-dev can change that environment (Local Docker always; Staging/Production only if `.php-version` or an htaccess PHP handler is already present and writable). Otherwise the UI says to use the hosting panel.
+**WP-dev Local:** Advanced → PHP (under This computer). Detect shows the running version. A version list and Apply appear only when this computer owns the runtime (local Docker). Apply restarts that stack.
 
-Production confirms in the browser; runners pass `--yes` so the CLI does not double-prompt.
+**WP-dev Cloud:** Setup, next to the environment you have open. Three outcomes:
+
+1. **Internal lab** — one PHP for every site on that shared lab. Apply recreates the lab WordPress container.
+2. **Existing selector** — the host already has a writable `.php-version` or an htaccess `AddHandler`. The change is that environment only. Production asks for the site name.
+3. **Anything else** — the detected version, and a note to change PHP in the hosting panel. There is no dropdown.
+
+A writable folder is not treated as permission to invent a selector. Production still asks you to confirm.
 
 ## Local (Dev)
 

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   JobProgressPanel,
-  SyncTab,
   createLocalAdapter,
   loadLocalStatus,
   loadWpDevConfig,
@@ -23,24 +22,30 @@ import { outlineButtonClass, secondaryAccentButtonClass } from "../uiClasses";
 type Scope = Extract<SyncScopePreset, "theme_only" | "full">;
 
 const FULL_HINT: Partial<Record<SyncRouteId, string>> = {
-  dev_to_staging: "Overwrites Staging files + database",
-  staging_to_dev: "Overwrites Local files + database",
-  production_to_dev: "Overwrites Local files + database",
+  dev_to_staging: "Files and database → Staging",
+  staging_to_dev: "Files and database → Local",
+  production_to_dev: "Files and database → Local",
 };
+
+const SITE_ROUTE_IDS: SyncRouteId[] = ["staging_to_dev", "production_to_dev", "dev_to_staging"];
+
+function hostNotReady(host: string): boolean {
+  const value = host.trim().toLowerCase();
+  return value === "" || value.endsWith(".invalid");
+}
 
 /**
  * Primary Sync: scope first (theme-only default), then route → preview → start.
  * Theme-only maps to `push/pull theme` — never the database.
  */
-export function SyncPage() {
+export function SyncPage({ mode = "site" }: { mode?: "site" | "theme" } = {}) {
   const { canRun } = useRunnerSecrets("Unlock admin to sync between environments.");
   const { job, run, cancel, outputRef, reset, isRunning } = useRunnerJob("sync", canRun);
   const adapter = useMemo(() => createLocalAdapter(run), [run]);
 
-  const [scope, setScope] = useState<Scope>("theme_only");
+  const [scope, setScope] = useState<Scope>(mode === "theme" ? "theme_only" : "full");
   const [routeId, setRouteId] = useState<SyncRouteId>("dev_to_staging");
   const [previewKey, setPreviewKey] = useState<string | null>(null);
-  const [showMoreRoutes, setShowMoreRoutes] = useState(false);
   const [buildTheme, setBuildTheme] = useState(true);
   const [themeSlug, setThemeSlug] = useState<string | null>(null);
   const [themeName, setThemeName] = useState<string | null>(null);
@@ -53,7 +58,6 @@ export function SyncPage() {
   });
 
   const primaryRoutes = LOCAL_SYNC_ROUTES.filter((r) => r.primary && !r.hostedOnly);
-  const advancedLocal = LOCAL_SYNC_ROUTES.filter((r) => !r.primary && !r.hostedOnly);
 
   /** Theme-only also allows Dev → Production (safe files-only path). */
   const themePushTargets = [
@@ -127,7 +131,6 @@ export function SyncPage() {
     const next = LOCAL_SYNC_ROUTES.find((r) => r.id === id);
     if (next?.hostedOnly) return;
     setRouteId(id);
-    if (!next?.primary) setShowMoreRoutes(true);
   };
 
   const runSync = async (dryRun: boolean) => {
@@ -175,18 +178,23 @@ export function SyncPage() {
     }
 
     if (route.hostedOnly) return;
+    const runnerEnv = route.runnerEnv;
+    const meta =
+      runnerEnv === "production"
+        ? remoteMeta.production
+        : runnerEnv === "staging"
+          ? remoteMeta.staging
+          : { host: "", url: "" };
+    if (hostNotReady(meta.host)) {
+      const label = runnerEnv === "production" ? "Production" : "Staging";
+      window.alert(`${label} is not set up yet. Save the server on Setup, then try again.`);
+      return;
+    }
     if (!dryRun) {
       if (route.destination === "production") {
         window.alert("Full-site Local → Production is not offered. Use Theme only for live CSS/JS.");
         return;
       }
-      const runnerEnv = route.runnerEnv;
-      const meta =
-        runnerEnv === "production"
-          ? remoteMeta.production
-          : runnerEnv === "staging"
-            ? remoteMeta.staging
-            : { host: "", url: "" };
       const hostLine = meta.host ? `SSH host: ${meta.host}` : "SSH host: (not set in config)";
       const urlLine = meta.url ? `URL: ${meta.url}` : "";
       if (
@@ -218,106 +226,50 @@ export function SyncPage() {
 
   // Theme-only is the safe lane — Start does not require Preview. Full-site still does.
   const previewDone = previewKey === selectionKey;
+  const selectedHost =
+    route.runnerEnv === "production" ? remoteMeta.production.host : remoteMeta.staging.host;
+  const selectedNotReady = mode === "site" && hostNotReady(selectedHost);
   const canStart =
     canRun &&
     !isRunning &&
     (scope === "theme_only" || !route.hostedOnly) &&
-    (scope === "theme_only" || previewDone);
+    (scope === "theme_only" || previewDone) &&
+    !selectedNotReady;
+
+  const siteRoutes = SITE_ROUTE_IDS.map(
+    (id) => LOCAL_SYNC_ROUTES.find((route) => route.id === id)!,
+  );
 
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Sync</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+          {mode === "theme" ? "Theme files" : "Sync"}
+        </h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Pick what to sync first — theme-only is the safe day-to-day path. Full-site sync refuses a
-          mistyped remote path (parent of other sites or WP-dev in the docroot) — verify path in Setup
-          staging first.
+          {mode === "theme"
+            ? "Copies the theme folder from this project. The database and uploads stay as they are."
+            : "Pull a server onto this computer, or push this computer to Staging. A whole-site push to Production is not available."}
         </p>
       </div>
 
-      <ol className="list-none space-y-8 p-0">
-        <li className="space-y-3">
-          <div className="flex items-baseline gap-2">
-            <span className="text-xs font-bold uppercase tracking-wide text-brand-600 dark:text-brand-400">
-              1 · What to sync
-            </span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => {
-                setScope("theme_only");
-                setThemePullId(null);
-              }}
-              className={`rounded-xl border px-4 py-3 text-left ${
-                scope === "theme_only"
-                  ? "border-emerald-500 bg-emerald-50 dark:border-emerald-600 dark:bg-emerald-950/40"
-                  : "border-slate-300 dark:border-slate-600"
-              }`}
-            >
-              <span className="block text-sm font-bold text-slate-900 dark:text-white">
-                Theme only
-                <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                  Recommended
-                </span>
-              </span>
-              <span className="mt-1 block text-xs text-slate-600 dark:text-slate-400">
-                Configured theme folder only (from local.themePath / themeSlug). Does{" "}
-                <strong>not</strong> touch the database or uploads.
-                Use this while developing on a live site.
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setScope("full")}
-              className={`rounded-xl border px-4 py-3 text-left ${
-                scope === "full"
-                  ? "border-amber-500 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40"
-                  : "border-slate-300 dark:border-slate-600"
-              }`}
-            >
-              <span className="block text-sm font-bold text-slate-900 dark:text-white">
-                Full site
-                <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                  Destructive
-                </span>
-              </span>
-              <span className="mt-1 block text-xs text-slate-600 dark:text-slate-400">
-                Entire environment — plugins, themes, uploads, <strong>and database</strong>.
-                Only for cloning or resetting an environment.
-              </span>
-            </button>
-          </div>
-        </li>
-
-        <li className="space-y-3">
-          <div className="flex items-baseline gap-2">
-            <span className="text-xs font-bold uppercase tracking-wide text-brand-600 dark:text-brand-400">
-              2 · Route
-            </span>
-            <span className="text-sm text-slate-500">Source → destination</span>
-          </div>
-
-            {scope === "theme_only" ? (
+      {mode === "theme" ? (
             <div className="space-y-3">
               <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-                Syncing theme:{" "}
+                Theme:{" "}
                 <strong className="text-slate-900 dark:text-white">
                   {themeName && themeSlug && themeName !== themeSlug
                     ? `${themeName} (${themeSlug})`
                     : themeSlug ?? themeName ?? "…"}
                 </strong>
-                <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
-                  From your WP-dev config / default theme folder — not WordPress “active theme”.
-                </span>
               </p>
-              <p className="text-xs font-medium text-slate-500">Push theme from Local</p>
               <div className="flex flex-wrap gap-2">
                 {themePushTargets.map((t) => (
                   <button
                     key={t.id}
                     type="button"
                     onClick={() => {
+                      setScope("theme_only");
                       setThemeTarget(t.id);
                       setThemePullId(null);
                     }}
@@ -333,10 +285,27 @@ export function SyncPage() {
                         !themePull && themeTarget === t.id ? "text-brand-100" : "text-slate-500"
                       }`}
                     >
-                      Theme files only → {ENV_LABEL[t.dest === "staging" ? "staging" : "production"]}
+                      Theme files only
                     </span>
                   </button>
                 ))}
+                {themePullTargets.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => {
+                        setScope("theme_only");
+                        setThemePullId(t.id);
+                      }}
+                      className={`rounded-lg px-3 py-2 text-left text-xs ${
+                        themePullId === t.id
+                          ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
+                          : outlineButtonClass
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
               </div>
               <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                 <input
@@ -347,101 +316,51 @@ export function SyncPage() {
                 />
                 Build theme before push (<code className="text-xs">npm run production</code>)
               </label>
-              <details className="text-sm">
-                <summary className="cursor-pointer font-medium text-slate-600 dark:text-slate-300">
-                  Pull theme into Local
-                </summary>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {themePullTargets.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setThemePullId(t.id)}
-                      className={`rounded-lg px-3 py-2 text-left text-xs ${
-                        themePullId === t.id
-                          ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
-                          : outlineButtonClass
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-              </details>
             </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {primaryRoutes.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => selectFullRoute(r.id)}
-                    className={`rounded-lg px-4 py-2.5 text-left text-sm ${
-                      routeId === r.id
-                        ? "bg-amber-600 text-white shadow-sm"
-                        : "border border-slate-300 dark:border-slate-600"
+      ) : (
+            <div className="flex flex-wrap gap-2">
+              {siteRoutes.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setScope("full");
+                    selectFullRoute(item.id);
+                  }}
+                  className={`rounded-lg px-4 py-2.5 text-left text-sm ${
+                    routeId === item.id
+                      ? "bg-brand-600 text-white shadow-sm"
+                      : "border border-slate-300 dark:border-slate-600"
+                  }`}
+                >
+                  <span className="block font-semibold">{item.label}</span>
+                  <span
+                    className={`mt-0.5 block text-xs ${
+                      routeId === item.id ? "text-brand-100" : "text-slate-500"
                     }`}
                   >
-                    <span className="block font-semibold">{r.label}</span>
-                    <span
-                      className={`mt-0.5 block text-xs ${
-                        routeId === r.id ? "text-amber-100" : "text-slate-500"
-                      }`}
-                    >
-                      {FULL_HINT[r.id]}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <details
-                className="text-sm"
-                open={showMoreRoutes}
-                onToggle={(e) => setShowMoreRoutes((e.target as HTMLDetailsElement).open)}
-              >
-                <summary className="cursor-pointer font-medium text-slate-600 dark:text-slate-300">
-                  More full-site routes
-                </summary>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {advancedLocal.map((r) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => selectFullRoute(r.id)}
-                      className={`rounded-lg px-3 py-2 text-left text-xs ${
-                        routeId === r.id
-                          ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
-                          : outlineButtonClass
-                      }`}
-                    >
-                      <span className="block font-semibold">{r.label}</span>
-                      <span className="opacity-70">{FULL_HINT[r.id]}</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-2 text-xs text-slate-500">
-                  Staging ↔ Production full sync runs in the hosted app (coming later).
-                </p>
-              </details>
+                    {FULL_HINT[item.id]}
+                  </span>
+                </button>
+              ))}
             </div>
-          )}
-        </li>
-      </ol>
+      )}
 
       <LockedGate message="Unlock admin to run preview and sync.">
-        <ol className="mt-8 list-none space-y-8 p-0" start={3}>
-          <li className="space-y-3">
-            <div className="flex items-baseline gap-2">
-              <span className="text-xs font-bold uppercase tracking-wide text-brand-600 dark:text-brand-400">
-                3 · Preview
-              </span>
-              <span className="text-sm text-slate-500">
-                {scope === "theme_only" ? `Theme ${themeLabel}` : `Full site ${route.label}`}
-              </span>
-            </div>
+        <div className="space-y-4">
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              {scope === "theme_only" ? `Theme ${themeLabel}` : route.label}
+            </p>
+            {selectedNotReady ? (
+              <p className="text-sm text-amber-800">
+                {route.runnerEnv === "production" ? "Production" : "Staging"} is not set up yet.
+                Save the server on Setup, then try again.
+              </p>
+            ) : null}
             <button
               type="button"
-              disabled={!canRun || isRunning}
+              disabled={!canRun || isRunning || selectedNotReady}
               className={`${secondaryAccentButtonClass} rounded-lg px-5 py-2.5 text-sm disabled:opacity-50`}
               onClick={() => void runSync(true)}
             >
@@ -461,14 +380,9 @@ export function SyncPage() {
             ) : (
               <p className="text-xs text-slate-500">Optional for theme sync — Start works without it.</p>
             )}
-          </li>
+          </div>
 
-          <li className="space-y-3">
-            <div className="flex items-baseline gap-2">
-              <span className="text-xs font-bold uppercase tracking-wide text-brand-600 dark:text-brand-400">
-                4 · Start
-              </span>
-            </div>
+          <div className="space-y-3">
             {scope === "theme_only" ? (
               <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100">
                 Safe lane: updates <strong>theme files</strong> on{" "}
@@ -481,8 +395,7 @@ export function SyncPage() {
               </p>
             ) : (
               <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-                Destructive: replaces <strong>{ENV_LABEL[route.destination]}</strong>{" "}
-                <strong>files and database</strong>. Prefer Theme only for day-to-day work.
+                This replaces the files and the database on <strong>{ENV_LABEL[route.destination]}</strong>.
               </p>
             )}
             <button
@@ -507,8 +420,8 @@ export function SyncPage() {
                 Start is locked until Preview finishes successfully.
               </p>
             ) : null}
-          </li>
-        </ol>
+          </div>
+        </div>
 
         <JobProgressPanel
           job={job}
@@ -521,14 +434,6 @@ export function SyncPage() {
           </button>
         ) : null}
 
-        <details className="mt-8 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
-          <summary className="cursor-pointer text-sm font-semibold text-slate-800 dark:text-slate-100">
-            Full-site excludes (not used by Theme only)
-          </summary>
-          <div className="mt-3">
-            <SyncTab rulesOnly />
-          </div>
-        </details>
       </LockedGate>
     </div>
   );

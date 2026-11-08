@@ -28,7 +28,7 @@ wp-dev CLI (src/cli.ts)
 | Filesystem | `src/fs/` | Ownership profiles, atomic writes, recovery |
 | Services | `src/services/` | rsync, ssh, wpcli, backup (CLI wrappers) |
 | Sync engine | `packages/sync-engine/` | Shared sync policy (lock, host-key pin, URL variants, exclude constants; rsync/wpcli next) — Phase 1 |
-| Shared web UI | `packages/wpdev-web/` | Backup · Setup · Sync pages (local + future hosted) |
+| Shared web UI | `packages/wpdev-web/` | Local pages: Setup, Sync, Backup, Update, Advanced. Cloud uses the tab names and its own job panels. |
 | Docker | `docker/` | Compose stack, terminal image, runners |
 | Admin | `docs/admin/` | React wizard → `wordpress/admin/` |
 

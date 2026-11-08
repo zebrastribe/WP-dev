@@ -1,5 +1,15 @@
 # SSH troubleshooting
 
+## Staging is not set up yet
+
+**Symptoms:** `Staging is not set up yet (staging.example.invalid)` or the admin says to save the server on Setup.
+
+**Cause:** The host is still the template (`*.invalid`), not a machine you can reach.
+
+**Fix:** On Setup, save a real Staging or Production host. Do not run `ssh` against `staging.example.invalid` and do not add it to `known_hosts`.
+
+---
+
 ## Host not pinned (not in known_hosts)
 
 **Symptoms:** `SSH host [hostname]:port is not pinned in ~/.ssh/known_hosts`

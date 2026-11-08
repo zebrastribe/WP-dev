@@ -2,7 +2,11 @@
 # Bring up the disposable wpdevlab stack and install WordPress once.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-COMPOSE=(docker compose -f "$ROOT/infra/compose.lab.yml" -p wpdevlab)
+ENV_FILE="$ROOT/infra/lab.env"
+if [[ ! -f "$ENV_FILE" ]]; then
+  printf 'WPDEV_PHP_VERSION=8.2\n' > "$ENV_FILE"
+fi
+COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$ROOT/infra/compose.lab.yml" -p wpdevlab)
 KEYS="$ROOT/infra/.lab-keys"
 
 mkdir -p "$KEYS"

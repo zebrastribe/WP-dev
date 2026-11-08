@@ -27,6 +27,7 @@ import {
   timestampedDbName,
 } from "../services/backup.js";
 import { confirmRemoteTarget } from "../utils/confirm.js";
+import { assertRemoteConfigured } from "../utils/remote-placeholder.js";
 import { assertRemotePathSafe } from "../services/remote-path-safety.js";
 import {
   DISK_NEED,
@@ -114,6 +115,7 @@ export async function cmdPush(
 ): Promise<void> {
   const { config, configDir } = loaded;
   const remote = getRemoteEnv(config, env);
+  assertRemoteConfigured(env, remote.host);
   const localWpRoot = resolveFromConfigDir(configDir, config.local.wpRoot);
 
   if (!options.dryRun) {

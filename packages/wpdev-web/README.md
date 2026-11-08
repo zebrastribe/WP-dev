@@ -7,15 +7,15 @@ Shared WP-dev web UI for:
 
 ## Primary IA (binding)
 
-**Backup · Setup · Sync** (+ **Advanced** for power tools)
+**Setup · Sync · Backup · Update**
 
-Localhost Sync defaults to **theme only**; full-site is Preview → Start. Backup restores on the Backup page (DB for remote envs). See [`docs/guides/browser-admin.md`](../../docs/guides/browser-admin.md).
+**Advanced** is local-only and sits beside those four tabs. Sync is full site: Staging → Local, Production → Local, and Local → Staging. Preview runs before Start. A whole-site push to Production is not offered. Theme files live under Advanced. See [`docs/guides/browser-admin.md`](../../docs/guides/browser-admin.md).
 
 ## Exports
 
 - Adapter types and `LOCAL_SYNC_ROUTES`
-- Primary pages: `BackupPage`, `SetupStagingPage`, `SyncPage`, `AdvancedPage`
-- `EnvBadges`, `PRIMARY_TABS` (Backup · Setup · Sync · Advanced), shared button classes
+- Primary pages: `SetupStagingPage`, `SyncPage`, `BackupPage`, `AdvancedPage`
+- `EnvBadges`, `PRIMARY_TABS` (Setup · Sync · Backup · Update), shared button classes
 
 ## Host wiring
 
@@ -29,5 +29,4 @@ Pages import runners and local-only panels from **`@wpdev/web-host`**. Localhost
 
 ## Private cloud consumers
 
-`WP-dev-cloud` vendors **shell only** (`@wpdev/web/shell` / `PRIMARY_TABS`) under its `packages/wpdev-web`.
-Full pages stay here for local admin. Refresh cloud shell via `WP-dev-cloud/scripts/sync-public-packages.sh`.
+`WP-dev-cloud` links this package. It uses `PRIMARY_TABS` for the hosted tab names and keeps its own job panels (login, account, site switcher). It does not render these pages. Full pages stay here for the local admin.

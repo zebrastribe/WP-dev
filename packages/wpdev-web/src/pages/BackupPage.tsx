@@ -87,8 +87,7 @@ export function BackupPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Backup</h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Snapshots for Local, Staging, and Production. Use <strong>Complete</strong> before WordPress,
-          theme, plugin, or PHP updates so you can roll the whole install back if something breaks.
+          Save or restore Local, Staging, or Production. Complete includes the database and the WordPress files.
         </p>
       </div>
 

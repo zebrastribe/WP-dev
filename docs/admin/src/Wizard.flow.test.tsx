@@ -40,33 +40,32 @@ describe("Wizard step flow", () => {
     localStorage.clear();
   });
 
-  it("skips Live SSH and Staging for a new local site", async () => {
+  it("skips Production and Staging for a new local site", async () => {
     const user = userEvent.setup();
     render(<Wizard />);
 
-    await screen.findByRole("radio", { name: /New local WordPress site only/i });
-    await user.click(screen.getByRole("radio", { name: /New local WordPress site only/i }));
+    await screen.findByRole("radio", { name: /New local WordPress/i });
+    await user.click(screen.getByRole("radio", { name: /New local WordPress/i }));
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Live SSH" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Production" })).toBeNull();
     });
     expect(screen.queryByRole("button", { name: "Staging" })).toBeNull();
-    expect(screen.getByText(/then First backup/i)).toBeTruthy();
-    expect(screen.getByText(/DNS provider \(Simply\.com\) — optional/i)).toBeTruthy();
+    expect(screen.queryByText(/DNS provider/i)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Next →" }));
 
-    expect(await screen.findByRole("heading", { name: "First backup" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Live SSH" })).toBeNull();
+    expect(await screen.findByRole("link", { name: /WordPress installer/i })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "First backup" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "← Previous" }));
-    expect(screen.getByRole("radio", { name: /New local WordPress site only/i })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /New local WordPress/i })).toBeTruthy();
   });
 
   it("keeps staging writes separate from the read-only check", async () => {
     const user = userEvent.setup();
     render(<Wizard />);
 
-    await user.click(await screen.findByRole("radio", { name: /Sync from my server/i }));
-    await screen.findByRole("button", { name: "Live SSH" });
+    await user.click(await screen.findByRole("radio", { name: /Connect Production and Staging/i }));
+    await screen.findByRole("button", { name: "Production" });
     await user.click(screen.getAllByRole("button", { name: "Next →" }).at(-1)!);
     expect(await screen.findByText(/Advanced → Terminal/i)).toBeTruthy();
     expect(screen.queryByText("Browser terminal (optional)")).toBeNull();

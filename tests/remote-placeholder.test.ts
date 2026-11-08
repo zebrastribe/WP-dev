@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { detectPhp } from "../src/services/php-version.js";
 import { wpDevConfigSchema } from "../src/config/schema.js";
 import {
+  assertRemoteConfigured,
   isPlaceholderRemoteHost,
   isStagingRemotePlaceholder,
   STAGING_PLACEHOLDER_SSH_PATH,
@@ -16,6 +17,13 @@ describe("isPlaceholderRemoteHost", () => {
     expect(isPlaceholderRemoteHost("linux159.unoeuro.com")).toBe(false);
     expect(isPlaceholderRemoteHost("stri.be")).toBe(false);
     expect(isPlaceholderRemoteHost("localhost")).toBe(false);
+  });
+
+  it("refuses a pull against the template host before SSH", () => {
+    expect(() => assertRemoteConfigured("staging", "staging.example.invalid")).toThrow(
+      /Staging is not set up yet/,
+    );
+    expect(() => assertRemoteConfigured("production", "ssh.simply.com")).not.toThrow();
   });
 });
 

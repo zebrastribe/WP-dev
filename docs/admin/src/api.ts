@@ -130,6 +130,7 @@ export function apiPhpUrl(
     | "staging-domain-check"
     | "staging-db-check"
     | "local-status"
+    | "project-folder"
     | "auth-status"
     | "auth"
     | "auth-bootstrap"
@@ -171,6 +172,8 @@ export type LocalStatus = {
   writable: { wpContent: boolean; plugins: boolean; upgrade: boolean };
   adminUrl: string;
   installUrl: string;
+  /** Host folder name for this project, such as local-evi. */
+  projectFolder?: string;
   /** Theme-only sync target (resolved like CLI; not necessarily WP active theme). */
   theme?: { slug: string; name: string; path: string; source: string };
 };
@@ -197,7 +200,7 @@ export function formatTerminalRunnerSecretsError(
   const prefix = options?.prefix ?? "Runner credentials are not initialized yet";
   const core = `${prefix} (${res.error}${res.detail ? `: ${res.detail}` : ""})`;
   if (res.error === "forbidden") {
-    return `${core}. Click Unlock admin (top right) and paste WPDEV_ADMIN_SAVE_TOKEN from docker/.env once.`;
+    return "Unlock admin in the top right, then try again.";
   }
   if (res.error === "not_found") {
     return `${core}. Rebuild admin: npm run admin:build:wp && npm run wp-dev -- down && npm run wp-dev -- up.`;
@@ -289,6 +292,25 @@ export async function loadWpDevConfigDetailed(): Promise<LoadWpDevConfigResult> 
     logAdmin("error", "loadWpDevConfig: network or fetch failed", detail);
     return { status: "error", detail };
   }
+}
+
+export async function loadProjectFolder(): Promise<string> {
+  try {
+    const res = await fetch(apiPhpUrl("project-folder"), { credentials: "same-origin" });
+    const data: unknown = await res.json();
+    if (
+      res.ok &&
+      data &&
+      typeof data === "object" &&
+      (data as { ok?: boolean }).ok === true &&
+      typeof (data as { projectFolder?: unknown }).projectFolder === "string"
+    ) {
+      return (data as { projectFolder: string }).projectFolder;
+    }
+  } catch {
+    /* header stays as WP-dev Local */
+  }
+  return "";
 }
 
 export async function loadLocalStatus(): Promise<LocalStatusResponse> {
@@ -851,9 +873,7 @@ export async function runTerminalAction(
     });
     const data = (await res.json()) as Record<string, unknown>;
     if (!res.ok || data.ok !== true) {
-      const detail = typeof data.detail === "string" ? data.detail : "";
-      const err = String(data.error ?? `HTTP ${res.status}`);
-      return { ok: false, error: detail ? `${err}: ${detail}` : err };
+      return { ok: false, error: adminActionError(data, res.status) };
     }
     return {
       ok: true,
@@ -880,9 +900,7 @@ export async function importLocalBackup(
     });
     const data = (await res.json()) as Record<string, unknown>;
     if (!res.ok || data.ok !== true || typeof data.path !== "string" || data.path === "") {
-      const detail = typeof data.detail === "string" ? data.detail : "";
-      const err = String(data.error ?? `HTTP ${res.status}`);
-      return { ok: false, error: detail ? `${err}: ${detail}` : err };
+      return { ok: false, error: adminActionError(data, res.status) };
     }
     return { ok: true, path: data.path };
   } catch (e) {
@@ -905,9 +923,7 @@ export async function getTerminalJobStatus(
     );
     const data = (await res.json()) as Record<string, unknown>;
     if (!res.ok || data.ok !== true) {
-      const detail = typeof data.detail === "string" ? data.detail : "";
-      const err = String(data.error ?? `HTTP ${res.status}`);
-      return { ok: false, error: detail ? `${err}: ${detail}` : err };
+      return { ok: false, error: adminActionError(data, res.status) };
     }
     return {
       ok: true,
@@ -937,14 +953,19 @@ export async function cancelTerminalJob(
     });
     const data = (await res.json()) as Record<string, unknown>;
     if (!res.ok || data.ok !== true) {
-      const detail = typeof data.detail === "string" ? data.detail : "";
-      const err = String(data.error ?? `HTTP ${res.status}`);
-      return { ok: false, error: detail ? `${err}: ${detail}` : err };
+      return { ok: false, error: adminActionError(data, res.status) };
     }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "network_error" };
   }
+}
+
+function adminActionError(data: Record<string, unknown>, status: number): string {
+  const err = String(data.error ?? `HTTP ${status}`);
+  if (err === "forbidden") return "Unlock admin in the top right, then try again.";
+  const detail = typeof data.detail === "string" ? data.detail : "";
+  return detail ? `${err}: ${detail}` : err;
 }
 
 export type ActiveJob = {

@@ -14,29 +14,37 @@ After `wp-dev up`:
 http://localhost:8888/admin/
 ```
 
-(Port comes from `WP_PORT` in `docker/.env`.) Unlock once if prompted (token in `docker/.env`).
+(Port comes from `WP_PORT` in `docker/.env`.) The header shows the project folder under **WP-dev Local**. **Unlock admin** is in the top right when the session is closed; **Sign out** is there when it is open. The token is `WPDEV_ADMIN_SAVE_TOKEN` in `docker/.env`.
 
 ## Primary navigation
 
 | Nav | Purpose |
 |-----|---------|
-| **Backup** | Snapshot Dev / Staging / Production; restore **on the same page** (database for Staging/Production; full DB+files for Dev) |
-| **Setup** | Live SSH (production.*), optional staging, save config, verify, first backup |
-| **Sync** | Day-to-day: **theme only** (configured theme folder). Full-site push/pull after Preview. |
-| **Advanced** | Restore points list, copy config JSON, PHP versions, services/ports, terminal, update wp-dev, docs |
+| **Setup** | This computer, Production, and Staging. Save the servers here. |
+| **Sync** | Full site pull onto this computer, or push this computer to Staging. Preview, then Start. |
+| **Backup** | Save or restore Local, Staging, or Production. |
+| **Update** | WordPress, plugins, and themes on this computer. |
+| **Advanced** | Extra controls. Everyday pull, push, backup, and updates stay on the four tabs above. |
 
-Header badges: **Dev** = stack online/offline; **Staging / Production** = “host saved” (config hostname), not “safe to push.”
+### Advanced
+
+| Group | Items |
+|-------|--------|
+| **Copying** | **Full site rules** (what a full site sync copies). **Theme files** (CSS/JS only; the database stays). |
+| **This computer** | Project files, PHP, services, terminal, update wp-dev. |
+| **Recovery** | Restore points, config file, docs. |
 
 ### Sync (what to use when)
 
 | Lane | Use for | CLI |
 |------|---------|-----|
-| **Theme only** (default) | Live theme files; does **not** touch DB or uploads | `push theme` / `pull theme` |
-| **Full site** | Migrations / reseeding after Preview | `push` / `pull` |
-| Full-site **Dev → Production** | Not offered in Sync primary (use CLI if you truly mean it) | `push production` |
-| Staging ↔ Production | Hosted later (not faked on localhost) | — |
+| **Staging → Local** / **Production → Local** | Copy a server onto this computer (files and database) | `pull staging` / `pull production` |
+| **Local → Staging** | Copy this computer to Staging after Preview | `push staging` |
+| **Theme files** (Advanced) | Theme CSS/JS only. Does not replace the database. | `push theme` / `pull theme` |
+| Full-site **Local → Production** | Not offered | — |
+| A host ending in `.invalid` | Not a server. Save a real host on Setup. Pull and push stop before SSH. | — |
 
-Full-site excludes (plugins, `node_modules`, etc.) are under Sync → “Full-site excludes” — they do **not** apply to Theme only.
+Full site rules do not apply to Theme files.
 
 ### Backup / restore
 
@@ -132,13 +140,14 @@ npm run admin:dev
 
 When dogfooding the browser UI:
 
-- Env badges read **Dev / Staging / Production** (not “local” as the user-facing label)
-- Sync default is theme-only; full-site needs Preview → Start; Dev → Production is not a primary button
-- Backup Staging/Production → Backup now produces a DB dump you can restore on the same page
-- Advanced → Terminal has doctor / key / backups — **not** one-click full-site production push
-- Advanced → Update is Preview steps first, then Update (confirm if Docker restart is checked)
+- The header shows the project folder. A closed session shows **Unlock admin**; an open session shows **Sign out**.
+- Sync offers Staging → Local, Production → Local, and Local → Staging. Full-site Local → Production is not a button. Preview runs before Start.
+- A Staging host ending in `.invalid` shows “not set up yet” and does not ask you to pin `known_hosts`.
+- Theme files live under Advanced → Copying. They do not replace the database.
+- Backup still restores on the Backup page. Advanced → Restore points is the longer list.
+- Advanced → Terminal is a shell on this computer, not a full-site production push.
 - Every UI action still maps to an existing CLI command (`push` / `pull` / `backup` / `doctor` / …)
 
 ## Shared package
 
-Primary pages + adapter types live in [`packages/wpdev-web`](../../packages/wpdev-web/README.md) (`@wpdev/web`). `docs/admin` is a thin Vite shell: auth, theme, and `@wpdev/web-host` → `LocalAdapter` / runners. Hosted control-web will import the same pages with a cloud host module.
+Primary pages + adapter types live in [`packages/wpdev-web`](../../packages/wpdev-web/README.md) (`@wpdev/web`). `docs/admin` is a thin Vite shell: auth, theme, and `@wpdev/web-host` → local runners. WP-dev Cloud keeps its own job panels and uses the same tab names. It does not mount this wizard.

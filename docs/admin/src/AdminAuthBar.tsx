@@ -20,16 +20,13 @@ export function AdminAuthBar() {
 
   if (authenticated) {
     return (
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-500">Admin unlocked</span>
-        <button
-          type="button"
-          onClick={() => void logout()}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
-        >
-          Sign out
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => void logout()}
+        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+      >
+        Sign out
+      </button>
     );
   }
 

@@ -521,7 +521,7 @@ function wpdev_resolve_sync_theme(string $configPath, string $wpRoot): array
 
 function wpdev_local_status(): array
 {
-    global $configPath;
+    global $configPath, $dockerEnvPath;
     $wpRoot = '/var/www/html';
     $configPresent = is_file($configPath) && is_readable($configPath);
     $configIsExample = false;
@@ -642,7 +642,30 @@ function wpdev_local_status(): array
         'adminUrl' => '/admin/',
         'installUrl' => '/wp-admin/install.php',
         'theme' => $theme,
+        'projectFolder' => wpdev_project_folder($dockerEnvPath, $configPath),
     ];
+}
+
+/** Folder name of this local project, for the admin header. Never the full path. */
+function wpdev_project_folder(string $dockerEnvPath, string $configPath): string
+{
+    if (is_file($dockerEnvPath) && is_readable($dockerEnvPath)) {
+        $raw = (string) file_get_contents($dockerEnvPath);
+        if (preg_match('/^WPDEV_HOST_PROJECT_ROOT=(.*)$/m', $raw, $m) === 1) {
+            $path = trim($m[1], " \t\"'");
+            $base = basename(str_replace('\\', '/', $path));
+            if ($base !== '' && $base !== '.' && $base !== '/') {
+                return $base;
+            }
+        }
+    }
+    if (is_file($configPath) && is_readable($configPath)) {
+        $cfg = json_decode((string) file_get_contents($configPath), true);
+        if (is_array($cfg) && is_string($cfg['project'] ?? null) && $cfg['project'] !== '') {
+            return $cfg['project'];
+        }
+    }
+    return '';
 }
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -787,6 +810,17 @@ if ($method === 'GET' && $action === 'load') {
     $len = strlen($raw);
     wpdev_admin_api_log("GET load 200 bytes={$len}");
     echo $raw;
+    exit;
+}
+
+if ($method === 'GET' && $action === 'project-folder') {
+    echo json_encode(
+        [
+            'ok' => true,
+            'projectFolder' => wpdev_project_folder($dockerEnvPath, $configPath),
+        ],
+        JSON_UNESCAPED_SLASHES,
+    );
     exit;
 }
 

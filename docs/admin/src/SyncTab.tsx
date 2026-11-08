@@ -65,26 +65,26 @@ type SyncPreviewJson = {
 const RECOMMENDED_TOGGLES = [
   {
     key: "node-modules",
-    label: "Exclude node_modules from full push",
-    hint: "All theme/build node_modules (checked = excluded)",
+    label: "Node folders",
+    hint: "node_modules stays on this computer",
   },
   {
     key: "debug-log",
-    label: "Exclude debug.log from full push",
-    hint: "wp-content/debug.log (checked = excluded)",
+    label: "debug.log",
+    hint: "wp-content/debug.log stays on this computer",
   },
   {
     key: "upgrade-temp",
-    label: "Exclude upgrade temp from full push",
-    hint: "wp-content/upgrade (checked = excluded)",
+    label: "Upgrade temp",
+    hint: "wp-content/upgrade stays on this computer",
   },
 ] as const;
 
 function SyncHelpPanel() {
   return (
     <details className="rounded-xl border border-slate-200 bg-slate-50 text-sm dark:border-slate-700 dark:bg-slate-900/60">
-      <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
-        What do Sync / Dev only mean?
+        <summary className="cursor-pointer px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
+        What do these choices mean?
       </summary>
       <div className="space-y-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-700 dark:border-slate-700 dark:text-slate-300">
         <p>
@@ -97,11 +97,10 @@ function SyncHelpPanel() {
           <p className="font-semibold text-slate-900 dark:text-slate-100">Plugins</p>
           <ul className="mt-1 list-disc space-y-1 pl-4">
             <li>
-              <strong>Deploy</strong> — plugin folder is included in sync.
+              <strong>Include</strong> — the plugin is copied with a full site sync.
             </li>
             <li>
-              <strong>Dev only</strong> — plugin never leaves your laptop. Use for tools
-              (e.g. Query Monitor). Production keeps its own copy.
+              <strong>Keep here</strong> — the plugin stays on this computer. The server keeps its own copy.
             </li>
           </ul>
         </div>
@@ -109,17 +108,13 @@ function SyncHelpPanel() {
           <p className="font-semibold text-slate-900 dark:text-slate-100">Themes</p>
           <ul className="mt-1 list-disc space-y-1 pl-4">
             <li>
-              <strong>All files</strong> — entire theme folder syncs (including node_modules unless
-              excluded globally).
+              <strong>Whole theme</strong> — the theme folder is copied.
             </li>
             <li>
-              <strong>Partial</strong> — only checked folders/files sync; dev folders like{" "}
-              <code className="rounded bg-slate-200 px-1 dark:bg-slate-800">node_modules</code> stay
-              local. Recommended for build themes.
+              <strong>Choose folders</strong> — checked folders and files are copied. Unchecked ones stay here.
             </li>
             <li>
-              <strong>Never deploy</strong> — theme is skipped on push; production is unchanged.
-              Do <em>not</em> use this for your active theme if you want to update production.
+              <strong>Skip</strong> — the theme stays on this computer. The server keeps its own copy.
             </li>
           </ul>
         </div>
@@ -151,6 +146,14 @@ function SyncHelpPanel() {
   );
 }
 
+function themeRuleLine(mode: ThemeMode, excludeFolders: string[], excludeFiles: string[]): string {
+  if (mode === "localOnly") return "Stays on this computer";
+  if (mode !== "custom") return "The whole theme is copied";
+  const leftOut = [...excludeFolders, ...excludeFiles];
+  if (leftOut.length === 0) return "Every folder is copied. Uncheck one to leave it here.";
+  return `Left here: ${leftOut.join(", ")}`;
+}
+
 function parseJsonFromOutput<T>(output: string): T | null {
   const start = output.indexOf("{");
   if (start < 0) return null;
@@ -180,7 +183,7 @@ function SegmentedToggle<T extends string>({
           type="button"
           disabled={disabled}
           onClick={() => onChange(opt.value)}
-          className={`rounded-md px-2 py-1 text-[10px] font-semibold ${
+          className={`rounded-md px-2 py-1 text-xs font-semibold ${
             value === opt.value
               ? "bg-brand-600 text-white"
               : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
@@ -313,14 +316,14 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
     });
   };
 
-  const toggleThemeItem = (slug: string, type: "folder" | "file", name: string, synced: boolean) => {
+  const toggleThemeItem = (slug: string, type: "folder" | "file", name: string, include: boolean) => {
     const current = getThemeConfig(slug);
     const excludeFolders = new Set(current.excludeFolders ?? []);
     const excludeFiles = new Set(current.excludeFiles ?? []);
     if (type === "folder") {
-      if (synced) excludeFolders.delete(name);
+      if (include) excludeFolders.delete(name);
       else excludeFolders.add(name);
-    } else if (synced) excludeFiles.delete(name);
+    } else if (include) excludeFiles.delete(name);
     else excludeFiles.add(name);
     updateSync({
       themes: {
@@ -460,14 +463,7 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
             no terminal required.
           </p>
         </div>
-      ) : (
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Sync rules</h2>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Choose what stays on Dev and what syncs with Staging or Production.
-          </p>
-        </div>
-      )}
+      ) : null}
 
       {!rulesOnly ? <SyncHelpPanel /> : null}
 
@@ -487,21 +483,20 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
       {hasSuggestions ? (
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
           <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            We found development-only items
+            These look like development tools
           </p>
           <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-            These stay on Dev during full sync — they are not removed from production.
+            Keep them on this computer during a full site sync. Nothing is deleted on the server.
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-slate-700 dark:text-slate-300">
             {(scan?.suggestions.devPlugins ?? []).map((s) => (
               <li key={s}>
-                Plugin <strong>{s}</strong> → Dev only (tool)
+                Plugin <strong>{s}</strong> stays here
               </li>
             ))}
             {(scan?.suggestions.buildThemes ?? []).map((t) => (
               <li key={t.slug}>
-                Theme <strong>{t.slug}</strong> → Partial deploy (exclude{" "}
-                {t.excludeFolders.join(", ") || "dev folders"})
+                Theme <strong>{t.slug}</strong> leaves out {t.excludeFolders.join(", ") || "source folders"}
               </li>
             ))}
           </ul>
@@ -511,7 +506,7 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
               onClick={() => applyAllRecommendations()}
               className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white"
             >
-              Apply all
+              Keep them here
             </button>
             <button
               type="button"
@@ -533,8 +528,7 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Plugins</h3>
             <p className="mt-1 text-xs text-slate-500">
-              <strong>Deploy</strong> = included in full sync.{" "}
-              <strong>Dev only</strong> = stays on your laptop (production unchanged).
+              Include copies the plugin. Keep here leaves it on this computer.
             </p>
             <div className="mt-3 flex justify-end">
               <input
@@ -589,8 +583,8 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
                       <SegmentedToggle
                         value={mode}
                         options={[
-                          { value: "sync", label: "Deploy" },
-                          { value: "localOnly", label: "Dev only" },
+                          { value: "sync", label: "Include" },
+                          { value: "localOnly", label: "Keep here" },
                         ]}
                         onChange={(v) => setPluginMode(p.slug, v)}
                       />
@@ -604,107 +598,116 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Themes</h3>
             <p className="mt-1 text-xs text-slate-500">
-              Rules for <strong>full site</strong> push/pull only. Active theme:{" "}
-              {activeThemeSlug ?? "unknown"}.
+              Whole theme copies everything. Choose folders when the theme has source you want to leave here.
+              {activeThemeSlug ? ` Active theme: ${activeThemeSlug}.` : ""}
             </p>
             {scan?.themes.some((t) => t.active && t.buildTheme) ? (
               <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
-                <strong>{activeThemeSlug}</strong> is a build theme. For production CSS/JS updates
-                without touching the database, run:{" "}
-                <code className="rounded bg-slate-200 px-1 dark:bg-slate-800">
-                  npm run wp-dev -- push theme production --build
-                </code>
+                <strong>{activeThemeSlug}</strong> is built from source. Copy the finished CSS and JS from Theme files.
+                Here, leave out the source folders.
               </p>
             ) : null}
             <div className="mt-3 space-y-2">
               {(scan?.themes ?? []).map((t) => {
                 const cfg = getThemeConfig(t.slug);
                 const expanded = expandedThemes.has(t.slug);
-                const rows = [
-                  ...t.folders.map((name) => ({
-                    name,
-                    type: "folder" as const,
-                    synced:
-                      cfg.mode === "all" ||
-                      (cfg.mode === "custom" && !(cfg.excludeFolders ?? []).includes(name)),
-                  })),
-                  ...t.files.map((name) => ({
-                    name,
-                    type: "file" as const,
-                    synced:
-                      cfg.mode === "all" ||
-                      (cfg.mode === "custom" && !(cfg.excludeFiles ?? []).includes(name)),
-                  })),
-                ];
+                const folders = t.folders.map((name) => ({
+                  name,
+                  type: "folder" as const,
+                  synced: cfg.mode === "all" || (cfg.mode === "custom" && !(cfg.excludeFolders ?? []).includes(name)),
+                }));
+                const files = t.files.map((name) => ({
+                  name,
+                  type: "file" as const,
+                  synced: cfg.mode === "all" || (cfg.mode === "custom" && !(cfg.excludeFiles ?? []).includes(name)),
+                }));
+                const usual = [...t.recommendedExcludeFolders, ...t.recommendedExcludeFiles];
                 return (
                   <div
                     key={t.slug}
                     className="rounded-lg border border-slate-100 dark:border-slate-800"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setExpandedThemes((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(t.slug)) next.delete(t.slug);
-                            else next.add(t.slug);
-                            return next;
-                          });
-                        }}
-                        className="text-left text-sm font-medium text-slate-800 dark:text-slate-200"
-                      >
-                        {expanded ? "▼" : "▸"} {t.slug}
-                        {t.active ? (
-                          <span className="ml-2 text-[10px] text-brand-600 dark:text-brand-400">
-                            active
-                          </span>
-                        ) : null}
-                        {t.buildTheme ? (
-                          <span className="ml-1 text-[10px] text-slate-500">build</span>
-                        ) : null}
-                      </button>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                          {t.slug}
+                          {t.active ? (
+                            <span className="ml-2 text-xs font-normal text-brand-600 dark:text-brand-400">
+                              active
+                            </span>
+                          ) : null}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {themeRuleLine(cfg.mode, cfg.excludeFolders ?? [], cfg.excludeFiles ?? [])}
+                        </p>
+                      </div>
                       <SegmentedToggle
                         value={cfg.mode === "localOnly" ? "localOnly" : cfg.mode === "custom" ? "custom" : "all"}
                         options={[
-                          { value: "all", label: "All files" },
-                          { value: "custom", label: "Partial" },
-                          { value: "localOnly", label: "Never deploy" },
+                          { value: "all", label: "Whole theme" },
+                          { value: "custom", label: "Choose folders" },
+                          { value: "localOnly", label: "Skip" },
                         ]}
-                        onChange={(v) => setThemeMode(t.slug, v)}
+                        onChange={(v) => {
+                          setThemeMode(t.slug, v);
+                          if (v === "custom") {
+                            setExpandedThemes((prev) => new Set(prev).add(t.slug));
+                          }
+                        }}
                       />
                     </div>
                     {expanded && cfg.mode === "custom" ? (
-                      <div className="border-t border-slate-100 px-3 py-2 dark:border-slate-800">
-                        <p className="mb-2 text-[10px] text-slate-500">
-                          Checked items are included in full push/pull. Unchecked stay on localhost.
+                      <div className="max-h-80 space-y-3 overflow-y-auto border-t border-slate-100 px-3 py-3 dark:border-slate-800">
+                        <p className="text-xs text-slate-500">
+                          Checked items are copied. Unchecked items stay on this computer.
                         </p>
-                        {t.recommendedExcludeFolders.length > 0 ? (
+                        {usual.length > 0 ? (
                           <button
                             type="button"
                             onClick={() => applyRecommendedTheme(t.slug)}
-                            className="mb-2 rounded border border-slate-300 px-2 py-1 text-[10px] dark:border-slate-600"
+                            className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-600"
                           >
-                            Apply recommended deployment
+                            Leave out {usual.join(", ")}
                           </button>
                         ) : null}
-                        <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
-                          {rows.map((row) => (
-                            <label
-                              key={`${row.type}-${row.name}`}
-                              className="flex cursor-pointer items-center gap-1 text-[11px]"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={row.synced}
-                                onChange={() =>
-                                  toggleThemeItem(t.slug, row.type, row.name, row.synced)
-                                }
-                              />
-                              <span className="truncate font-mono">{row.name}</span>
-                            </label>
-                          ))}
-                        </div>
+                        {folders.length > 0 ? (
+                          <div>
+                            <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Folders</p>
+                            <div className="mt-1 space-y-1">
+                              {folders.map((row) => (
+                                <label key={row.name} className="flex cursor-pointer items-center gap-2 text-sm">
+                                  <input
+                                    type="checkbox"
+                                    checked={row.synced}
+                                    onChange={(e) =>
+                                      toggleThemeItem(t.slug, row.type, row.name, e.target.checked)
+                                    }
+                                  />
+                                  <span>{row.name}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {files.length > 0 ? (
+                          <div>
+                            <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Files</p>
+                            <div className="mt-1 space-y-1">
+                              {files.map((row) => (
+                                <label key={row.name} className="flex cursor-pointer items-center gap-2 text-sm">
+                                  <input
+                                    type="checkbox"
+                                    checked={row.synced}
+                                    onChange={(e) =>
+                                      toggleThemeItem(t.slug, row.type, row.name, e.target.checked)
+                                    }
+                                  />
+                                  <span>{row.name}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -714,7 +717,10 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Global (push)</h3>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Leave these out</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Checked items stay off a full site sync. Uncheck one if you want it copied.
+            </p>
             <div className="mt-3 space-y-2">
               {RECOMMENDED_TOGGLES.map((item) => (
                 <label key={item.key} className="flex cursor-pointer items-start gap-2 text-sm">
@@ -743,8 +749,8 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
                   className="mt-0.5"
                 />
                 <span>
-                  <span className="font-medium">Skip uploads on push</span>
-                  <span className="block text-xs text-slate-500">Optional — media stays on remote</span>
+                  <span className="font-medium">Media</span>
+                  <span className="block text-xs text-slate-500">On a push, uploads stay on the server</span>
                 </span>
               </label>
             </div>
@@ -755,7 +761,7 @@ export function SyncTab({ rulesOnly = false }: SyncTabProps) {
                 onClick={() => void saveConfig()}
                 className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white"
               >
-                Save deployment rules{configDirty ? " *" : ""}
+                Save rules{configDirty ? " *" : ""}
               </button>
               {saveMsg ? <span className="self-center text-xs text-slate-500">{saveMsg}</span> : null}
             </div>

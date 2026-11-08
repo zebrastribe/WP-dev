@@ -15,7 +15,7 @@ npm run wp-dev -- sync-scan
 npm run wp-dev -- sync-scan --json
 ```
 
-Used by the **Sync** tab in `/admin/`.
+In `/admin/`, open **Advanced → Full site rules**. Theme files (the item next to it) copies the theme only and ignores this list.
 
 ## Config: `sync` section
 
@@ -32,10 +32,17 @@ In `wp-dev.config.json`:
 }
 ```
 
-| Value | Meaning |
-|-------|---------|
-| `localOnly` | Never push this plugin to remote |
-| Custom theme rules | Exclude paths like `src/` from push |
+| Choice in the admin | Stored as | Meaning |
+|--------------------|-----------|---------|
+| Plugin **Include** | `"sync"` (or omitted) | The plugin is copied with a full site sync |
+| Plugin **Keep here** | `"localOnly"` | The plugin stays on this computer. The server keeps its own copy |
+| Theme **Whole theme** | `{ "mode": "all" }` | The theme folder is copied |
+| Theme **Choose folders** | `{ "mode": "custom", "excludeFolders": […] }` | Checked folders and files are copied. Unchecked ones stay here |
+| Theme **Skip** | `{ "mode": "localOnly" }` | The theme stays on this computer |
+
+**Leave these out** covers `node_modules`, `debug.log`, the WordPress upgrade folder, and media on push (`skipUploadsOnPush`). A checked box means that item stays off the full site sync.
+
+A host whose name ends in `.invalid` (the Setup template) is not a server. Pull and push refuse it before SSH and do not ask you to pin it in `known_hosts`.
 
 ## Preview before sync
 

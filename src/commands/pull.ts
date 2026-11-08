@@ -35,7 +35,7 @@ import { detectTablePrefixFromSqlDump } from "../utils/sql-dump-prefix.js";
 import { runLocalWordpressFileMutation } from "../fs/index.js";
 import { registerTempDir, unregisterTempDir } from "../fs/temp-registry.js";
 import { getSimplyApiKey } from "../services/simply.js";
-import { isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
+import { assertRemoteConfigured, isStagingRemotePlaceholder } from "../utils/remote-placeholder.js";
 import { getUrlVariants } from "../utils/url-variants.js";
 import { getLocalUrlPortMismatch } from "../utils/published-local-urls.js";
 import { verifyLocalSiteUrls } from "../utils/sync-verify.js";
@@ -61,6 +61,7 @@ export async function cmdPull(
 ): Promise<void> {
   const { config, configDir } = loaded;
   const remote = getRemoteEnv(config, env);
+  assertRemoteConfigured(env, remote.host);
   const localWpRoot = resolveFromConfigDir(configDir, config.local.wpRoot);
   const portMismatch = getLocalUrlPortMismatch(loaded);
 

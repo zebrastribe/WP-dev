@@ -20,9 +20,23 @@ export type ComponentUpdate =
 
 export type SiteUpdateRequest =
   | { target: "check" }
+  | { target: "php_show" }
   | { target: "apply"; items: ComponentUpdate[] }
   | { target: "php"; version: SiteUpdatePhpVersion }
   | ComponentUpdate;
+
+export type PhpControlKind = "lab" | "selector" | "panel";
+
+export type PhpControlView = {
+  kind: PhpControlKind;
+  /** Major.minor when it is one of the versions we can ask for. */
+  version: string | null;
+  /** What the site reported, such as 8.2.30. */
+  reported: string | null;
+  selectable: boolean;
+  detail: string;
+  versions: readonly string[];
+};
 
 export type AvailableComponent = {
   slug: string;
@@ -71,6 +85,7 @@ export function parseSiteUpdate(input: unknown): SiteUpdateRequest {
   }
   const raw = input as { target?: unknown; version?: unknown; slug?: unknown; items?: unknown };
   if (raw.target === "check") return { target: "check" };
+  if (raw.target === "php_show") return { target: "php_show" };
   if (raw.target === "apply") {
     if (!Array.isArray(raw.items) || raw.items.length === 0) {
       throw new Error("Select at least one available update.");
@@ -95,7 +110,7 @@ export function parseSiteUpdate(input: unknown): SiteUpdateRequest {
   if (raw.target === "core" || raw.target === "plugin" || raw.target === "theme") {
     return parseComponent(raw);
   }
-  throw new Error("Site update target must be check, apply, php, core, plugin, or theme.");
+  throw new Error("Site update target must be check, php_show, apply, php, core, plugin, or theme.");
 }
 
 function section(name: string, command: string): string {
@@ -305,6 +320,94 @@ const PHP_SELECTOR_SNIPPET = [
   'fwrite(STDERR, "No per-site PHP selector. Change PHP in the hosting panel.\\n");',
   "exit(2);",
 ].join("\n");
+
+export function phpMajorMinor(reported: string | null | undefined): string | null {
+  const match = /^(\d+\.\d+)/.exec((reported ?? "").trim());
+  return match ? match[1]! : null;
+}
+
+/** Read-only look at one WordPress root. Does not create a selector. */
+export function buildPhpProbeScript(wpPath: string): string {
+  const root = wpPath.replace(/\/$/, "");
+  if (!root.startsWith("/")) {
+    throw new Error("Refusing PHP check: WordPress path must be absolute.");
+  }
+  const q = posixShellQuote(root);
+  return [
+    "set +e",
+    `WP=${q}`,
+    'echo WPDEV_PHP_BEGIN',
+    'if command -v wp >/dev/null 2>&1 && wp --path="$WP" core is-installed >/dev/null 2>&1; then',
+    '  wp --path="$WP" eval \'echo PHP_VERSION;\'',
+    "else",
+    "  php -r 'echo PHP_VERSION;'",
+    "fi",
+    "echo",
+    "echo WPDEV_PHP_DOT",
+    'if [ -f "$WP/.php-version" ]; then echo yes; else echo no; fi',
+    "echo WPDEV_PHP_HT",
+    'if [ -f "$WP/.htaccess" ] && grep -qi "AddHandler.*php" "$WP/.htaccess"; then echo yes; else echo no; fi',
+    "echo WPDEV_PHP_END",
+  ].join("\n");
+}
+
+export function phpControlFromProbe(input: {
+  reported: string | null;
+  dotFile: boolean;
+  htaccessHandler: boolean;
+}): PhpControlView {
+  const version = phpMajorMinor(input.reported);
+  const known = version !== null && SITE_UPDATE_PHP_VERSIONS.includes(version as SiteUpdatePhpVersion);
+  const shown = input.reported?.trim() || version;
+  if (input.htaccessHandler || input.dotFile) {
+    return {
+      kind: "selector",
+      version: known ? version : null,
+      reported: shown || null,
+      selectable: true,
+      detail: input.htaccessHandler
+        ? "This folder already has an htaccess PHP handler. A change applies to this environment only."
+        : "This folder already has a .php-version file. A change applies to this environment only.",
+      versions: SITE_UPDATE_PHP_VERSIONS,
+    };
+  }
+  return {
+    kind: "panel",
+    version: known ? version : null,
+    reported: shown || null,
+    selectable: false,
+    detail: shown
+      ? `PHP ${shown} is running. This host has no per-site selector, so change PHP in the hosting panel.`
+      : "PHP could not be read. Change it in the hosting panel.",
+    versions: SITE_UPDATE_PHP_VERSIONS,
+  };
+}
+
+export function parsePhpProbe(output: string): PhpControlView {
+  const body = output.split("WPDEV_PHP_BEGIN")[1]?.split("WPDEV_PHP_END")[0] ?? "";
+  const reported = body.split("WPDEV_PHP_DOT")[0]?.replace(/\s+/g, " ").trim() || null;
+  const dot = /WPDEV_PHP_DOT\s+yes/.test(body);
+  const ht = /WPDEV_PHP_HT\s+yes/.test(body);
+  const clean = reported && /^\d+\.\d+/.test(reported) ? reported : null;
+  return phpControlFromProbe({ reported: clean, dotFile: dot, htaccessHandler: ht });
+}
+
+export function labPhpView(version: string | null, running: string | null): PhpControlView {
+  const selected = phpMajorMinor(version);
+  const known = selected !== null && SITE_UPDATE_PHP_VERSIONS.includes(selected as SiteUpdatePhpVersion);
+  const live = phpMajorMinor(running);
+  const same = !live || !selected || live === selected;
+  return {
+    kind: "lab",
+    version: known ? selected : null,
+    reported: running || version,
+    selectable: true,
+    detail: same
+      ? "This is the shared internal lab. Every site on it uses this PHP."
+      : `The lab is set to PHP ${selected ?? version}, and the running website is still PHP ${live}. Apply again to restart it.`,
+    versions: SITE_UPDATE_PHP_VERSIONS,
+  };
+}
 
 /** Remote command for this WordPress root only. Path safety runs before this. */
 export function buildSiteUpdateScript(

@@ -7,11 +7,14 @@ import { normalizeSshPrivateKey } from "../packages/sync-engine/src/ssh-private-
 import {
   assertSelectionAvailable,
   assertSingleSiteRoot,
+  buildPhpProbeScript,
   buildSiteUpdateScript,
   buildUpdateCheckScript,
   evaluatePathSafety,
+  parsePhpProbe,
   parseSiteUpdate,
   parseUpdateCheckOutput,
+  phpControlFromProbe,
 } from "../packages/sync-engine/src/index.js";
 
 describe("site update contract", () => {
@@ -50,8 +53,22 @@ describe("site update contract", () => {
     expect(script).toContain("hosting panel");
   });
 
+  it("offers a PHP change only when the folder already has a selector", () => {
+    const script = buildPhpProbeScript("/var/www/live");
+    expect(script).toContain("WPDEV_PHP_BEGIN");
+    expect(script).not.toContain("file_put_contents");
+    expect(phpControlFromProbe({ reported: "8.2.30", dotFile: true, htaccessHandler: false }).selectable).toBe(true);
+    expect(phpControlFromProbe({ reported: "8.1.2", dotFile: false, htaccessHandler: false }).kind).toBe("panel");
+    const parsed = parsePhpProbe(
+      ["WPDEV_PHP_BEGIN", "8.3.1", "WPDEV_PHP_DOT", "no", "WPDEV_PHP_HT", "yes", "WPDEV_PHP_END"].join("\n"),
+    );
+    expect(parsed.kind).toBe("selector");
+    expect(parsed.version).toBe("8.3");
+  });
+
   it("rejects git as a site update target", () => {
-    expect(() => parseSiteUpdate({ target: "git" })).toThrow(/check, apply, php, core, plugin, or theme/);
+    expect(() => parseSiteUpdate({ target: "git" })).toThrow(/check, php_show, apply, php/);
+    expect(parseSiteUpdate({ target: "php_show" })).toEqual({ target: "php_show" });
   });
 
   it("lists nothing when wp-cli is missing", () => {

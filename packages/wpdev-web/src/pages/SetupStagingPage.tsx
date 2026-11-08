@@ -12,8 +12,8 @@ export function SetupStagingPage() {
           Setup
         </h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Pull from a server: Connect, Live SSH, Staging (optional), First backup, Ready. A new
-          local site skips Live SSH and Staging. DNS provider settings sit under Connect.
+          Create a WordPress on this computer, or save Production and Staging. Pull, push, backup,
+          and updates are their own tabs.
         </p>
       </div>
       <LockedGate message="Unlock admin to configure remote servers.">

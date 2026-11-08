@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   archiveRequest,
+  bindingAfterBranchChange,
   branchStatus,
   buildRepoInstallScript,
+  formatAuthHeader,
   loadRepoSnapshot,
   parseRepositoryUrl,
   redactSecret,
+  resolveArchiveRedirect,
   verifyComponentFiles,
   type EnvBinding,
 } from "../packages/sync-engine/src/index.js";
@@ -58,6 +61,71 @@ describe("repository source", () => {
     expect(snapshot.branches.map((row) => row.name)).toEqual(["release-2026", "customer-beta"]);
     expect(snapshot.isPrivate).toBe(true);
     expect(calls.every((url) => url.startsWith("https://api.github.com/"))).toBe(true);
+  });
+
+  it("follows a GitHub page when the owner casing differs", async () => {
+    const seen: string[] = [];
+    const snapshot = await loadRepoSnapshot(
+      { provider: "github", owner: "Acme", name: "Plugin" },
+      "user:app-password",
+      async (url, init) => {
+        seen.push(url);
+        expect(init?.headers?.Authorization).toBe(
+          `Basic ${Buffer.from("user:app-password").toString("base64")}`,
+        );
+        if (!url.includes("/branches")) {
+          return jsonResponse({ default_branch: "main", private: true });
+        }
+        if (url.includes("page=2")) {
+          return jsonResponse([{ name: "develop", commit: { sha: "b".repeat(40) } }]);
+        }
+        return jsonResponse(
+          [{ name: "main", commit: { sha: "a".repeat(40) } }],
+          200,
+          '<https://api.github.com/repos/ACME/PLUGIN/branches?page=2>; rel="next"',
+        );
+      },
+    );
+    expect(seen.some((url) => url.includes("page=2"))).toBe(true);
+    expect(snapshot.branches.map((row) => row.name)).toEqual(["main", "develop"]);
+  });
+
+  it("allows Bitbucket's archive bucket and keeps the GitHub token on codeload", () => {
+    const s3 = resolveArchiveRedirect(
+      "https://bitbucket.org/acme/theme/get/abc.zip",
+      "https://bb-tarballs.s3.amazonaws.com/acme/theme?X-Amz-Signature=abc",
+    );
+    expect(s3.stripAuthorization).toBe(true);
+    expect(s3.url).toContain("bb-tarballs.s3.amazonaws.com");
+    const regional = resolveArchiveRedirect(
+      "https://api.bitbucket.org/2.0/repositories/acme/theme/src",
+      "https://bb-tarballs.s3.eu-central-1.amazonaws.com/file.zip",
+    );
+    expect(regional.stripAuthorization).toBe(true);
+    const github = resolveArchiveRedirect(
+      "https://api.github.com/repos/acme/plugin/zipball/abc",
+      "https://codeload.github.com/acme/plugin/legacy.zip/abc",
+    );
+    expect(github.stripAuthorization).toBe(false);
+    expect(() =>
+      resolveArchiveRedirect("https://bitbucket.org/acme/theme/get/abc.zip", "https://evil.amazonaws.com/file.zip"),
+    ).toThrow(/cannot be used/);
+    expect(() =>
+      resolveArchiveRedirect("https://api.github.com/repos/acme/plugin/zipball/abc", "https://bb-tarballs.s3.amazonaws.com/file.zip"),
+    ).toThrow(/cannot be used/);
+  });
+
+  it("clears the deployed commit when the branch changes", () => {
+    const previous: EnvBinding = {
+      provider: "github",
+      owner: "acme",
+      name: "plugin",
+      branch: "main",
+      subdirectory: "",
+      deployedSha: "a".repeat(40),
+    };
+    expect(bindingAfterBranchChange(previous, { ...previous, branch: "develop" }).deployedSha).toBeNull();
+    expect(bindingAfterBranchChange(previous, { ...previous }).deployedSha).toBe("a".repeat(40));
   });
 
   it("reads Bitbucket pages and refuses a next link on another host", async () => {
@@ -138,6 +206,15 @@ describe("repository source", () => {
     );
     expect(archive.url.startsWith("https://bitbucket.org/acme/theme/get/")).toBe(true);
     expect(archive.headers.Authorization).toBe(`Bearer ${token}`);
+    expect(formatAuthHeader("jane@example.com:app-password")).toBe(
+      `Basic ${Buffer.from("jane@example.com:app-password").toString("base64")}`,
+    );
+    expect(formatAuthHeader("workspace-token")).toBe("Bearer workspace-token");
+    expect(archiveRequest(
+      { provider: "github", owner: "acme", name: "plugin" },
+      "a".repeat(40),
+      "ghp_private_token",
+    ).headers.Authorization).toBe("Bearer ghp_private_token");
     const script = buildRepoInstallScript({
       wpPath: "/var/www/stri.be/public_html",
       zipPath: "/tmp/wpdev-repo-abc.zip",

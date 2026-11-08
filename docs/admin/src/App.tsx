@@ -8,13 +8,14 @@ import {
   type PrimaryTab,
 } from "@wpdev/web";
 import { AdminAuthBar } from "./AdminAuthBar";
+import { loadProjectFolder } from "./api";
 import { LocalSiteUpdate } from "./LocalSiteUpdate";
-import { ActivityLog } from "./ActivityLog";
 import { logAdmin } from "./adminLog";
 
 /** Thin Vite shell: auth and LocalAdapter host wiring via `@wpdev/web-host`. */
 export default function App() {
   const [tab, setTab] = useState<PrimaryTab>("setup");
+  const [projectFolder, setProjectFolder] = useState("");
 
   useEffect(() => {
     document.documentElement.classList.remove("dark");
@@ -24,12 +25,23 @@ export default function App() {
     logAdmin("info", "App: loaded (plan IA)", window.location.href);
   }, []);
 
+  useEffect(() => {
+    void loadProjectFolder().then((folder) => {
+      if (folder) setProjectFolder(folder);
+    });
+  }, []);
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
         <div className="mx-auto flex max-w-5xl flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm font-bold tracking-tight text-slate-900">WP-dev Local</p>
+            <div>
+              <p className="text-sm font-bold tracking-tight text-slate-900">WP-dev Local</p>
+              {projectFolder ? (
+                <p className="text-xs text-slate-500">{projectFolder}</p>
+              ) : null}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -76,16 +88,6 @@ export default function App() {
             {tab === "sync" && <SyncPage />}
             {tab === "update" && <LocalSiteUpdate />}
             {tab === "advanced" && <AdvancedPage />}
-            {tab !== "advanced" && (
-              <details className="mt-8 rounded-xl border border-slate-200">
-                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Activity log
-                </summary>
-                <div className="border-t border-slate-200 p-2">
-                  <ActivityLog />
-                </div>
-              </details>
-            )}
           </div>
         </div>
       </main>

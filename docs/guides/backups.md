@@ -52,7 +52,7 @@ Restore accepts `.sql`, content archives (`full-*.tar.gz`), and complete archive
 In `/admin/`:
 
 - **Backup** — env picker, backup type (**Database** | **Content** | **Complete**), Backup now, and restore on the same page for all envs.
-- **Advanced → Restore points** — longer restore-point list for the same `~/.wp-dev/backups/<project>/` store.
+- **Advanced → Restore points** (under Recovery) — longer restore-point list for the same `~/.wp-dev/backups/<project>/` store.
 
 Both use the terminal runner (`backup` / `restore`). See [Browser admin](./browser-admin.md).
 

@@ -178,6 +178,64 @@ export function redactSecret(text: string, secret: string | undefined): string {
   return text.split(secret).join("[redacted]");
 }
 
+/** Keep the recorded commit only when the same repository and branch stay selected. */
+export function bindingAfterBranchChange(previous: EnvBinding | undefined, next: Omit<EnvBinding, "deployedSha">): EnvBinding {
+  const same =
+    previous &&
+    previous.provider === next.provider &&
+    previous.owner === next.owner &&
+    previous.name === next.name &&
+    previous.branch === next.branch;
+  return { ...next, deployedSha: same ? previous.deployedSha : null };
+}
+
+export function formatAuthHeader(token: string): string {
+  const trimmed = token.trim();
+  if (/^(Bearer|Basic)\s+\S/.test(trimmed)) return trimmed;
+  if (trimmed.includes(":")) return `Basic ${Buffer.from(trimmed).toString("base64")}`;
+  return `Bearer ${trimmed}`;
+}
+
+const ARCHIVE_HOSTS = new Set([
+  "api.github.com",
+  "codeload.github.com",
+  "github.com",
+  "bitbucket.org",
+  "api.bitbucket.org",
+]);
+
+function bitbucketTarballHost(hostname: string): boolean {
+  return (
+    hostname === "bb-tarballs.s3.amazonaws.com" ||
+    /^bb-tarballs\.s3\.[a-z0-9-]+\.amazonaws\.com$/.test(hostname)
+  );
+}
+
+/**
+ * Follow one archive redirect. Bitbucket's zip moves to its own S3 bucket.
+ * The GitHub token stays on codeload. The S3 hop must not receive Authorization.
+ */
+export function resolveArchiveRedirect(current: string, location: string): { url: string; stripAuthorization: boolean } {
+  let next: URL;
+  let from = "";
+  try {
+    next = new URL(location, current);
+    from = new URL(current).hostname.toLowerCase();
+  } catch {
+    throw new Error("The repository host returned an address that cannot be used.");
+  }
+  if (next.protocol !== "https:") {
+    throw new Error("The repository host returned an address that cannot be used.");
+  }
+  const host = next.hostname.toLowerCase();
+  const fromBitbucket = from === "bitbucket.org" || from === "api.bitbucket.org";
+  const tarball = bitbucketTarballHost(host) && fromBitbucket;
+  if (!ARCHIVE_HOSTS.has(host) && !tarball) {
+    throw new Error("The repository host returned an address that cannot be used.");
+  }
+  return { url: next.toString(), stripAuthorization: tarball };
+}
+
 type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<{
   ok: boolean;
   status: number;
@@ -191,7 +249,7 @@ function authHeaders(token: string | undefined): Record<string, string> {
     Accept: "application/vnd.github+json",
     "User-Agent": "wp-dev",
   };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  if (token) headers.Authorization = formatAuthHeader(token);
   return headers;
 }
 
@@ -215,15 +273,15 @@ function assertAllowedApi(url: string, provider: RepoProviderId, owner: string, 
     throw new Error("The repository host returned an address that cannot be used.");
   }
   const host = parsed.hostname.toLowerCase();
-  const path = parsed.pathname;
+  const path = parsed.pathname.toLowerCase();
   if (provider === "github") {
-    const prefix = `/repos/${owner}/${name}/`;
+    const prefix = `/repos/${owner.toLowerCase()}/${name.toLowerCase()}/`;
     if (host !== "api.github.com" || !path.startsWith(prefix)) {
       throw new Error("The repository host returned an address that cannot be used.");
     }
     return parsed;
   }
-  const prefix = `/2.0/repositories/${owner}/${name}/`;
+  const prefix = `/2.0/repositories/${owner.toLowerCase()}/${name.toLowerCase()}/`;
   if (host !== "api.bitbucket.org" || !path.startsWith(prefix)) {
     throw new Error("The repository host returned an address that cannot be used.");
   }

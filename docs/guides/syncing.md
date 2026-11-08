@@ -23,6 +23,10 @@ npm run wp-dev -- pull staging
 
 Open `local.url` from config in your browser.
 
+## Host not set up yet
+
+A Staging or Production host that still ends in `.invalid` is the Setup template, not a server. `pull` and `push` stop with “not set up yet” and do not ask you to pin that name in `~/.ssh/known_hosts`. Save a real host on Setup (or in `wp-dev.config.json`), connect once with OpenSSH, then sync.
+
 ## Dry run (preview only)
 
 ```bash

@@ -34,8 +34,8 @@ npm run wp-dev -- up
 ```
 
 - Site: `http://localhost:<your-port>` (default 8888, see `WP_PORT` in `docker/.env`)
-- Admin UI: `http://localhost:<your-port>/admin/` — **Backup · Setup · Sync**  
-  Unlock with `WPDEV_ADMIN_SAVE_TOKEN` from `docker/.env` if asked.
+- Admin UI: `http://localhost:<your-port>/admin/` — **Setup · Sync · Backup · Update**
+  The header shows the project folder. **Unlock admin** is in the top right when the session is closed (`WPDEV_ADMIN_SAVE_TOKEN` in `docker/.env`).
 
 Configure SSH (keys, not passwords), then pull if you have a live site:
 

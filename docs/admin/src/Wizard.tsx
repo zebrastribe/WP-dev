@@ -289,7 +289,7 @@ function alignLocalUrlToCurrentBrowser(url: string): { value: string; changed: b
   }
 }
 
-export function Wizard() {
+export function Wizard({ surface = "setup" }: { surface?: "setup" | "tools" } = {}) {
   const { authenticated, authVersion, requestUnlock } = useAdminAuth();
   const {
     terminalAuth,
@@ -362,14 +362,16 @@ export function Wizard() {
 
   const goNext = useCallback(() => {
     setStep((s) => {
-      if (setupWorkflow === "local-only" && s < 3) return 3;
+      if (setupWorkflow === "local-only" && s < 4) return 4;
+      if (s === 2) return 4;
       return wizardStepAfter(s);
     });
   }, [setupWorkflow]);
 
   const goPrev = useCallback(() => {
     setStep((s) => {
-      if (setupWorkflow === "local-only" && (s === 1 || s === 2 || s === 3)) return 0;
+      if (s === 4) return setupWorkflow === "local-only" ? 0 : 2;
+      if (s === 3) return setupWorkflow === "local-only" ? 0 : 2;
       return wizardStepBefore(s);
     });
   }, [setupWorkflow]);
@@ -1093,7 +1095,6 @@ export function Wizard() {
     },
   ];
   const readinessBlocking = checklist.filter((x) => x.status === "todo");
-  const stepOneReady = Boolean(data.project.trim() && data.local.url.trim());
   const localUrlLooksValid = (() => {
     try {
       const u = new URL(data.local.url.trim());
@@ -1138,25 +1139,37 @@ export function Wizard() {
 
   return (
     <div className="w-full space-y-6">
+      {surface === "setup" && (
       <div className="flex flex-wrap gap-2 text-xs">
-        {STEP_LABELS.map((label, i) =>
-          workflow === "local-only" && (i === 1 || i === 2) ? null : (
+        {(workflow === "local-only"
+          ? [
+              { step: 0, label: "This computer" },
+              { step: 4, label: "Ready" },
+            ]
+          : [
+              { step: 0, label: "This computer" },
+              { step: 1, label: "Production" },
+              { step: 2, label: "Staging" },
+              { step: 4, label: "Ready" },
+            ]
+        ).map((item) => (
           <button
-            key={label}
+            key={item.label}
             type="button"
-            onClick={() => goStep(i)}
+            onClick={() => goStep(item.step)}
             className={`rounded-full px-3 py-1 font-medium ${
-              step === i
+              step === item.step
                 ? "bg-brand-600 text-white"
                 : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
             }`}
           >
-            {label}
+            {item.label}
           </button>
         ))}
       </div>
+      )}
       {alertBox}
-      {terminalRun && (
+      {surface === "setup" && terminalRun && (
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
           <p className="font-semibold text-slate-800 dark:text-slate-100">
             Command output {terminalRun.running ? "(running...)" : "(finished)"}
@@ -1167,7 +1180,7 @@ export function Wizard() {
         </div>
       )}
 
-      {step === 0 && (
+      {step === 0 && surface === "setup" && (
         <div className="space-y-4">
           {localStatus?.needsSetup && (
             <div className="rounded-lg border-2 border-brand-500 bg-brand-50 p-4 dark:border-brand-600 dark:bg-brand-950/30">
@@ -1215,10 +1228,10 @@ export function Wizard() {
               />
               <span>
                 <span className="block text-sm font-medium text-slate-900 dark:text-white">
-                  Sync from my server (SSH only)
+                  Connect Production and Staging
                 </span>
                 <span className="text-xs text-slate-600 dark:text-slate-400">
-                  Set up live SSH, then optionally add Staging on the next step, save, and pull.
+                  Save the servers here. Pull and push are on Sync.
                 </span>
               </span>
             </label>
@@ -1235,32 +1248,16 @@ export function Wizard() {
               />
               <span>
                 <span className="block text-sm font-medium text-slate-900 dark:text-white">
-                  New local WordPress site only
+                  New local WordPress
                 </span>
                 <span className="text-xs text-slate-600 dark:text-slate-400">
-                  Skip production SSH for now. Save config, then open the WordPress installer.
+                  Skip the servers. Save, then open the WordPress installer.
                 </span>
               </span>
             </label>
           </fieldset>
-          <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
-            <p className="font-semibold">What to do on this step</p>
-            <ol className="mt-1 list-inside list-decimal space-y-1">
-              <li>Confirm <code>Project id</code> (used for compose project naming).</li>
-              <li>Confirm <code>Local site URL</code> matches your current localhost port.</li>
-              <li>
-                Click <strong>Next</strong>
-                {workflow === "pull"
-                  ? " — then Live SSH, then Staging (optional)."
-                  : " — then First backup. Live SSH and Staging stay off this path."}
-              </li>
-            </ol>
-            <p className="mt-2">
-              Status: {stepOneReady ? "Ready to continue" : "Fill required fields before continuing"}.
-            </p>
-          </div>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            This step defines local project identity and localhost URL used after sync/install.
+            Project id names this computer’s Docker project. The URL is where WordPress opens.
           </p>
           <label className="block">
             <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Project id *</span>
@@ -1279,9 +1276,20 @@ export function Wizard() {
           <p className="text-xs text-slate-500">
             After save, open this URL in another tab to run the WordPress installer (or continue after a pull).
           </p>
-          <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+        </div>
+      )}
+
+      {step === 0 && surface === "tools" && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Project files</h2>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+              Compose paths, the terminal login, and DNS. The site and the servers stay on Setup.
+            </p>
+          </div>
+          <details open className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
             <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
-              Terminal settings (optional — deploy uses the host runner, not this shell)
+              Terminal login
             </summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="block">
@@ -1345,9 +1353,9 @@ export function Wizard() {
               </div>
             )}
           </details>
-          <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+          <details open className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
             <summary className="cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-200">
-              Advanced local settings
+              Compose paths
             </summary>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="block">
@@ -1379,7 +1387,7 @@ export function Wizard() {
         </div>
       )}
 
-      {step === 1 && (
+      {surface === "setup" && step === 1 && (
         <div className="space-y-4">
           {workflow === "local-only" && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
@@ -1387,28 +1395,12 @@ export function Wizard() {
               server.
             </p>
           )}
-          {workflow === "pull" && (
-            <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
-              <p className="font-semibold">Quick path</p>
-              <ol className="mt-1 list-inside list-decimal space-y-1">
-                <li>Generate/upload SSH key below and run the SSH test.</li>
-                <li>Fill SSH host, user, and the WordPress folder path on the server.</li>
-                <li>
-                  Live site URL is only for fixing links in the database — often{" "}
-                  <code>https://yourdomain.com</code> (auto-guessed from SSH host when possible).
-                </li>
-                <li>Next → Staging (optional) → First backup → Ready, then Sync tab → pull.</li>
-              </ol>
-            </div>
-          )}
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            {workflow === "pull"
-              ? "Live site SSH — saved as production.* in config. Staging (next step) is optional."
-              : "Live / production SSH (optional for local-only). Saved as production.*"}
+            Production SSH. Staging is optional and comes next. Saved as production in the config.
           </p>
           <label className="block">
             <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-              Live SSH host{workflow === "pull" ? " *" : ""}
+              Production host{workflow === "pull" ? " *" : ""}
             </span>
             <input
               className={input}
@@ -1419,7 +1411,7 @@ export function Wizard() {
           </label>
           <label className="block">
             <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
-              Live SSH user{workflow === "pull" ? " *" : ""}
+              Production user{workflow === "pull" ? " *" : ""}
             </span>
             <input
               className={input}
@@ -1580,7 +1572,7 @@ export function Wizard() {
         </div>
       )}
 
-      {step === STAGING_STEP && (
+      {surface === "setup" && step === STAGING_STEP && (
         <div className="space-y-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Staging server</h2>
@@ -2236,10 +2228,10 @@ export function Wizard() {
         </div>
       )}
 
-      {step === 0 && (
-        <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+      {surface === "tools" && (
+        <details open className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
           <summary className="cursor-pointer text-sm font-medium text-slate-800 dark:text-slate-100">
-            DNS provider (Simply.com) — optional
+            DNS provider (Simply.com)
           </summary>
           <div className="mt-3 space-y-4">
           <label className="flex items-center gap-2 text-sm">
@@ -2394,7 +2386,7 @@ export function Wizard() {
         </details>
       )}
 
-      {step === 3 && (
+      {surface === "setup" && step === 3 && (
         <div className="space-y-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white">First backup</h2>
@@ -2458,21 +2450,15 @@ export function Wizard() {
         </div>
       )}
 
-      {step === 4 && (
+      {surface === "setup" && step === 4 && (
         <div className="space-y-4">
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm dark:border-emerald-900 dark:bg-emerald-950/40">
             <p className="font-semibold text-emerald-900 dark:text-emerald-100">Next steps</p>
             {workflow === "pull" && !localStatus?.hasSyncedContent && (
               <ol className="mt-2 list-inside list-decimal space-y-1 text-emerald-900 dark:text-emerald-100">
-                <li>
-                  Open the <strong>Sync</strong> tab → Full site → <strong>Production → Dev</strong> (or{" "}
-                  <code className="rounded bg-white/60 px-1 dark:bg-slate-900">npm run wp-dev -- pull production --yes</code>
-                  ).
-                </li>
-                <li>When pull finishes, open Localhost below to verify the site.</li>
-                <li>
-                  Day-to-day theme work: Sync → <strong>Theme only</strong>. Keep a Backup before big changes.
-                </li>
+                <li>Open Sync and pull Production or Staging onto this computer.</li>
+                <li>When the pull finishes, open Localhost below to verify the site.</li>
+                <li>Backups are on the Backup tab. Theme files are under Advanced.</li>
               </ol>
             )}
             {workflow === "local-only" && !localStatus?.wpInstalled && (
@@ -2535,6 +2521,7 @@ export function Wizard() {
         </div>
       )}
 
+      {surface === "setup" && (
       <div className="flex justify-between border-t border-slate-100 pt-4 dark:border-slate-800">
         <button
           type="button"
@@ -2553,6 +2540,7 @@ export function Wizard() {
           {step === STEP_LABELS.length - 1 ? "Finish" : "Next →"}
         </button>
       </div>
+      )}
     </div>
   );
 }
