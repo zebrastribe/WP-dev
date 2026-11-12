@@ -191,8 +191,9 @@ describe("golden pull order (P1.7)", () => {
       note("rsyncPull");
     });
     connectSshMock.mockReset().mockResolvedValue(mockSafeSshSession());
-    wpLocalDbExportToFileMock.mockReset().mockImplementation(async () => {
+    wpLocalDbExportToFileMock.mockReset().mockImplementation(async (_dir: unknown, _config: unknown, file: string) => {
       note("wpLocalDbExport");
+      writeFileSync(file, "-- dump\n");
     });
     wpLocalDbImportFromFileMock.mockReset().mockImplementation(async () => {
       note("wpLocalDbImport");
@@ -283,8 +284,9 @@ describe("golden push order (P1.7)", () => {
       note("rsyncPush");
     });
     connectSshMock.mockReset().mockResolvedValue(mockSafeSshSession());
-    wpLocalDbExportToFileMock.mockReset().mockImplementation(async () => {
+    wpLocalDbExportToFileMock.mockReset().mockImplementation(async (_dir: unknown, _config: unknown, file: string) => {
       note("wpLocalDbExport");
+      writeFileSync(file, "-- dump\n");
     });
     wpRemoteDbExportMock.mockReset().mockImplementation(async () => {
       note("wpRemoteDbExport");

@@ -44,6 +44,7 @@ vi.mock("../src/services/wpcli.js", () => ({
   wpLocalAlignTablePrefixAfterImport: (...args: unknown[]) => wpLocalAlignTablePrefixAfterImportMock(...args),
   isLocalWpInstalled: (...args: unknown[]) => isLocalWpInstalledMock(...args),
   assertRemoteWpInstalled: (...args: unknown[]) => assertRemoteWpInstalledMock(...args),
+  resolveRemoteWpPath: vi.fn(async (_ssh: unknown, path: string) => ({ installed: true, path })),
   assertNotInTerminalContainerWithoutDocker: vi.fn(),
 }));
 

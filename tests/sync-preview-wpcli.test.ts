@@ -10,6 +10,18 @@ vi.mock("execa", () => ({
   execa: (...args: unknown[]) => execaMock(...args),
 }));
 
+vi.mock("../src/services/ssh.js", () => ({
+  connectSsh: vi.fn(async () => ({ dispose: vi.fn() })),
+}));
+
+vi.mock("../src/services/wpcli.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/wpcli.js")>();
+  return {
+    ...actual,
+    assertRemoteWpInstalled: vi.fn(async (_ssh: unknown, path: string) => path),
+  };
+});
+
 describe("runSyncPreview", () => {
   let configDir: string;
   let loaded: LoadedConfig;
