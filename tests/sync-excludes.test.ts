@@ -152,6 +152,11 @@ describe("sync-preview-parse", () => {
     expect(parsed.deleted).toContain("wp-content/old.txt");
   });
 
+  it("keeps the full path on a real rsync deleting line", () => {
+    const parsed = parseRsyncItemizeOutput("*deleting wp-content/uploads/old.jpg", "push");
+    expect(parsed.deleted).toEqual(["wp-content/uploads/old.jpg"]);
+  });
+
   it("parses pull itemize lines", () => {
     const out = "<f+++++++++ wp-content/uploads/a.jpg\n";
     const parsed = parseRsyncItemizeOutput(out, "pull");

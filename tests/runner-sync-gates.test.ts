@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   restoreEnvConfirmOk,
+  gitTokenEnv,
   safeArg,
+  safeRepoUrl,
   safeBackupImportName,
   wpdevPullPushCommand,
   wpdevPushThemeCommand,
@@ -12,6 +14,19 @@ describe("runner-sync-gates", () => {
     expect(safeArg("staging.example.com")).toBe("staging.example.com");
     expect(safeArg("evil;rm -rf /")).toBe("");
     expect(safeArg("a b")).toBe("");
+  });
+
+  it("allows an IP or LAN name in a repository address", () => {
+    expect(safeRepoUrl("http://192.168.1.20:7990/scm/ACME/plugin.git")).toBe(
+      "http://192.168.1.20:7990/scm/ACME/plugin.git",
+    );
+    expect(safeRepoUrl("https://bitbucket.lan/projects/ACME/repos/theme")).toContain("bitbucket.lan");
+    expect(safeRepoUrl("http://evil.example/scm/ACME/plugin.git?token=secret")).toBe("");
+  });
+
+  it("keeps a repository token out of the command string", () => {
+    expect(gitTokenEnv("ghp_example")).toEqual({ WPDEV_GIT_TOKEN: "ghp_example" });
+    expect(gitTokenEnv("has\nnewline")).toEqual({});
   });
 
   it.each([

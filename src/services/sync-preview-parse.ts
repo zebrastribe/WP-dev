@@ -38,21 +38,24 @@ export function parseRsyncItemizeOutput(
     const marker = line[0];
     if (marker !== transferMarker && marker !== "*") continue;
 
-    const path = line.slice(11).trim();
+    if (marker === "*") {
+      const deleting = /^\*deleting\s+(.+)$/.exec(line);
+      const rel = (deleting?.[1] ?? "").replace(/^\.\//, "").trim();
+      if (deleting && rel && rel !== "." && rel !== "./") pushBucket(deleted, rel);
+      else if (!deleting) {
+        const rest = line.slice(1).trim();
+        if (rest) pushBucket(other, rest);
+      }
+      continue;
+    }
+
+    if (line.length < 12 || line[11] !== " ") continue;
+    const path = line.slice(12).trim();
     if (!path || path === "./" || path === ".") continue;
 
     const rel = path.replace(/^\.\//, "");
     const kind = line[1] ?? "";
     const flags = line.slice(2, 11);
-
-    if (marker === "*") {
-      if (/deleting/i.test(line)) {
-        pushBucket(deleted, rel);
-      } else {
-        pushBucket(other, rel);
-      }
-      continue;
-    }
 
     if (kind === "d") {
       if (flags.includes("+")) pushBucket(added, rel);

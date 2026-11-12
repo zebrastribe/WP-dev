@@ -751,10 +751,14 @@ export function Wizard({ surface = "setup" }: { surface?: "setup" | "tools" } = 
               tone: ok ? "success" : "error",
               text:
                 (ok
-                  ? action === "ssh_test" || action === "wpdev_doctor"
+                  ? action === "generate_keypair"
+                    ? "Public key is in the output below. Upload that file to the hosting SSH keys."
+                    : action === "ssh_test" || action === "wpdev_doctor"
                     ? "Path check passed. Remote path looks like this site’s WordPress root."
                     : "Command completed successfully."
-                  : `Command failed (exit ${status.exitCode ?? 1}). Fix path/SSH, then re-run Verify path.`) +
+                  : action === "generate_keypair"
+                    ? "No public key on this computer yet. Create it with the command in the list, then show the key again."
+                    : `Command failed (exit ${status.exitCode ?? 1}). Fix path/SSH, then re-run Verify path.`) +
                 "\n\nSee output in the command output panel below.",
             });
             return ok;
@@ -837,8 +841,7 @@ export function Wizard({ surface = "setup" }: { surface?: "setup" | "tools" } = 
     return `ssh ${sshOpts.join(" ")} ${user}@${host} 'P=${path}; test -f "$P/wp-config.php" || test -f "$P/wp-config-sample.php" || { echo FAIL: not a WordPress root; exit 1; }; echo Path OK: $P; ls -la "$P" | head; wp --path="$P" --info'`;
   };
 
-  const buildKeypairCommand = (): string =>
-    'test -f ~/.ssh/id_ed25519 || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C "$USER@$(hostname)"; ls -la ~/.ssh/id_ed25519*; echo ""; echo "Public key:"; cat ~/.ssh/id_ed25519.pub';
+  const buildKeypairCommand = (): string => "show ~/.ssh/id_ed25519.pub from this computer";
 
   const runStagingChecks = async () => {
     setStagingChecksBusy(true);
@@ -1457,13 +1460,16 @@ export function Wizard({ surface = "setup" }: { surface?: "setup" | "tools" } = 
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200">
             <p className="font-semibold text-slate-800 dark:text-slate-100">SSH key setup (required)</p>
             <p className="mt-1 font-semibold text-amber-700 dark:text-amber-300">
-              Required: upload the generated public key (<code>~/.ssh/id_ed25519.pub</code>) to your hosting SSH keys before pull/push.
+              Create the key on this computer, then upload <code>~/.ssh/id_ed25519.pub</code> to your hosting SSH keys before pull/push.
             </p>
             <ol className="mt-2 list-inside list-decimal space-y-1">
-              <li>Create keypair: <code>ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "you@host"</code></li>
+              <li>
+                On this computer: <code>ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C &quot;you@host&quot;</code>
+              </li>
+              <li>Show SSH public key reads that file. It does not create a key.</li>
               <li>Add <code>~/.ssh/id_ed25519.pub</code> to your hosting SSH keys in the control panel.</li>
-              <li>Use the hosting SSH hostname + user in fields above (often not the public domain).</li>
-              <li>Run the test command in terminal; it must work without password prompts.</li>
+              <li>Use the hosting SSH hostname and user in the fields above.</li>
+              <li>Run the path check. It must work without a password prompt.</li>
             </ol>
             <div className="mt-3 flex flex-wrap gap-2">
               <button
@@ -1471,7 +1477,7 @@ export function Wizard({ surface = "setup" }: { surface?: "setup" | "tools" } = 
                 onClick={() => void runTerminalCommand(buildKeypairCommand(), "plain", "generate_keypair")}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
               >
-                Generate SSH keypair
+                Show SSH public key
               </button>
               <button
                 type="button"

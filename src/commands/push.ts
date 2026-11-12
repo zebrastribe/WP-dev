@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { LoadedConfig } from "../config/load.js";
@@ -27,6 +27,7 @@ import {
   timestampedDbName,
 } from "../services/backup.js";
 import { confirmRemoteTarget } from "../utils/confirm.js";
+import { assertValidSqlDump } from "../utils/sql-dump-validate.js";
 import { assertRemoteConfigured } from "../utils/remote-placeholder.js";
 import { assertRemotePathSafe } from "../services/remote-path-safety.js";
 import {
@@ -137,17 +138,20 @@ export async function cmdPush(
       "[dry-run] Would: backup remote DB, rsync push, export local DB, import on remote, search-replace URLs.",
     );
     const sshDry = await connectSsh(remote);
+    let dryPath = remote.path;
     try {
       await assertRemotePathSafe(sshDry, remote.path, env, {
         allowMissingWpConfig: env === "staging",
       });
+      const found = await resolveRemoteWpPath(sshDry, remote.path);
+      if (found.installed && found.path) dryPath = found.path;
     } finally {
       sshDry.dispose();
     }
     await rsyncPush(remote, localWpRoot, {
       dryRun: true,
       excludes: pushExcludePatterns(configDir, config, localWpRoot),
-      remotePath: remote.path,
+      remotePath: dryPath,
     });
     return;
   }
@@ -238,6 +242,7 @@ export async function cmdPush(
         await wpRemoteDbExport(ssh, wpPath, remotePreDump);
         await ssh.getFile(remotePreDump, prePushBackup);
         chownBackupArtifact(prePushBackup, configDir);
+        assertValidSqlDump(readFileSync(prePushBackup, "utf8"), "Pre-push backup");
       } finally {
         try {
           await ssh.exec(remoteRmFile(remotePreDump));
@@ -253,6 +258,7 @@ export async function cmdPush(
     ssh.dispose();
 
     logInfo(`push ${env}: rsync files -> remote (${wpPath})`);
+    let dbImportStarted = false;
     try {
       await rsyncPush(remote, localWpRoot, {
         dryRun: false,
@@ -275,6 +281,7 @@ export async function cmdPush(
         logInfo(`push ${env}: export local db, import on remote`);
         await wpLocalDbExportToFile(configDir, config, localDump);
         await ssh.putFile(localDump, remoteImport);
+        dbImportStarted = true;
         await wpRemoteDbImport(ssh, wpPath, remoteImport);
         await ssh.exec(remoteRmFile(remoteImport));
         const localCandidates = getUrlVariants(config.local.url).filter(
@@ -322,9 +329,11 @@ export async function cmdPush(
         rmSync(tmpDir, { recursive: true, force: true });
       }
     } catch (syncErr) {
-      if (prePushBackup && !bootstrappedFreshRemote) {
+      if (prePushBackup && !bootstrappedFreshRemote && dbImportStarted) {
         logInfo(`push ${env}: sync failed — rolling back remote DB from ${prePushBackup}`);
         try {
+          ssh.dispose();
+          ssh = await connectSsh(remote);
           const remoteRollback = `/tmp/wp-dev-push-rollback-${Date.now()}.sql`;
           await ssh.putFile(prePushBackup, remoteRollback);
           await wpRemoteDbImport(ssh, wpPath, remoteRollback);

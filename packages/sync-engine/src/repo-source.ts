@@ -12,6 +12,8 @@ export type RepoRef = {
   provider: RepoProviderId;
   owner: string;
   name: string;
+  /** Set for a Bitbucket server. Absent for github.com and bitbucket.org. */
+  origin?: string;
 };
 
 export type EnvBinding = {
@@ -21,6 +23,8 @@ export type EnvBinding = {
   branch: string;
   subdirectory: string;
   deployedSha: string | null;
+  /** Set when this binding is a Bitbucket server on an IP or DNS name. */
+  origin?: string;
 };
 
 export type ComponentRepoConfig = {
@@ -31,21 +35,25 @@ export type ComponentRepoConfig = {
   production?: EnvBinding;
 };
 
-export type BranchInfo = { name: string; sha: string };
+export type BranchInfo = { name: string; sha: string; subject?: string };
 
 export type RepoSnapshot = {
   ref: RepoRef;
   isPrivate: boolean;
   defaultBranch: string;
+  /** True when more branches exist than the 1000 that were read. */
+  truncated: boolean;
   branches: BranchInfo[];
 };
 
 export type BranchStatus =
   | { state: "not_configured" }
   | { state: "branch_gone"; branch: string }
-  | { state: "up_to_date"; branch: string; sha: string }
-  | { state: "update_available"; branch: string; from: string | null; to: string }
+  | { state: "up_to_date"; branch: string; sha: string; subject?: string }
+  | { state: "update_available"; branch: string; from: string | null; to: string; subject?: string }
   | { state: "unknown_remote" };
+
+export type CommitSummary = { sha: string; subject: string };
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const SHA = /^[0-9a-f]{7,40}$/i;
@@ -94,6 +102,74 @@ export function assertCommitSha(value: string): string {
   return sha;
 }
 
+function isIpv4(host: string): boolean {
+  const parts = host.split(".");
+  return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+
+function isPrivateIpv4(host: string): boolean {
+  if (!isIpv4(host)) return false;
+  const [a, b] = host.split(".").map(Number);
+  if (a === 10 || a === 127 || a === 0) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b !== undefined && b >= 16 && b <= 31) return true;
+  if (a === 169 && b === 254) return true;
+  return false;
+}
+
+function isLocalIpv6(host: string): boolean {
+  const value = host.toLowerCase();
+  return value === "::1" || value.startsWith("fe80:") || /^f[cd][0-9a-f]{0,2}:/.test(value);
+}
+
+/** A name that resolves only on this computer's network, including a VPN DNS name with a local suffix. */
+function isLocalDns(host: string): boolean {
+  const value = host.toLowerCase().replace(/\.$/, "");
+  if (value === "localhost" || !value.includes(".")) return true;
+  return [".local", ".lan", ".internal", ".home", ".intranet", ".localdomain"].some((suffix) => value.endsWith(suffix));
+}
+
+function isLocalNetworkHost(host: string): boolean {
+  return isPrivateIpv4(host) || isLocalIpv6(host) || isLocalDns(host);
+}
+
+function isHostName(host: string): boolean {
+  if (isIpv4(host) || host.includes(":")) return true;
+  const value = host.toLowerCase().replace(/\.$/, "");
+  if (value.length === 0 || value.length > 253) return false;
+  return value.split(".").every((label) => /^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$/i.test(label));
+}
+
+function serverProject(value: string): string {
+  const project = value.trim();
+  if (!/^(?:~)?[A-Za-z][A-Za-z0-9._-]{0,127}$/.test(project)) {
+    throw new Error("That project name cannot be used.");
+  }
+  return project;
+}
+
+function serverRepo(value: string): string {
+  const name = value.trim().replace(/\.git$/i, "");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) {
+    throw new Error("That repository name cannot be used.");
+  }
+  return name;
+}
+
+/** Bitbucket Server addresses: /scm/PROJECT/repo.git, /projects/PROJECT/repos/repo, /users/NAME/repos/repo. */
+function bitbucketServerParts(pathname: string): { owner: string; name: string } | null {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts.length === 3 && parts[0]!.toLowerCase() === "scm") {
+    return { owner: serverProject(parts[1]!), name: serverRepo(parts[2]!) };
+  }
+  const browse = parts.length === 5 && parts[4]!.toLowerCase() === "browse";
+  const body = browse ? parts.slice(0, 4) : parts;
+  if (body.length !== 4 || body[2]!.toLowerCase() !== "repos") return null;
+  if (body[0]!.toLowerCase() === "projects") return { owner: serverProject(body[1]!), name: serverRepo(body[3]!) };
+  if (body[0]!.toLowerCase() === "users") return { owner: serverProject(`~${body[1]}`), name: serverRepo(body[3]!) };
+  return null;
+}
+
 export function parseRepositoryUrl(input: string): RepoRef {
   const raw = input.trim();
   if (!raw || /[\s"'`<>]/.test(raw)) {
@@ -117,29 +193,45 @@ export function parseRepositoryUrl(input: string): RepoRef {
   if (url.username || url.password) {
     throw new Error("Don't put a token in the repository address.");
   }
-  if (url.protocol !== "https:") {
-    throw new Error("Use the https address of the repository.");
-  }
   const host = url.hostname.toLowerCase();
-  const provider: RepoProviderId | null =
+  const cloud =
     host === "github.com" || host === "www.github.com"
       ? "github"
       : host === "bitbucket.org" || host === "www.bitbucket.org"
         ? "bitbucket"
         : null;
-  if (!provider) {
-    throw new Error("Only GitHub and Bitbucket repositories can be connected.");
+  if (cloud) {
+    if (url.protocol !== "https:") throw new Error("Use the https address of the repository.");
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length !== 2) throw new Error("Use the repository address, not a file or branch link.");
+    const name = parts[1]!.replace(/\.git$/i, "");
+    return { provider: cloud, owner: assertRepoName(parts[0]!, "Account"), name: assertRepoName(name, "Repository") };
   }
-  const parts = url.pathname.split("/").filter(Boolean);
-  if (parts.length !== 2) {
-    throw new Error("Use the repository address, not a file or branch link.");
+  const server = bitbucketServerParts(url.pathname);
+  if (!server) throw new Error("Only GitHub and Bitbucket repositories can be connected.");
+  if (!isHostName(host)) throw new Error("That server address cannot be used.");
+  if (url.protocol === "http:") {
+    if (!isLocalNetworkHost(host)) throw new Error("Use https for that server, or an address on this network.");
+  } else if (url.protocol !== "https:") {
+    throw new Error("Use the https address of the repository.");
   }
-  const name = parts[1]!.replace(/\.git$/i, "");
-  return {
-    provider,
-    owner: assertRepoName(parts[0]!, "Account"),
-    name: assertRepoName(name, "Repository"),
-  };
+  return { provider: "bitbucket", owner: server.owner, name: server.name, origin: url.origin };
+}
+
+/** The repository a saved binding points at, including a Bitbucket server when one was saved. */
+export function repoRefFromBinding(binding: Pick<EnvBinding, "provider" | "owner" | "name" | "origin">): RepoRef {
+  if (!binding.origin) return { provider: binding.provider, owner: binding.owner, name: binding.name };
+  const origin = new URL(binding.origin);
+  if (origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) {
+    throw new Error("That server address cannot be used.");
+  }
+  if (origin.protocol === "http:" && !isLocalNetworkHost(origin.hostname.toLowerCase())) {
+    throw new Error("Use https for that server, or an address on this network.");
+  }
+  if (origin.protocol !== "http:" && origin.protocol !== "https:") {
+    throw new Error("Use the https address of the repository.");
+  }
+  return { provider: binding.provider, owner: binding.owner, name: binding.name, origin: origin.origin };
 }
 
 export function componentSlug(target: RepoComponentTarget, slug: string): string {
@@ -162,15 +254,76 @@ export function bindingFor(config: ComponentRepoConfig, env: RepoEnv): EnvBindin
   return config[env];
 }
 
-export function branchStatus(binding: EnvBinding | undefined, branches: BranchInfo[]): BranchStatus {
+function commitSubject(value: string | undefined): string | undefined {
+  const line = value?.split("\n")[0]?.trim() ?? "";
+  if (!line) return undefined;
+  return line.length > 80 ? `${line.slice(0, 77)}…` : line;
+}
+
+export function branchStatus(
+  binding: EnvBinding | undefined,
+  branches: BranchInfo[],
+  options?: { truncated?: boolean },
+): BranchStatus {
   if (!binding?.branch) return { state: "not_configured" };
   const branch = assertBranchName(binding.branch);
   const found = branches.find((row) => row.name === branch);
-  if (!found) return { state: "branch_gone", branch };
+  if (!found) {
+    if (options?.truncated) return { state: "unknown_remote" };
+    return { state: "branch_gone", branch };
+  }
   const to = assertCommitSha(found.sha);
   const from = binding.deployedSha ? assertCommitSha(binding.deployedSha) : null;
-  if (from && from === to) return { state: "up_to_date", branch, sha: to };
-  return { state: "update_available", branch, from, to };
+  const subject = commitSubject(found.subject);
+  if (from && from === to) return { state: "up_to_date", branch, sha: to, subject };
+  return { state: "update_available", branch, from, to, subject };
+}
+
+export function formatBranchStatus(status: BranchStatus): string {
+  if (status.state === "up_to_date") {
+    const sha = status.sha.slice(0, 7);
+    return status.subject ? `Up to date (${sha}) — ${status.subject}` : `Up to date (${sha})`;
+  }
+  if (status.state === "update_available") {
+    const from = status.from ? status.from.slice(0, 7) : "not deployed";
+    const to = status.to.slice(0, 7);
+    const subject = status.subject ? ` — ${status.subject}` : "";
+    return `Update available ${from} → ${to}${subject}`;
+  }
+  if (status.state === "branch_gone") return "That branch is no longer on the repository";
+  if (status.state === "unknown_remote") {
+    return "The branch list was cut off, so this branch could not be confirmed.";
+  }
+  if (status.state === "not_configured") return "Choose a branch";
+  return "";
+}
+
+/**
+ * Write the deployed commit only when that environment still points at the same repository and branch.
+ * A branch switch during the deploy must not be overwritten.
+ */
+export function configAfterDeploy(
+  config: ComponentRepoConfig,
+  role: "staging" | "production",
+  deployed: Pick<EnvBinding, "provider" | "owner" | "name" | "branch" | "origin">,
+  sha: string,
+): ComponentRepoConfig | null {
+  const current = config[role];
+  if (!current) return null;
+  if (
+    current.provider !== deployed.provider ||
+    current.owner !== deployed.owner ||
+    current.name !== deployed.name ||
+    current.branch !== deployed.branch ||
+    (current.origin ?? "") !== (deployed.origin ?? "")
+  ) {
+    return null;
+  }
+  return { ...config, [role]: { ...current, deployedSha: assertCommitSha(sha) } };
+}
+
+export function repoDeployLockKey(parts: { orgId: string; siteId: string; target: string; slug: string }): string {
+  return `wpdev-repo:${parts.orgId}:${parts.siteId}:${parts.target}:${parts.slug}`;
 }
 
 export function redactSecret(text: string, secret: string | undefined): string {
@@ -185,7 +338,8 @@ export function bindingAfterBranchChange(previous: EnvBinding | undefined, next:
     previous.provider === next.provider &&
     previous.owner === next.owner &&
     previous.name === next.name &&
-    previous.branch === next.branch;
+    previous.branch === next.branch &&
+    (previous.origin ?? "") === (next.origin ?? "");
   return { ...next, deployedSha: same ? previous.deployedSha : null };
 }
 
@@ -224,16 +378,47 @@ export function resolveArchiveRedirect(current: string, location: string): { url
   } catch {
     throw new Error("The repository host returned an address that cannot be used.");
   }
+  const host = next.hostname.toLowerCase();
+  const currentUrl = new URL(current);
+  const sameServer =
+    next.protocol === currentUrl.protocol &&
+    host === currentUrl.hostname.toLowerCase() &&
+    next.port === currentUrl.port;
+  if (sameServer && next.protocol === "http:" && isLocalNetworkHost(host)) {
+    return { url: next.toString(), stripAuthorization: false };
+  }
   if (next.protocol !== "https:") {
     throw new Error("The repository host returned an address that cannot be used.");
   }
-  const host = next.hostname.toLowerCase();
   const fromBitbucket = from === "bitbucket.org" || from === "api.bitbucket.org";
   const tarball = bitbucketTarballHost(host) && fromBitbucket;
+  if (sameServer && !ARCHIVE_HOSTS.has(host)) {
+    return { url: next.toString(), stripAuthorization: false };
+  }
   if (!ARCHIVE_HOSTS.has(host) && !tarball) {
     throw new Error("The repository host returned an address that cannot be used.");
   }
   return { url: next.toString(), stripAuthorization: tarball };
+}
+
+/** A certificate or network failure, explained for the person who typed the server. */
+export function explainRepoReachError(err: unknown): Error | null {
+  const parts: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    parts.push(current.message);
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string") parts.push(code);
+    current = (current as { cause?: unknown }).cause;
+  }
+  const text = parts.join(" ");
+  if (/CERT|certificate|SELF_SIGNED|UNABLE_TO_VERIFY/i.test(text)) {
+    return new Error("This computer does not trust the certificate on that server.");
+  }
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|ECONNRESET|bad port|fetch failed/i.test(text)) {
+    return new Error("Could not reach that server. Connect to the network that can see it, then try again.");
+  }
+  return null;
 }
 
 type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<{
@@ -243,6 +428,24 @@ type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => P
   json(): Promise<unknown>;
   text(): Promise<string>;
 }>;
+
+function reaching(fetchImpl: FetchLike): FetchLike {
+  return async (url, init) => {
+    try {
+      return await fetchImpl(url, init);
+    } catch (err) {
+      const explained = explainRepoReachError(err);
+      if (explained) throw explained;
+      throw err;
+    }
+  };
+}
+
+function serverRoot(ref: RepoRef): string {
+  const parsed = repoRefFromBinding(ref);
+  if (!parsed.origin) throw new Error("That server address cannot be used.");
+  return `${parsed.origin}/rest/api/1.0/projects/${encodeURIComponent(ref.owner)}/repos/${encodeURIComponent(ref.name)}`;
+}
 
 function authHeaders(token: string | undefined): Record<string, string> {
   const headers: Record<string, string> = {
@@ -259,7 +462,11 @@ function plainFailure(status: number): Error {
   }
   if (status === 404) return new Error("Repository not found.");
   if (status === 429) return new Error("The repository host asked us to wait. Try again in a minute.");
-  return new Error("Could not reach the repository.");
+  if (status >= 500 && status <= 599) {
+    return new Error(`The repository host had a problem (${status}). Try again in a minute.`);
+  }
+  if (status === 0) return new Error("Could not reach the repository host.");
+  return new Error(`Could not reach the repository (${status}).`);
 }
 
 function assertAllowedApi(url: string, provider: RepoProviderId, owner: string, name: string): URL {
@@ -296,11 +503,53 @@ function githubNext(link: string | null, owner: string, name: string): string | 
   return assertAllowedApi(match[1]!, "github", owner, name).toString();
 }
 
+async function loadBitbucketServerSnapshot(
+  ref: RepoRef,
+  token: string | undefined,
+  fetchImpl: FetchLike,
+): Promise<RepoSnapshot> {
+  const root = serverRoot(ref);
+  const headers = authHeaders(token);
+  headers.Accept = "application/json";
+  const repoRes = await fetchImpl(root, { headers });
+  if (!repoRes.ok) throw plainFailure(repoRes.status);
+  const repo = (await repoRes.json()) as { public?: unknown };
+  const defaultRes = await fetchImpl(`${root}/branches/default`, { headers });
+  if (!defaultRes.ok) throw plainFailure(defaultRes.status);
+  const fallback = (await defaultRes.json()) as { displayId?: unknown };
+  if (typeof fallback.displayId !== "string" || fallback.displayId.trim() === "") {
+    throw new Error("This repository has no default branch.");
+  }
+  const defaultBranch = assertBranchName(fallback.displayId);
+  const branches: BranchInfo[] = [];
+  let start = 0;
+  let truncated = false;
+  for (let page = 0; page < 10; page += 1) {
+    const res = await fetchImpl(`${root}/branches?limit=100&start=${start}`, { headers });
+    if (!res.ok) throw plainFailure(res.status);
+    const body = (await res.json()) as {
+      isLastPage?: unknown;
+      nextPageStart?: unknown;
+      values?: { displayId?: unknown; latestCommit?: unknown }[];
+    };
+    for (const row of body.values ?? []) {
+      if (typeof row.displayId !== "string" || typeof row.latestCommit !== "string") continue;
+      branches.push({ name: assertBranchName(row.displayId), sha: assertCommitSha(row.latestCommit) });
+    }
+    if (body.isLastPage !== false || typeof body.nextPageStart !== "number") break;
+    start = body.nextPageStart;
+    truncated = page === 9;
+  }
+  return { ref, isPrivate: repo.public !== true, defaultBranch, truncated, branches };
+}
+
 export async function loadRepoSnapshot(
   ref: RepoRef,
   token: string | undefined,
   fetchImpl: FetchLike,
 ): Promise<RepoSnapshot> {
+  fetchImpl = reaching(fetchImpl);
+  if (ref.origin) return loadBitbucketServerSnapshot(ref, token, fetchImpl);
   const headers = authHeaders(token);
   if (ref.provider === "bitbucket") headers.Accept = "application/json";
   if (ref.provider === "github") {
@@ -329,6 +578,7 @@ export async function loadRepoSnapshot(
       ref,
       isPrivate: repo.private === true,
       defaultBranch,
+      truncated: next !== null,
       branches,
     };
   }
@@ -366,8 +616,89 @@ export async function loadRepoSnapshot(
     ref,
     isPrivate: repo.is_private === true,
     defaultBranch,
+    truncated: next !== null,
     branches,
   };
+}
+
+export async function loadBranch(
+  ref: RepoRef,
+  name: string,
+  token: string | undefined,
+  fetchImpl: FetchLike,
+): Promise<BranchInfo | null> {
+  const branch = assertBranchName(name);
+  fetchImpl = reaching(fetchImpl);
+  const headers = authHeaders(token);
+  if (ref.origin) {
+    headers.Accept = "application/json";
+    const url = `${serverRoot(ref)}/commits?until=${encodeURIComponent(`refs/heads/${branch}`)}&limit=1`;
+    const res = await fetchImpl(url, { headers });
+    if (res.status === 404) return null;
+    if (!res.ok) throw plainFailure(res.status);
+    const body = (await res.json()) as { values?: { id?: unknown; displayId?: unknown }[] };
+    const row = body.values?.[0];
+    if (!row || typeof row.id !== "string") return null;
+    return { name: branch, sha: assertCommitSha(row.id) };
+  }
+  if (ref.provider === "github") {
+    const url = `https://api.github.com/repos/${ref.owner}/${ref.name}/branches/${encodeURIComponent(branch)}`;
+    const res = await fetchImpl(url, { headers });
+    if (res.status === 404) return null;
+    if (!res.ok) throw plainFailure(res.status);
+    const body = (await res.json()) as { name?: unknown; commit?: { sha?: unknown } };
+    if (typeof body.name !== "string" || typeof body.commit?.sha !== "string") {
+      throw new Error("Could not read that branch.");
+    }
+    return { name: assertBranchName(body.name), sha: assertCommitSha(body.commit.sha) };
+  }
+  headers.Accept = "application/json";
+  const url = `https://api.bitbucket.org/2.0/repositories/${ref.owner}/${ref.name}/refs/branches/${encodeURIComponent(branch)}`;
+  const res = await fetchImpl(url, { headers });
+  if (res.status === 404) return null;
+  if (!res.ok) throw plainFailure(res.status);
+  const body = (await res.json()) as { name?: unknown; target?: { hash?: unknown } };
+  if (typeof body.name !== "string" || typeof body.target?.hash !== "string") {
+    throw new Error("Could not read that branch.");
+  }
+  return { name: assertBranchName(body.name), sha: assertCommitSha(body.target.hash) };
+}
+
+export async function loadCommitSummary(
+  ref: RepoRef,
+  sha: string,
+  token: string | undefined,
+  fetchImpl: FetchLike,
+): Promise<CommitSummary> {
+  const commit = assertCommitSha(sha);
+  fetchImpl = reaching(fetchImpl);
+  const headers = authHeaders(token);
+  if (ref.origin) {
+    headers.Accept = "application/json";
+    const res = await fetchImpl(`${serverRoot(ref)}/commits/${commit}`, { headers });
+    if (!res.ok) throw plainFailure(res.status);
+    const body = (await res.json()) as { message?: unknown };
+    const subject = commitSubject(typeof body.message === "string" ? body.message : undefined);
+    if (!subject) throw new Error("The repository did not return a commit message.");
+    return { sha: commit, subject };
+  }
+  if (ref.provider === "github") {
+    const url = `https://api.github.com/repos/${ref.owner}/${ref.name}/commits/${commit}`;
+    const res = await fetchImpl(url, { headers });
+    if (!res.ok) throw plainFailure(res.status);
+    const body = (await res.json()) as { commit?: { message?: unknown } };
+    const subject = commitSubject(typeof body.commit?.message === "string" ? body.commit.message : undefined);
+    if (!subject) throw new Error("The repository did not return a commit message.");
+    return { sha: commit, subject };
+  }
+  headers.Accept = "application/json";
+  const url = `https://api.bitbucket.org/2.0/repositories/${ref.owner}/${ref.name}/commit/${commit}`;
+  const res = await fetchImpl(url, { headers });
+  if (!res.ok) throw plainFailure(res.status);
+  const body = (await res.json()) as { message?: unknown };
+  const subject = commitSubject(typeof body.message === "string" ? body.message : undefined);
+  if (!subject) throw new Error("The repository did not return a commit message.");
+  return { sha: commit, subject };
 }
 
 export function archiveRequest(ref: RepoRef, sha: string, token: string | undefined): {
@@ -376,6 +707,10 @@ export function archiveRequest(ref: RepoRef, sha: string, token: string | undefi
 } {
   const commit = assertCommitSha(sha);
   const headers = authHeaders(token);
+  if (ref.origin) {
+    headers.Accept = "application/zip";
+    return { url: `${serverRoot(ref)}/archive?at=${commit}&format=zip`, headers };
+  }
   if (ref.provider === "github") {
     return {
       url: `https://api.github.com/repos/${ref.owner}/${ref.name}/zipball/${commit}`,
@@ -459,6 +794,8 @@ export function buildRepoInstallScript(input: {
   target: RepoComponentTarget;
   slug: string;
   subdirectory: string;
+  /** Installed path, relative to WordPress, hashed after the copy. */
+  headerRel?: string;
 }): string {
   const wp = input.wpPath.replace(/\/$/, "");
   if (!wp.startsWith("/") || wp.includes("..")) {
@@ -523,6 +860,17 @@ export function buildRepoInstallScript(input: {
       `find "$WP/${install}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +`,
       `cp -a "$SRC"/. "$WP/${install}/"`,
       `test -d "$WP/${install}"`,
+    );
+  }
+  if (
+    input.headerRel &&
+    !input.headerRel.startsWith("/") &&
+    !input.headerRel.includes("..") &&
+    /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(input.headerRel)
+  ) {
+    const installed = `"$WP/${input.headerRel}"`;
+    lines.push(
+      `if [ -f ${installed} ]; then php -r 'echo "WPDEV_REPO_HEADER_SHA ".hash_file("sha256",$argv[1]),"\\n";' ${installed}; fi`,
     );
   }
   lines.push("DONE=1", "echo WPDEV_REPO_INSTALL_OK");

@@ -78,6 +78,19 @@ export async function readGitHeadSha(configDir: string): Promise<string | null> 
 
 /** Restore tool sources to snapshot SHA and rebuild CLI (never touches site DB/content). */
 export async function rollbackWpDevTool(configDir: string, sha: string): Promise<void> {
+  const dirty = await execa("git", ["-c", "safe.directory=.", "status", "--porcelain"], {
+    cwd: configDir,
+  });
+  if (dirty.stdout.trim()) {
+    await execa(
+      "git",
+      ["-c", "safe.directory=.", "stash", "push", "-m", "wp-dev update rollback"],
+      { cwd: configDir, stdio: "inherit" },
+    );
+    console.error(
+      'Tracked changes were stashed as "wp-dev update rollback" before the snapshot was restored. Run git stash pop when you want them back.',
+    );
+  }
   await execa("git", ["-c", "safe.directory=.", "reset", "--hard", sha], {
     cwd: configDir,
     stdio: "inherit",

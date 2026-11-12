@@ -22,5 +22,4 @@ Sibling path (private apps, after extract grows): `"@wpdev/sync-engine": "file:.
 
 ## Private cloud consumers
 
-`WP-dev-cloud` vendors a snapshot under its own `packages/sync-engine` so the private repo works alone.
-Edit **here**; refresh cloud with `WP-dev-cloud/scripts/sync-public-packages.sh` when both trees are available.
+`WP-dev-cloud` does not keep a second copy. `npm install` there links `.public/sync-engine` at this package. Edit here, then rebuild with `npm run build` in this folder so the cloud typecheck sees `dist/`.

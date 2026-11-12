@@ -111,7 +111,7 @@ export async function collectUpdatePreflight(
 
   if (dirtyCount > 0) {
     warnings.push(
-      `${dirtyCount} tracked file(s) have local changes. --autostash helps, but forks should commit to a safety branch first.`,
+      `${dirtyCount} tracked file(s) have local changes. A failed update runs git reset --hard back to the snapshot. Commit or stash first. --autostash only covers the git pull.`,
     );
   }
   if (untrackedCount > 0) {
@@ -154,10 +154,10 @@ export function formatUpdatePreflight(preflight: UpdatePreflight): string {
   } else {
     lines.push(`  • Upstream: ${preflight.upstream ?? "(none set)"}`);
     if (preflight.commitsBehind != null) {
-      lines.push(`  • Behind upstream: ${preflight.commitsBehind} commit(s)`);
+      lines.push(`  • Behind upstream, as of the last fetch: ${preflight.commitsBehind} commit(s)`);
     }
     if (preflight.commitsAhead != null) {
-      lines.push(`  • Ahead of upstream: ${preflight.commitsAhead} commit(s)`);
+      lines.push(`  • Ahead of upstream, as of the last fetch: ${preflight.commitsAhead} commit(s)`);
     }
     lines.push(`  • Dirty tracked files: ${preflight.dirtyCount}`);
     lines.push(`  • Untracked files: ${preflight.untrackedCount}`);

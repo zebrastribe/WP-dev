@@ -89,14 +89,17 @@ export async function cmdPull(
     logInfo(`pull ${env} dry-run: rsync only`);
     console.error("[dry-run] Would: validate SSH, export remote DB, rsync files, import DB, search-replace URLs.");
     const sshDry = await connectSsh(remote);
+    let dryPath = remote.path;
     try {
       await assertRemotePathSafe(sshDry, remote.path, env);
+      dryPath = await assertRemoteWpInstalled(sshDry, remote.path);
     } finally {
       sshDry.dispose();
     }
     await rsyncPull(remote, localWpRoot, {
       dryRun: true,
       excludes: pullExcludePatterns(configDir, config),
+      remotePath: dryPath,
     });
     return;
   }
@@ -114,6 +117,7 @@ export async function cmdPull(
       logInfo(`pull ${env}: local pre-pull db backup -> ${prePullBackup}`);
       await wpLocalDbExportToFile(configDir, config, prePullBackup);
       chownBackupArtifact(prePullBackup, configDir);
+      assertValidSqlDump(readFileSync(prePullBackup, "utf8"), "Pre-pull backup");
     } else {
       logInfo(
         `pull ${env}: skip local pre-pull backup (local WordPress not installed yet — first pull)`,

@@ -55,10 +55,10 @@ export function TerminalEmbed({
       {canOpen ? (
         <p className="mt-3 text-xs text-slate-600 dark:text-slate-300">
           Opens <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">127.0.0.1:{terminalPort}</code>.
-          Browser will ask for login — user{" "}
-          <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{terminalUser}</code>, password from{" "}
-          <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>{" "}
-          (<code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_TERMINAL_AUTH</code>).
+          The browser asks for a login. User{" "}
+          <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">{terminalUser}</code>. The password is the text after the colon in{" "}
+          <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">WPDEV_TERMINAL_AUTH</code> in{" "}
+          <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docker/.env</code>.
         </p>
       ) : null}
     </details>

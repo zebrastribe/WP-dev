@@ -4,7 +4,9 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, appendFileSync, mkdirSync, existsSync, chownSync, statSync, createWriteStream, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
+  gitTokenEnv,
   safeArg,
+  safeRepoUrl,
   wpdevPullPushCommand,
   wpdevPushThemeCommand,
   restoreEnvConfirmOk,
@@ -13,6 +15,7 @@ import {
 import { stripControlChars, sanitizeArgsForLog } from "./runner-log-utils.mjs";
 import { readRemoteEnv, sshOptsShell } from "./runner-remote-env.mjs";
 import { logPathForWorkdir, logDirForWorkdir, LOG_DIR_NAME, LOG_FILE_NAME } from "./runner-log-constants.mjs";
+import { SHOW_HOST_PUBKEY } from "./show-host-pubkey.mjs";
 
 const PORT = Number(process.env.WPDEV_TERMINAL_RUNNER_PORT || 7682);
 const AUTH = process.env.WPDEV_TERMINAL_AUTH || "wpdev:wpdev";
@@ -159,7 +162,7 @@ function isAllowedOrigin(req) {
 
 function commandForAction(action, args) {
   if (action === "generate_keypair") {
-    return 'test -f ~/.ssh/id_ed25519 || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C "$USER@$(hostname)"; ls -la ~/.ssh/id_ed25519*; echo ""; echo "Public key:"; cat ~/.ssh/id_ed25519.pub';
+    return SHOW_HOST_PUBKEY;
   }
   if (action === "ssh_test") {
     const env = safeArg(args?.env);
@@ -271,6 +274,34 @@ function commandForAction(action, args) {
       return `npm run wp-dev -- site-update apply --target ${target} --slug ${slug}`;
     }
     return null;
+  }
+  if (action === "wpdev_deploy") {
+    const env = safeArg(args?.env);
+    const target = safeArg(args?.target);
+    const slug = safeArg(args?.slug);
+    const sha = safeArg(args?.sha);
+    if (!["staging", "production"].includes(env)) return null;
+    if (!["core", "plugin", "theme"].includes(target)) return null;
+    if (target !== "core" && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(slug)) return null;
+    if (sha && !/^[0-9a-f]{7,40}$/i.test(sha)) return null;
+    const url = safeRepoUrl(args?.url);
+    const branch = safeArg(args?.branch);
+    const directory = safeArg(args?.directory);
+    const flags = [`--target ${target}`];
+    if (target !== "core") flags.push(`--slug ${slug}`);
+    if (url) flags.push(`--url '${url}'`);
+    if (branch) flags.push(`--branch ${branch}`);
+    if (directory) flags.push(`--directory ${directory}`);
+    if (sha) flags.push(`--sha ${sha}`);
+    if (safeArg(args?.promote) === "1") flags.push("--promote");
+    if (safeArg(args?.dry_run) === "1") flags.push("--dry-run");
+    if (safeArg(args?.yes) === "1") flags.push("--yes");
+    return `npm run wp-dev -- deploy ${env} ${flags.join(" ")}`;
+  }
+  if (action === "wpdev_repo_branches") {
+    const url = safeRepoUrl(args?.url);
+    if (!url) return null;
+    return `npm run wp-dev -- repo-branches --url '${url}'`;
   }
   if (action === "wpdev_php_show") {
     const env = safeArg(args?.env) || "local";
@@ -453,7 +484,7 @@ function describeRefusal(action, args) {
   return `unknown action ${safeAction}`;
 }
 
-function startJob(command) {
+function startJob(command, extraEnv = {}) {
   const id = randomUUID();
   const job = {
     id,
@@ -471,7 +502,7 @@ function startJob(command) {
     cwd: WORKDIR,
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, WPDEV_ASSUME_YES: "1" },
+    env: { ...process.env, WPDEV_ASSUME_YES: "1", ...extraEnv },
   });
   job.child = child;
   const timeout = setTimeout(() => {
@@ -632,7 +663,7 @@ const server = http.createServer(async (req, res) => {
         json(req, res, 400, { ok: false, error: "invalid_action_or_args", reason });
         return;
       }
-      const jobId = startJob(command);
+      const jobId = startJob(command, gitTokenEnv(data.args?.token));
       json(req, res, 200, { ok: true, jobId, command });
     });
     return;

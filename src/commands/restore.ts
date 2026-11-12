@@ -397,17 +397,10 @@ export async function cmdRestore(
       await assertRemoteFreeSpace(ssh, "/tmp", DISK_NEED.dbBackupRemoteTmp, `restore ${env}`);
 
       logInfo(`restore ${env}: pre-restore remote db backup -> ${preRestore}`);
-      try {
-        await wpRemoteDbExport(ssh, wpPath, remotePreDump);
-        await ssh.getFile(remotePreDump, preRestore);
-        chownBackupArtifact(preRestore, configDir);
-      } finally {
-        try {
-          await ssh.exec(remoteRmFile(remotePreDump));
-        } catch {
-          /* best-effort */
-        }
-      }
+      await wpRemoteDbExport(ssh, wpPath, remotePreDump);
+      await ssh.getFile(remotePreDump, preRestore);
+      chownBackupArtifact(preRestore, configDir);
+      assertValidSqlDump(readFileSync(preRestore, "utf8"), "Pre-restore backup");
 
       const sqlText = readFileSync(resolvedFile, "utf8");
       assertValidSqlDump(sqlText, "Restore SQL dump");
@@ -418,9 +411,27 @@ export async function cmdRestore(
       try {
         await ssh.putFile(resolvedFile, remoteImport);
         await wpRemoteDbImport(ssh, wpPath, remoteImport);
+      } catch (importErr) {
+        try {
+          await wpRemoteDbImport(ssh, wpPath, remotePreDump);
+          console.error(
+            `Rolled back remote DB from pre-restore backup: ${preRestore}`,
+          );
+        } catch (rollbackErr) {
+          const rb = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+          console.error(
+            `Warning: could not roll back remote DB (${rb}). Pre-restore backup kept at: ${preRestore}`,
+          );
+        }
+        throw importErr;
       } finally {
         try {
           await ssh.exec(remoteRmFile(remoteImport));
+        } catch {
+          /* best-effort */
+        }
+        try {
+          await ssh.exec(remoteRmFile(remotePreDump));
         } catch {
           /* best-effort */
         }

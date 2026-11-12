@@ -61,7 +61,7 @@ export function ServicesTab() {
           <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Services & ports</h2>
           <p className="text-sm text-slate-600 dark:text-slate-400">
             Local Docker / supervisor registry from <code>logs/service-registry.json</code>. Change PHP under{" "}
-            Advanced → PHP versions.
+            Advanced → PHP.
           </p>
         </div>
         <button

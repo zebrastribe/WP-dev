@@ -116,6 +116,16 @@ const syncSchema = z
   })
   .optional();
 
+const componentSchema = z.object({
+  target: z.enum(["core", "plugin", "theme"]),
+  slug: z.string().default(""),
+  provider: z.enum(["github", "bitbucket"]),
+  owner: z.string().min(1),
+  name: z.string().min(1),
+  branch: z.string().min(1),
+  subdirectory: z.string().default(""),
+});
+
 export const wpDevConfigSchema = z.object({
   /** Used for backup paths and (unless overridden) Docker Compose project isolation. */
   project: z.string().min(1),
@@ -125,6 +135,8 @@ export const wpDevConfigSchema = z.object({
   simply: simplySchema.optional(),
   sync: syncSchema,
   importWorkspace: importWorkspaceSchema.optional(),
+  /** Optional Git sources. Package and file updates stay available without these. */
+  components: z.array(componentSchema).optional(),
 });
 
 export type WpDevConfig = z.infer<typeof wpDevConfigSchema>;

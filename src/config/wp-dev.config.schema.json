@@ -333,6 +333,57 @@
             }
           },
           "additionalProperties": false
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "target": {
+                "type": "string",
+                "enum": [
+                  "core",
+                  "plugin",
+                  "theme"
+                ]
+              },
+              "slug": {
+                "type": "string",
+                "default": ""
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "github",
+                  "bitbucket"
+                ]
+              },
+              "owner": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "branch": {
+                "type": "string",
+                "minLength": 1
+              },
+              "subdirectory": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "target",
+              "provider",
+              "owner",
+              "name",
+              "branch"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [

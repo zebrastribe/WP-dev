@@ -18,8 +18,8 @@ export function TerminalTab() {
     <div className="space-y-4">
       <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Terminal</h2>
       <p className="text-sm text-slate-600 dark:text-slate-400">
-        Doctor, SSH key, and backups for the selected environment. Full-site push/pull lives under{" "}
-        <strong>Sync</strong> (theme-only by default; staging full-site after preview).
+        The public key is read from this computer (<code>~/.ssh/id_ed25519.pub</code>). Doctor and backups run in the project runner for the environment you pick. Full-site push/pull lives under{" "}
+        <strong>Sync</strong>.
       </p>
 
       <div
@@ -38,8 +38,23 @@ export function TerminalTab() {
         secretsReady={runnerReady}
         secretsError={runnerReady ? undefined : runnerMessage}
         title="Interactive shell (optional)"
-        subtitle="Open only when you need manual commands; quick actions run below either way."
+        subtitle="A shell inside the project runner. It is not where the SSH key is stored. Create the key on this computer."
       />
+
+      <div className="space-y-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+        <p className="text-xs text-slate-600 dark:text-slate-400">
+          Create the key on this computer if it is missing:{" "}
+          <code>ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C &quot;you@host&quot;</code>
+        </p>
+        <button
+          type="button"
+          disabled={isRunning || !canRun}
+          onClick={() => void run("generate_keypair", undefined, "Show SSH public key")}
+          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
+        >
+          Show SSH public key
+        </button>
+      </div>
 
       <div className="flex flex-wrap items-center gap-2">
         {(
@@ -59,16 +74,9 @@ export function TerminalTab() {
           </button>
         ))}
       </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">These actions use the environment selected above.</p>
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={isRunning || !canRun}
-          onClick={() => void run("generate_keypair", undefined, "Generate SSH keypair")}
-          className={`rounded-lg px-3 py-1.5 text-xs ${outlineButtonClass}`}
-        >
-          Generate SSH keypair
-        </button>
         <button
           type="button"
           disabled={isRunning || !canRun || env === "local"}

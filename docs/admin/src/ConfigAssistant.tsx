@@ -209,7 +209,7 @@ export function ConfigAssistant() {
           </label>
           <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">
             PHP for Dev / Staging / Production (with rollback) lives under{" "}
-            <strong className="font-medium">Advanced → PHP versions</strong>.
+            <strong className="font-medium">Advanced → PHP</strong>.
           </p>
           <button
             type="button"

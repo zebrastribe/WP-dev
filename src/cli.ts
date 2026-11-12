@@ -28,6 +28,8 @@ import { cmdServices } from "./commands/services.js";
 import { cmdSyncPreview, cmdSyncRules, cmdSyncScan } from "./commands/sync-preview.js";
 import { cmdUpdate } from "./commands/update.js";
 import { cmdSiteUpdateApply, cmdSiteUpdateCheck } from "./commands/site-update.js";
+import { cmdDeployRepo } from "./commands/deploy-repo.js";
+import { cmdRepoBranches } from "./commands/repo-branches.js";
 import { cmdSslDisable, cmdSslEnable } from "./commands/ssl.js";
 import { cmdPhpRollback, cmdPhpSet, cmdPhpShow, cmdPhpValidate } from "./commands/php.js";
 import { cmdImportBuild } from "./commands/import/build.js";
@@ -517,6 +519,63 @@ async function main(): Promise<void> {
         }
         throw new Error("Apply needs --target core, or --target plugin|theme and --slug.");
       });
+    });
+
+  program
+    .command("deploy")
+    .description("Deploy one saved repository to Staging or Production. Package updates stay on site-update.")
+    .argument("<env>", "staging or production")
+    .requiredOption("--target <target>", "core, plugin, or theme")
+    .option("--slug <slug>", "plugin or theme slug")
+    .option("--url <url>", "GitHub or Bitbucket repository address")
+    .option("--branch <branch>", "branch returned by the repository")
+    .option("--directory <directory>", "folder inside the repository")
+    .option("--sha <sha>", "deploy this commit instead of the branch tip")
+    .option("--promote", "deploy the commit recorded from Staging onto Production")
+    .option("--dry-run", "print the commit without changing the site")
+    .option("--yes", "apply the deploy")
+    .action(async (
+      envName: string,
+      opts: {
+        target?: string;
+        slug?: string;
+        sha?: string;
+        url?: string;
+        branch?: string;
+        directory?: string;
+        promote?: boolean;
+        dryRun?: boolean;
+        yes?: boolean;
+      },
+    ) => {
+      const env = parseRemoteEnv(envName);
+      const target = opts.target;
+      if (target !== "core" && target !== "plugin" && target !== "theme") {
+        throw new Error("Deploy needs --target core, plugin, or theme.");
+      }
+      if (target !== "core" && !opts.slug) throw new Error("Deploy needs --slug for a plugin or theme.");
+      await runWithConfig(`deploy ${env}`, (loaded) =>
+        cmdDeployRepo(loaded, env, {
+          target,
+          slug: opts.slug ?? "",
+          sha: opts.sha,
+          url: opts.url,
+          branch: opts.branch,
+          subdirectory: opts.directory,
+          promote: opts.promote,
+          dryRun: opts.dryRun,
+          yes: opts.yes,
+        }),
+      );
+    });
+
+  program
+    .command("repo-branches")
+    .description("List branches on a GitHub or Bitbucket repository")
+    .requiredOption("--url <url>", "repository address")
+    .action(async (opts: { url?: string }) => {
+      if (!opts.url) throw new Error("Enter the repository address.");
+      await runWithConfig("repo-branches", () => cmdRepoBranches(opts.url!));
     });
 
   program

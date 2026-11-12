@@ -17,6 +17,8 @@ import {
   summarizeChangePaths,
 } from "./sync-preview-parse.js";
 import { buildSshRsyncEnv } from "../utils/rsync-ssh-env.js";
+import { connectSsh } from "./ssh.js";
+import { assertRemoteWpInstalled } from "./wpcli.js";
 
 export type SyncDirection = "push" | "pull";
 
@@ -58,9 +60,10 @@ async function rsyncPushCapture(
   remote: RemoteEnvConfig,
   localDir: string,
   excludes: string[],
+  remoteRoot: string,
 ): Promise<CaptureResult> {
   const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
-  const remoteUrl = `${remote.user}@${remote.host}:${remote.path.replace(/\/$/, "")}/`;
+  const remoteUrl = `${remote.user}@${remote.host}:${remoteRoot.replace(/\/$/, "")}/`;
   const args = [
     "-avzn",
     "--itemize-changes",
@@ -79,9 +82,10 @@ async function rsyncPullCapture(
   remote: RemoteEnvConfig,
   localDir: string,
   excludes: string[],
+  remoteRoot: string,
 ): Promise<CaptureResult> {
   const excludeArgs = excludes.flatMap((e) => ["--exclude", e]);
-  const remoteUrl = `${remote.user}@${remote.host}:${remote.path.replace(/\/$/, "")}/`;
+  const remoteUrl = `${remote.user}@${remote.host}:${remoteRoot.replace(/\/$/, "")}/`;
   const args = [
     "-avzn",
     "--itemize-changes",
@@ -113,10 +117,18 @@ export async function runSyncPreview(
       ? buildPushExcludeRules(configDir, config, localWpRoot)
       : buildPullExcludeRules(configDir, config);
 
+  const ssh = await connectSsh(remote);
+  let remoteRoot = remote.path;
+  try {
+    remoteRoot = await assertRemoteWpInstalled(ssh, remote.path);
+  } finally {
+    ssh.dispose();
+  }
+
   const capture =
     direction === "push"
-      ? await rsyncPushCapture(remote, localWpRoot, excludes)
-      : await rsyncPullCapture(remote, localWpRoot, excludes);
+      ? await rsyncPushCapture(remote, localWpRoot, excludes, remoteRoot)
+      : await rsyncPullCapture(remote, localWpRoot, excludes, remoteRoot);
 
   if (capture.exitCode !== 0) {
     const detail = [capture.stderr.trim(), capture.stdout.trim()].filter(Boolean).join("\n");

@@ -21,6 +21,10 @@ export function sanitizeArgsForLog(args) {
   const safe = {};
   for (const [k, v] of Object.entries(args)) {
     const safeKey = stripControlChars(k);
+    if (safeKey === "token") {
+      safe[safeKey] = typeof v === "string" && v.length > 0 ? "[redacted]" : "";
+      continue;
+    }
     if (typeof v === "string") {
       safe[safeKey] = safeArg(v) || `[unsafe:${v.length}chars]`;
     } else {

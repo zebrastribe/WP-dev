@@ -60,7 +60,7 @@ const ADV_BLURB: Record<AdvId, string> = {
   files: "Paths, terminal login, and DNS for this project.",
   php: "PHP for the WordPress on this computer.",
   services: "Ports and Docker services for this project.",
-  terminal: "A shell on this computer.",
+  terminal: "Shows this computer's SSH public key. Doctor and backups run in the project runner.",
   update: "Update the wp-dev tool on this computer.",
   history: "Older copies you can restore on this computer.",
   config: "Read or copy this project’s config.",

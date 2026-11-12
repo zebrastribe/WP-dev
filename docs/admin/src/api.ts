@@ -808,6 +808,8 @@ export type TerminalAction =
   | "wpdev_update_preflight"
   | "wpdev_site_check"
   | "wpdev_site_apply"
+  | "wpdev_deploy"
+  | "wpdev_repo_branches"
   | "wpdev_php_show"
   | "wpdev_php_set"
   | "wpdev_php_rollback"

@@ -62,6 +62,12 @@ describe("runner log injection prevention (real functions)", () => {
       expect(sanitizeArgsForLog({})).toBe("{}");
     });
 
+    it("redacts an access token", () => {
+      const result = sanitizeArgsForLog({ token: "ghp_exampletoken", url: "https://github.com/acme/plugin" });
+      expect(result).toContain("[redacted]");
+      expect(result).not.toContain("ghp_exampletoken");
+    });
+
     it("handles non-string values", () => {
       const result = sanitizeArgsForLog({ count: 42 as unknown as string });
       expect(result).toContain('"count":42');

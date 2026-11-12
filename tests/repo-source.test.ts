@@ -4,7 +4,11 @@ import {
   bindingAfterBranchChange,
   branchStatus,
   buildRepoInstallScript,
+  configAfterDeploy,
+  explainRepoReachError,
   formatAuthHeader,
+  formatBranchStatus,
+  loadCommitSummary,
   loadRepoSnapshot,
   parseRepositoryUrl,
   redactSecret,
@@ -41,6 +45,57 @@ describe("repository source", () => {
     expect(() => parseRepositoryUrl("https://github.com/acme/plugin/tree/main")).toThrow(/not a file or branch/);
   });
 
+  it("accepts a Bitbucket server on an IP or a name on this network", async () => {
+    expect(parseRepositoryUrl("https://192.168.1.20:7990/scm/ACME/plugin.git")).toEqual({
+      provider: "bitbucket",
+      owner: "ACME",
+      name: "plugin",
+      origin: "https://192.168.1.20:7990",
+    });
+    expect(parseRepositoryUrl("http://bitbucket.lan/projects/MY_PROJ/repos/theme")).toEqual({
+      provider: "bitbucket",
+      owner: "MY_PROJ",
+      name: "theme",
+      origin: "http://bitbucket.lan",
+    });
+    expect(parseRepositoryUrl("https://git.internal/users/jane/repos/plugin/browse")).toMatchObject({
+      owner: "~jane",
+      name: "plugin",
+      origin: "https://git.internal",
+    });
+    expect(() => parseRepositoryUrl("http://bitbucket.example.com/scm/ACME/plugin.git")).toThrow(/https/);
+    const calls: string[] = [];
+    const ref = parseRepositoryUrl("http://10.1.2.3:7990/scm/ACME/plugin.git");
+    const snapshot = await loadRepoSnapshot(ref, "server-token", async (url, init) => {
+      calls.push(url);
+      expect(init?.headers?.Authorization).toBe("Bearer server-token");
+      if (url.endsWith("/branches/default")) return jsonResponse({ displayId: "customer-beta" });
+      if (url.includes("/branches?")) {
+        return jsonResponse({
+          isLastPage: true,
+          values: [{ displayId: "customer-beta", latestCommit: "c".repeat(40) }],
+        });
+      }
+      return jsonResponse({ public: false });
+    });
+    expect(calls.every((url) => url.startsWith("http://10.1.2.3:7990/rest/api/1.0/projects/ACME/repos/plugin"))).toBe(true);
+    expect(snapshot.branches.map((row) => row.name)).toEqual(["customer-beta"]);
+    expect(archiveRequest(ref, "c".repeat(40), "server-token").url).toBe(
+      `http://10.1.2.3:7990/rest/api/1.0/projects/ACME/repos/plugin/archive?at=${"c".repeat(40)}&format=zip`,
+    );
+    const stayed = resolveArchiveRedirect(
+      `http://10.1.2.3:7990/rest/api/1.0/projects/ACME/repos/plugin/archive?at=${"c".repeat(40)}&format=zip`,
+      "http://10.1.2.3:7990/download/plugin.zip",
+    );
+    expect(stayed.stripAuthorization).toBe(false);
+    expect(stayed.url).toContain("10.1.2.3:7990");
+    expect(() =>
+      resolveArchiveRedirect("http://10.1.2.3:7990/archive", "https://evil.example/plugin.zip"),
+    ).toThrow(/cannot be used/);
+    const refused = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    expect(explainRepoReachError(refused)?.message).toMatch(/Connect to the network/);
+  });
+
   it("discovers whatever branches the repository returns", async () => {
     const calls: string[] = [];
     const snapshot = await loadRepoSnapshot(
@@ -60,6 +115,7 @@ describe("repository source", () => {
     expect(snapshot.defaultBranch).toBe("release-2026");
     expect(snapshot.branches.map((row) => row.name)).toEqual(["release-2026", "customer-beta"]);
     expect(snapshot.isPrivate).toBe(true);
+    expect(snapshot.truncated).toBe(false);
     expect(calls.every((url) => url.startsWith("https://api.github.com/"))).toBe(true);
   });
 
@@ -165,10 +221,79 @@ describe("repository source", () => {
       deployedSha: "c".repeat(40),
     };
     const production: EnvBinding = { ...dev, branch: "stable", deployedSha: "b".repeat(40) };
-    expect(branchStatus(dev, branches).state).toBe("update_available");
+    const available = branchStatus(dev, branches);
+    expect(available.state).toBe("update_available");
+    if (available.state === "update_available") {
+      expect(formatBranchStatus(available)).toBe(
+        `Update available ${"c".repeat(7)} → ${"a".repeat(7)}`,
+      );
+    }
     expect(branchStatus(production, branches).state).toBe("up_to_date");
     expect(branchStatus({ ...dev, branch: "renamed" }, branches).state).toBe("branch_gone");
+    expect(branchStatus({ ...dev, branch: "renamed" }, branches, { truncated: true }).state).toBe(
+      "unknown_remote",
+    );
     expect(branchStatus(undefined, branches).state).toBe("not_configured");
+    const withSubject = branchStatus(
+      dev,
+      branches.map((row) => (row.name === "feature-a" ? { ...row, subject: "Fix the header" } : row)),
+    );
+    expect(formatBranchStatus(withSubject)).toContain("Fix the header");
+  });
+
+  it("keeps a deployed commit only when the branch is still the one that was deployed", () => {
+    const config = {
+      target: "plugin" as const,
+      slug: "acme",
+      staging: {
+        provider: "github" as const,
+        owner: "acme",
+        name: "plugin",
+        branch: "main",
+        subdirectory: "",
+        deployedSha: null,
+      },
+    };
+    const deployed = { provider: "github" as const, owner: "acme", name: "plugin", branch: "main" };
+    const next = configAfterDeploy(config, "staging", deployed, "a".repeat(40));
+    expect(next?.staging?.deployedSha).toBe("a".repeat(40));
+    expect(configAfterDeploy(config, "staging", { ...deployed, branch: "develop" }, "b".repeat(40))).toBeNull();
+  });
+
+  it("marks a branch list as cut off and names a host error", async () => {
+    let pages = 0;
+    const snapshot = await loadRepoSnapshot(
+      { provider: "github", owner: "acme", name: "plugin" },
+      undefined,
+      async (url) => {
+        if (!url.includes("/branches")) return jsonResponse({ default_branch: "main", private: false });
+        pages += 1;
+        return jsonResponse(
+          [{ name: `b${pages}`, commit: { sha: "a".repeat(40) } }],
+          200,
+          '<https://api.github.com/repos/acme/plugin/branches?page=next>; rel="next"',
+        );
+      },
+    );
+    expect(pages).toBe(10);
+    expect(snapshot.truncated).toBe(true);
+    await expect(
+      loadRepoSnapshot({ provider: "github", owner: "acme", name: "plugin" }, undefined, async (url) =>
+        url.includes("/branches")
+          ? jsonResponse({}, 502)
+          : jsonResponse({ default_branch: "main", private: false }),
+      ),
+    ).rejects.toThrow(/had a problem \(502\)/);
+  });
+
+  it("reads the first line of a commit message", async () => {
+    const summary = await loadCommitSummary(
+      { provider: "github", owner: "acme", name: "plugin" },
+      "a".repeat(40),
+      undefined,
+      async () => jsonResponse({ commit: { message: "Fix the header\n\nLonger body" } }),
+    );
+    expect(summary.subject).toBe("Fix the header");
   });
 
   it("checks plugin, theme, and core identity", () => {

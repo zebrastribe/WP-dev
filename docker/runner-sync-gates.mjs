@@ -7,6 +7,20 @@ export function safeArg(v) {
   return typeof v === "string" && /^[a-zA-Z0-9._:@~/-]+$/.test(v) ? v : "";
 }
 
+/** A repository address, including an IP or LAN name. Quoted by the caller before it reaches the shell. */
+export function safeRepoUrl(v) {
+  if (typeof v !== "string" || v.includes("..")) return "";
+  return /^https?:\/\/[A-Za-z0-9._:@~\/[\]-]+$/.test(v) ? v : "";
+}
+
+/** Child environment for a private repository. Never place this value in the command string. */
+export function gitTokenEnv(token) {
+  if (typeof token !== "string") return {};
+  const trimmed = token.trim();
+  if (!trimmed || trimmed.length > 500 || /[\r\n\0]/.test(trimmed)) return {};
+  return { WPDEV_GIT_TOKEN: trimmed };
+}
+
 /**
  * `npm run wp-dev -- {pull|push} <env> --yes…` or null when confirm is refused.
  * Staging requires --confirm-host <host>; production requires confirm === SYNC_PRODUCTION.
